@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { supabase } from '../supabaseClient';
-import { KeyRound, Mail, Eye, EyeOff, ShieldCheck, Sparkles, ArrowRight, Lock } from 'lucide-react';
+import { Mail, Eye, EyeOff, ArrowRight, Lock } from 'lucide-react';
 import logo from '../assets/logo.svg';
 
 export default function Auth({ onAuthSuccess }) {
@@ -58,7 +58,7 @@ export default function Auth({ onAuthSuccess }) {
               <img src={logo} alt="Almas ERP" className="brand-logo-img" />
             </div>
             <h1 className="auth-brand-title">ALMAS ACCESSORIES</h1>
-            <p className="auth-brand-subtitle">Enterprise Resource Planning & Multi-Branch Hub</p>
+            <p className="auth-brand-subtitle">Enterprise Resource Planning</p>
           </div>
 
           {/* Error Notice */}
@@ -73,7 +73,7 @@ export default function Auth({ onAuthSuccess }) {
             {/* Email Field */}
             <div className="auth-input-group">
               <label htmlFor="auth-email" className="auth-label">
-                Work Email Address
+                Email
               </label>
               <div className={`auth-input-wrapper ${focusedField === 'email' ? 'focused' : ''}`}>
                 <Mail size={17} className="auth-input-icon" />
@@ -95,7 +95,7 @@ export default function Auth({ onAuthSuccess }) {
             {/* Password Field */}
             <div className="auth-input-group">
               <label htmlFor="auth-password" className="auth-label">
-                Security Password
+                Password
               </label>
               <div className={`auth-input-wrapper ${focusedField === 'password' ? 'focused' : ''}`}>
                 <Lock size={17} className="auth-input-icon" />
@@ -132,18 +132,12 @@ export default function Auth({ onAuthSuccess }) {
                 <div className="auth-spinner" />
               ) : (
                 <>
-                  <span>Sign In to System</span>
+                  <span>Sign In</span>
                   <ArrowRight size={17} className="auth-btn-arrow" />
                 </>
               )}
             </button>
           </form>
-
-          {/* Footer Security Badges */}
-          <div className="auth-footer-badge">
-            <ShieldCheck size={14} className="auth-shield-icon" />
-            <span>256-Bit Encrypted Session • Multi-Branch Isolated</span>
-          </div>
         </div>
       </div>
 
@@ -467,23 +461,6 @@ export default function Auth({ onAuthSuccess }) {
 
         @keyframes spin {
           to { transform: rotate(360deg); }
-        }
-
-        .auth-footer-badge {
-          margin-top: 2rem;
-          padding-top: 1.25rem;
-          border-top: 1px solid rgba(255, 255, 255, 0.08);
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          gap: 0.45rem;
-          font-size: 0.72rem;
-          color: #64748b;
-          font-weight: 500;
-        }
-
-        .auth-shield-icon {
-          color: #10b981;
         }
       `}</style>
     </div>
