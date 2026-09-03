@@ -1,10 +1,11 @@
 -- ====================================================================
--- ALMAS ACCESSORIES ERP - COMPLETE PRODUCTION SETUP SCRIPT
+-- ALMAS ACCESSORIES ERP - PRODUCTION SETUP SCRIPT (CLEAN DATA)
 -- ====================================================================
 -- INSTRUCTIONS: Run this complete script in the Supabase SQL Editor
 -- (Dashboard -> SQL Editor -> New Query -> Run)
--- It establishes all tables, sequences, functions, triggers, RLS 
--- policies, master data, and seeds the owner account (almas@admin.com).
+-- It creates all tables, sequences, functions, triggers, RLS 
+-- policies, role permissions, default branches, and the owner user.
+-- Contains NO dummy products, dummy contacts, or test sales.
 -- ====================================================================
 
 -- 1. EXTENSIONS
@@ -593,10 +594,10 @@ CREATE POLICY "Allow authenticated full access to cash_ledger" ON public.cash_le
 CREATE POLICY "Allow anon read/write to cash_ledger" ON public.cash_ledger FOR ALL TO anon USING (true) WITH CHECK (true);
 
 -- ====================================================================
--- 10. MASTER SEED DATA
+-- 10. SYSTEM FOUNDATION MASTER DATA
 -- ====================================================================
 
--- 10.1 Branches
+-- 10.1 Default Production Branches
 INSERT INTO public.branches (id, name, address, phone) VALUES
 ('a0000000-0000-0000-0000-000000000001', 'Main Showroom', 'Shop #12, Islampur Market, Dhaka', '+880 1711-000001'),
 ('a0000000-0000-0000-0000-000000000002', 'Central Godown', 'Plot 45, Narayanganj Industrial Area', '+880 1711-000002'),
@@ -609,48 +610,6 @@ INSERT INTO public.role_permissions (role, permissions, updated_at) VALUES
 ('branch_manager', '["product.items_view", "product.items_create", "product.shades_view", "product.shades_create", "inventory.stock_view", "inventory.adjust", "inventory.transfer_view", "inventory.transfer", "inventory.logs_view", "sales.view", "sales.pos_view", "sales.create", "purchases.view", "purchases.new_view", "purchases.create", "payments.view", "payments.create", "expenses.view", "expenses.create", "contacts.view", "contacts.create", "contacts.edit", "reports.view"]'::jsonb, now()),
 ('staff', '["product.items_view", "product.shades_view", "inventory.stock_view", "sales.view", "sales.pos_view", "sales.create", "payments.view", "payments.create", "contacts.view", "contacts.create"]'::jsonb, now())
 ON CONFLICT (role) DO UPDATE SET permissions = EXCLUDED.permissions, updated_at = now();
-
--- 10.3 Color Shades
-INSERT INTO public.colors (code, name, shade_card, hex_code) VALUES
-('WH-01', 'Bleached White', 'Almas Standard', '#FFFFFF'),
-('BK-01', 'Jet Black', 'Almas Standard', '#0A0A0A'),
-('NV-02', 'Deep Navy', 'Almas Standard', '#0F172A'),
-('RD-05', 'Crimson Red', 'Almas Standard', '#DC2626'),
-('RY-03', 'Royal Blue', 'Almas Standard', '#2563EB'),
-('GN-04', 'Forest Olive', 'Almas Standard', '#166534'),
-('YL-01', 'Golden Yellow', 'Almas Standard', '#CA8A04'),
-('OR-02', 'Vibrant Orange', 'Almas Standard', '#EA580C'),
-('GY-01', 'Heather Grey', 'Almas Standard', '#64748B'),
-('PK-01', 'Baby Pink', 'Almas Standard', '#F472B6')
-ON CONFLICT (code, shade_card) DO NOTHING;
-
--- 10.4 Sample Products
-INSERT INTO public.products (product_code, sku, name, description, category, unit, color_code, color_name, purchase_price, sale_price) VALUES
-('PRD-10001', 'THR-402-WH01', 'Sewing Thread 40/2 5000M - White', '100% Spun Polyester high-speed sewing thread', 'Sewing Thread', 'cones', 'WH-01', 'Bleached White', 95.00, 125.00),
-('PRD-10002', 'THR-402-BK01', 'Sewing Thread 40/2 5000M - Black', '100% Spun Polyester high-speed sewing thread', 'Sewing Thread', 'cones', 'BK-01', 'Jet Black', 95.00, 125.00),
-('PRD-10003', 'THR-402-NV02', 'Sewing Thread 40/2 5000M - Deep Navy', '100% Spun Polyester high-speed sewing thread', 'Sewing Thread', 'cones', 'NV-02', 'Deep Navy', 98.00, 130.00),
-('PRD-10004', 'THR-202-WH01', 'Heavy Duty Thread 20/2 3000M - White', 'High tenacity polyester for denim and workwear', 'Heavy Thread', 'cones', 'WH-01', 'Bleached White', 140.00, 185.00),
-('PRD-10005', 'THR-202-BK01', 'Heavy Duty Thread 20/2 3000M - Black', 'High tenacity polyester for denim and workwear', 'Heavy Thread', 'cones', 'BK-01', 'Jet Black', 140.00, 185.00),
-('PRD-10006', 'ELT-075-WH01', 'Woven Elastic Tape 3/4 Inch (20mm)', 'Premium stretch knitted elastic roll (100 Yards)', 'Elastic Tape', 'rolls', 'WH-01', 'Bleached White', 320.00, 420.00),
-('PRD-10007', 'ELT-100-BK01', 'Woven Elastic Tape 1.0 Inch (25mm)', 'Premium stretch knitted elastic roll (100 Yards)', 'Elastic Tape', 'rolls', 'BK-01', 'Jet Black', 380.00, 495.00)
-ON CONFLICT (sku) DO NOTHING;
-
--- 10.5 Initial Stock for Sample Products in Main Showroom & Central Godown
-INSERT INTO public.inventory (branch_id, product_id, quantity, min_stock_level)
-SELECT 'a0000000-0000-0000-0000-000000000001', id, 250, 20 FROM public.products
-ON CONFLICT (branch_id, product_id) DO NOTHING;
-
-INSERT INTO public.inventory (branch_id, product_id, quantity, min_stock_level)
-SELECT 'a0000000-0000-0000-0000-000000000002', id, 1000, 50 FROM public.products
-ON CONFLICT (branch_id, product_id) DO NOTHING;
-
--- 10.6 Default Sample Contacts
-INSERT INTO public.contacts (name, type, phone, email, address, opening_balance) VALUES
-('Ananta Garments Ltd', 'customer', '+880 1819-112233', 'procurement@ananta.com', 'Plot 14, Sector 7, Uttara EPZ, Dhaka', 0.00),
-('Ha-Meem Group Textiles', 'customer', '+880 1912-334455', 'textiles@hameemgroup.com', 'Tejgaon I/A, Dhaka', 0.00),
-('Square Fashions Sourcing', 'customer', '+880 1713-998877', 'accessories@squaregroup.com', 'Square Tower, Mohakhali, Dhaka', 0.00),
-('Padma Spinning Mills Ltd', 'supplier', '+880 1714-445566', 'sales@padmaspinning.com', 'Adamjee EPZ, Narayanganj', 0.00),
-('Bengal Dyes & Chemicals Ltd', 'supplier', '+880 1715-778899', 'orders@bengaldyes.com', 'Tongi I/A, Gazipur', 0.00);
 
 -- ====================================================================
 -- 11. SEED OWNER USER (almas@admin.com / almas12345)
