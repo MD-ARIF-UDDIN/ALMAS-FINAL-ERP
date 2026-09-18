@@ -1,0 +1,1798 @@
+import React, { useState, useEffect } from 'react';
+import { supabase } from '../supabaseClient';
+import {
+  Truck,
+  Plus,
+  Search,
+  Printer,
+  DollarSign,
+  TrendingUp,
+  Clock,
+  CheckCircle2,
+  AlertCircle,
+  Package,
+  Layers,
+  ArrowRight,
+  FileText,
+  Calendar,
+  X,
+  CreditCard,
+  User,
+  MapPin,
+  Check,
+  ChevronDown,
+  ShieldCheck,
+  XCircle,
+  History,
+  Send,
+  AlertTriangle
+} from 'lucide-react';
+import { TableLoading } from '../components/TableLoading';
+
+export default function BranchChallans({ userProfile, branches = [], addToast }) {
+  const role = userProfile?.role || 'staff';
+  const isOwner = role === 'owner';
+  const myBranchId = userProfile?.branch_id;
+
+  // Selected Branch Filter for Owner
+  const [selectedBranchId, setSelectedBranchId] = useState(() => {
+    if (isOwner) {
+      const factoryBranch = branches.find((b) => b.is_factory || b.name?.toLowerCase().includes('factory'));
+      return factoryBranch ? factoryBranch.id : (branches.length > 0 ? branches[0].id : '');
+    }
+    return myBranchId || (branches.length > 0 ? branches[0].id : '');
+  });
+
+  const activeBranchObj = branches.find((b) => b.id === (isOwner ? selectedBranchId : myBranchId));
+  const isFactoryPerspective = Boolean(
+    !activeBranchObj || 
+    activeBranchObj.is_factory || 
+    activeBranchObj.name?.toLowerCase().includes('factory') || 
+    (isOwner && selectedBranchId === 'all')
+  );
+
+  // Navigation View Tab: 'challans', 'approvals', 'payments_history'
+  const [activeMainTab, setActiveMainTab] = useState('challans');
+
+  // State lists
+  const [challans, setChallans] = useState([]);
+  const [branchPayments, setBranchPayments] = useState([]);
+  const [catalogProducts, setCatalogProducts] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all'); // 'all', 'unpaid', 'partial', 'paid'
+
+  // Modals
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [showPaymentHistoryModal, setShowPaymentHistoryModal] = useState(false);
+  const [showPrintModal, setShowPrintModal] = useState(false);
+  const [showDetailModal, setShowDetailModal] = useState(false);
+  const [showRejectModal, setShowRejectModal] = useState(false);
+  const [activeChallan, setActiveChallan] = useState(null);
+  const [selectedPaymentForAction, setSelectedPaymentForAction] = useState(null);
+  const [rejectionReason, setRejectionReason] = useState('');
+
+  // New Challan Form State
+  const [fromBranchId, setFromBranchId] = useState(() => {
+    const factory = branches.find((b) => b.is_factory || b.name?.toLowerCase().includes('factory'));
+    return factory ? factory.id : (branches.length > 0 ? branches[0].id : '');
+  });
+  const [toBranchId, setToBranchId] = useState('');
+  const [challanDate, setChallanDate] = useState(new Date().toISOString().split('T')[0]);
+  const [vehicleNo, setVehicleNo] = useState('');
+  const [driverName, setDriverName] = useState('');
+  const [notes, setNotes] = useState('');
+  const [challanItems, setChallanItems] = useState([
+    { productId: '', quantity: 1, unitPrice: 0.00, totalPrice: 0.00 }
+  ]);
+  const [isSubmittingChallan, setIsSubmittingChallan] = useState(false);
+
+  // Payment Form State (Branch submits request / Owner records payment)
+  const [payAmount, setPayAmount] = useState('');
+  const [payMethod, setPayMethod] = useState('cash');
+  const [payDate, setPayDate] = useState(new Date().toISOString().split('T')[0]);
+  const [payReference, setPayReference] = useState('');
+  const [payNotes, setPayNotes] = useState('');
+  const [isSubmittingPayment, setIsSubmittingPayment] = useState(false);
+
+  useEffect(() => {
+    if (!selectedBranchId && branches.length > 0) {
+      if (isOwner) {
+        const factoryBranch = branches.find((b) => b.is_factory || b.name?.toLowerCase().includes('factory'));
+        setSelectedBranchId(factoryBranch ? factoryBranch.id : branches[0].id);
+      } else {
+        setSelectedBranchId(myBranchId || branches[0].id);
+      }
+    }
+    if (!fromBranchId && branches.length > 0) {
+      const factoryBranch = branches.find((b) => b.is_factory || b.name?.toLowerCase().includes('factory'));
+      setFromBranchId(factoryBranch ? factoryBranch.id : branches[0].id);
+    }
+  }, [branches, isOwner, myBranchId, selectedBranchId, fromBranchId]);
+
+  useEffect(() => {
+    fetchChallans();
+    fetchBranchPayments();
+    fetchCatalogProducts();
+  }, [selectedBranchId, statusFilter]);
+
+  const showMessage = (text, type = 'info') => {
+    addToast(text, type === 'error' ? 'error' : type === 'success' ? 'success' : 'info');
+  };
+
+  const fetchCatalogProducts = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('products')
+        .select('id, sku, product_code, name, sale_price, purchase_price, category, description')
+        .order('name', { ascending: true });
+      if (error) throw error;
+      setCatalogProducts(data || []);
+    } catch (err) {
+      console.error('Error loading products:', err);
+    }
+  };
+
+  const fetchChallans = async () => {
+    setLoading(true);
+    try {
+      let query = supabase
+        .from('branch_challans')
+        .select(`
+          *,
+          from_branch:branches!branch_challans_from_branch_id_fkey (id, name, is_factory),
+          to_branch:branches!branch_challans_to_branch_id_fkey (id, name, is_factory),
+          items:branch_challan_items (
+            id,
+            product_id,
+            dispatched_qty,
+            sold_qty,
+            remaining_qty,
+            unit_transfer_price,
+            total_price,
+            product:products (id, sku, product_code, name, category)
+          )
+        `)
+        .order('created_at', { ascending: false });
+
+      if (!isOwner && myBranchId) {
+        query = query.or(`from_branch_id.eq.${myBranchId},to_branch_id.eq.${myBranchId}`);
+      } else if (isOwner && selectedBranchId && selectedBranchId !== 'all') {
+        query = query.or(`from_branch_id.eq.${selectedBranchId},to_branch_id.eq.${selectedBranchId}`);
+      }
+
+      if (statusFilter !== 'all') {
+        query = query.eq('payment_status', statusFilter);
+      }
+
+      const { data, error } = await query;
+      if (error) throw error;
+      setChallans(data || []);
+    } catch (err) {
+      console.error('Error loading challans:', err);
+      showMessage('Failed to load branch delivery challans.', 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchBranchPayments = async () => {
+    try {
+      let query = supabase
+        .from('branch_payments')
+        .select(`
+          *,
+          branch:branches (id, name, is_factory),
+          challan:branch_challans (id, challan_no, total_bill_amount, due_amount)
+        `)
+        .order('created_at', { ascending: false });
+
+      if (!isOwner && myBranchId) {
+        query = query.eq('branch_id', myBranchId);
+      } else if (isOwner && selectedBranchId && selectedBranchId !== 'all') {
+        query = query.eq('branch_id', selectedBranchId);
+      }
+
+      const { data, error } = await query;
+      if (error) throw error;
+      setBranchPayments(data || []);
+    } catch (err) {
+      console.error('Error loading payments:', err);
+    }
+  };
+
+  // Pending payments awaiting Owner approval
+  const pendingPayments = branchPayments.filter((p) => (p.status || 'approved') === 'pending');
+
+  // KPI Computations
+  const totalDispatchedValue = challans.reduce((sum, c) => sum + (parseFloat(c.total_bill_amount) || 0), 0);
+  const totalPaidValue = challans.reduce((sum, c) => sum + (parseFloat(c.paid_amount) || 0), 0);
+  const totalDueValue = challans.reduce((sum, c) => sum + (parseFloat(c.due_amount) || 0), 0);
+
+  const totalDispatchedQty = challans.reduce((sum, c) => {
+    const itemQty = (c.items || []).reduce((iSum, it) => iSum + (it.dispatched_qty || 0), 0);
+    return sum + itemQty;
+  }, 0);
+
+  const totalSoldQty = challans.reduce((sum, c) => {
+    const itemSold = (c.items || []).reduce((iSum, it) => iSum + (it.sold_qty || 0), 0);
+    return sum + itemSold;
+  }, 0);
+
+  // Filtered list by search query
+  const filteredChallans = challans.filter((c) => {
+    const q = searchQuery.toLowerCase();
+    return (
+      c.challan_no?.toLowerCase().includes(q) ||
+      c.to_branch?.name?.toLowerCase().includes(q) ||
+      c.from_branch?.name?.toLowerCase().includes(q) ||
+      c.driver_name?.toLowerCase().includes(q) ||
+      c.vehicle_no?.toLowerCase().includes(q) ||
+      (c.items || []).some((it) => it.product?.name?.toLowerCase().includes(q) || it.product?.sku?.toLowerCase().includes(q))
+    );
+  });
+
+  // Handle Item Row changes in Create Challan Modal
+  const addItemRow = () => {
+    setChallanItems([...challanItems, { productId: '', quantity: 1, unitPrice: 0.00, totalPrice: 0.00 }]);
+  };
+
+  const removeItemRow = (index) => {
+    if (challanItems.length <= 1) return;
+    setChallanItems(challanItems.filter((_, idx) => idx !== index));
+  };
+
+  const updateItemRow = (index, field, value) => {
+    const updated = [...challanItems];
+    const row = { ...updated[index] };
+
+    if (field === 'productId') {
+      row.productId = value;
+      const matchedProd = catalogProducts.find((p) => p.id === value);
+      if (matchedProd) {
+        row.unitPrice = parseFloat(matchedProd.sale_price) || parseFloat(matchedProd.purchase_price) || 0;
+      }
+    } else if (field === 'quantity') {
+      row.quantity = value;
+    } else if (field === 'unitPrice') {
+      row.unitPrice = value;
+    }
+
+    const qty = parseInt(row.quantity) || 0;
+    const price = parseFloat(row.unitPrice) || 0;
+    row.totalPrice = qty * price;
+    updated[index] = row;
+    setChallanItems(updated);
+  };
+
+  const getNewChallanGrandTotal = () => {
+    return challanItems.reduce((sum, item) => sum + (parseFloat(item.totalPrice) || 0), 0);
+  };
+
+  // Submit Create Delivery Challan (Factory ➔ Branch)
+  const handleCreateChallan = async (e) => {
+    e.preventDefault();
+    if (!toBranchId) {
+      showMessage('Please select a Destination Branch.', 'error');
+      return;
+    }
+    if (fromBranchId === toBranchId) {
+      showMessage('Origin Factory and Destination Branch cannot be the same.', 'error');
+      return;
+    }
+    const validItems = challanItems.filter((it) => it.productId && (parseInt(it.quantity) || 0) > 0);
+    if (validItems.length === 0) {
+      showMessage('Please add at least one product with valid quantity.', 'error');
+      return;
+    }
+
+    setIsSubmittingChallan(true);
+    try {
+      const grandTotal = getNewChallanGrandTotal();
+      const challanNo = `CHL-${Date.now().toString().slice(-6)}`;
+
+      // 1. Insert Challan Header
+      const { data: challanData, error: challanErr } = await supabase
+        .from('branch_challans')
+        .insert([
+          {
+            challan_no: challanNo,
+            from_branch_id: fromBranchId,
+            to_branch_id: toBranchId,
+            total_bill_amount: grandTotal,
+            paid_amount: 0.00,
+            due_amount: grandTotal,
+            payment_status: 'unpaid',
+            challan_date: challanDate,
+            vehicle_no: vehicleNo.trim() || null,
+            driver_name: driverName.trim() || null,
+            notes: notes.trim() || null,
+            created_by: userProfile?.id,
+          },
+        ])
+        .select()
+        .single();
+
+      if (challanErr) throw challanErr;
+
+      // 2. Insert Challan Line Items
+      const itemsPayload = validItems.map((it) => {
+        const q = parseInt(it.quantity) || 0;
+        const p = parseFloat(it.unitPrice) || 0;
+        return {
+          challan_id: challanData.id,
+          product_id: it.productId,
+          dispatched_qty: q,
+          sold_qty: 0,
+          remaining_qty: q,
+          unit_transfer_price: p,
+          total_price: q * p,
+        };
+      });
+
+      const { error: itemsErr } = await supabase.from('branch_challan_items').insert(itemsPayload);
+      if (itemsErr) throw itemsErr;
+
+      // 3. Increment Destination Branch Inventory
+      for (const it of validItems) {
+        const q = parseInt(it.quantity) || 0;
+        const { data: existingInv } = await supabase
+          .from('inventory')
+          .select('id, quantity')
+          .eq('branch_id', toBranchId)
+          .eq('product_id', it.productId)
+          .maybeSingle();
+
+        if (existingInv) {
+          await supabase
+            .from('inventory')
+            .update({ quantity: (existingInv.quantity || 0) + q })
+            .eq('id', existingInv.id);
+        } else {
+          await supabase
+            .from('inventory')
+            .insert([{ branch_id: toBranchId, product_id: it.productId, quantity: q }]);
+        }
+      }
+
+      showMessage(`Challan #${challanNo} created & dispatched successfully!`, 'success');
+      setShowCreateModal(false);
+      resetChallanForm();
+      fetchChallans();
+    } catch (err) {
+      console.error(err);
+      showMessage(err.message || 'Failed to dispatch delivery challan.', 'error');
+    } finally {
+      setIsSubmittingChallan(false);
+    }
+  };
+
+  const resetChallanForm = () => {
+    setToBranchId('');
+    setChallanDate(new Date().toISOString().split('T')[0]);
+    setVehicleNo('');
+    setDriverName('');
+    setNotes('');
+    setChallanItems([{ productId: '', quantity: 1, unitPrice: 0.00, totalPrice: 0.00 }]);
+  };
+
+  // Open Payment / Submission Modal
+  const handleOpenPaymentModal = (challan) => {
+    setActiveChallan(challan);
+    setPayAmount((parseFloat(challan.due_amount) || 0).toFixed(2));
+    setPayMethod('cash');
+    setPayDate(new Date().toISOString().split('T')[0]);
+    setPayReference('');
+    setPayNotes('');
+    setShowPaymentModal(true);
+  };
+
+  // Open Payment History Modal for a specific challan
+  const handleOpenPaymentHistory = (challan) => {
+    setActiveChallan(challan);
+    setShowPaymentHistoryModal(true);
+  };
+
+  // Submit Payment (Branch submits request ➔ Owner directly approves)
+  const handleRecordPayment = async (e) => {
+    e.preventDefault();
+    if (!activeChallan) return;
+
+    const amountNum = parseFloat(payAmount) || 0;
+    const currentDue = parseFloat(activeChallan.due_amount) || 0;
+
+    if (amountNum <= 0) {
+      showMessage('Please enter a valid payment amount.', 'error');
+      return;
+    }
+    if (amountNum > currentDue + 0.01) {
+      showMessage(`Payment amount cannot exceed the remaining due of ৳${currentDue.toFixed(2)}.`, 'error');
+      return;
+    }
+
+    setIsSubmittingPayment(true);
+    try {
+      const paymentNo = `PAY-${Date.now().toString().slice(-6)}`;
+      const targetBranchId = activeChallan.to_branch_id;
+      const initialStatus = isOwner ? 'approved' : 'pending';
+
+      // 1. Insert into branch_payments audit table
+      const paymentPayload = {
+        payment_no: paymentNo,
+        branch_id: targetBranchId,
+        challan_id: activeChallan.id,
+        amount: amountNum,
+        payment_method: payMethod,
+        payment_date: payDate,
+        reference_number: payReference.trim() || null,
+        notes: payNotes.trim() || `Payment for Challan #${activeChallan.challan_no}`,
+        status: initialStatus,
+        submitted_by: userProfile?.id,
+        approved_by: isOwner ? userProfile?.id : null,
+        approved_at: isOwner ? new Date().toISOString() : null,
+      };
+
+      const { error: bpErr } = await supabase.from('branch_payments').insert([paymentPayload]);
+      if (bpErr) throw bpErr;
+
+      if (isOwner) {
+        // If Owner entered it, credit Factory cash ledger & deduct challan due immediately
+        await applyApprovedPayment(activeChallan, amountNum, payMethod, payDate);
+        showMessage(`Payment of ৳${amountNum.toLocaleString()} recorded & settled directly!`, 'success');
+      } else {
+        // If Branch submitted it, it stays pending until Owner approves
+        showMessage(`Payment request of ৳${amountNum.toLocaleString()} submitted! Awaiting Owner verification.`, 'success');
+      }
+
+      setShowPaymentModal(false);
+      fetchChallans();
+      fetchBranchPayments();
+    } catch (err) {
+      console.error(err);
+      showMessage(err.message || 'Failed to submit payment.', 'error');
+    } finally {
+      setIsSubmittingPayment(false);
+    }
+  };
+
+  // Helper to apply approved payment to Challan and Cash Ledger
+  const applyApprovedPayment = async (challanObj, amountNum, method, date) => {
+    // 1. Insert into cash_ledger for Factory Cash/Bank Balance
+    await supabase.from('cash_ledger').insert([
+      {
+        branch_id: challanObj.from_branch_id || selectedBranchId,
+        account_type: method,
+        type: 'in',
+        amount: amountNum,
+        description: `Settlement Approved: Challan #${challanObj.challan_no} from ${challanObj.to_branch?.name || 'Branch'}`,
+        transaction_date: new Date(date).toISOString(),
+      },
+    ]);
+
+    // 2. Update branch_challans Due & Status
+    const currentPaid = parseFloat(challanObj.paid_amount) || 0;
+    const totalBill = parseFloat(challanObj.total_bill_amount) || 0;
+    const newPaid = currentPaid + amountNum;
+    const newDue = Math.max(0, totalBill - newPaid);
+    const newStatus = newDue <= 0.01 ? 'paid' : 'partial';
+
+    await supabase
+      .from('branch_challans')
+      .update({
+        paid_amount: newPaid,
+        due_amount: newDue,
+        payment_status: newStatus,
+      })
+      .eq('id', challanObj.id);
+  };
+
+  // Owner Action: Approve Pending Payment Request
+  const handleApprovePaymentRequest = async (payment) => {
+    if (!isOwner) return;
+
+    try {
+      const { data: targetChallan, error: chErr } = await supabase
+        .from('branch_challans')
+        .select(`
+          *,
+          from_branch:branches!branch_challans_from_branch_id_fkey (id, name, is_factory),
+          to_branch:branches!branch_challans_to_branch_id_fkey (id, name, is_factory)
+        `)
+        .eq('id', payment.challan_id)
+        .single();
+
+      if (chErr) throw chErr;
+
+      // 1. Apply payment settlement
+      await applyApprovedPayment(
+        targetChallan,
+        parseFloat(payment.amount),
+        payment.payment_method,
+        payment.payment_date
+      );
+
+      // 2. Update branch_payments status to 'approved'
+      const { error: payUpdateErr } = await supabase
+        .from('branch_payments')
+        .update({
+          status: 'approved',
+          approved_by: userProfile?.id,
+          approved_at: new Date().toISOString(),
+        })
+        .eq('id', payment.id);
+
+      if (payUpdateErr) throw payUpdateErr;
+
+      showMessage(`Payment #${payment.payment_no} (৳${parseFloat(payment.amount).toLocaleString()}) approved & credited to Factory!`, 'success');
+      fetchChallans();
+      fetchBranchPayments();
+    } catch (err) {
+      console.error(err);
+      showMessage('Failed to approve payment request.', 'error');
+    }
+  };
+
+  // Owner Action: Open Reject Modal
+  const handleOpenRejectModal = (payment) => {
+    setSelectedPaymentForAction(payment);
+    setRejectionReason('');
+    setShowRejectModal(true);
+  };
+
+  // Owner Action: Confirm Rejection
+  const handleConfirmRejection = async (e) => {
+    e.preventDefault();
+    if (!selectedPaymentForAction) return;
+
+    try {
+      const { error } = await supabase
+        .from('branch_payments')
+        .update({
+          status: 'rejected',
+          rejection_reason: rejectionReason.trim() || 'Payment not verified / funds not received.',
+          approved_by: userProfile?.id,
+          approved_at: new Date().toISOString(),
+        })
+        .eq('id', selectedPaymentForAction.id);
+
+      if (error) throw error;
+
+      showMessage(`Payment #${selectedPaymentForAction.payment_no} rejected.`, 'info');
+      setShowRejectModal(false);
+      setSelectedPaymentForAction(null);
+      fetchBranchPayments();
+    } catch (err) {
+      console.error(err);
+      showMessage('Failed to reject payment request.', 'error');
+    }
+  };
+
+  const handlePrint = (challan) => {
+    setActiveChallan(challan);
+    setShowPrintModal(true);
+    setTimeout(() => {
+      window.print();
+    }, 400);
+  };
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+      {/* TOP BAR */}
+      <div className="no-print top-bar">
+        <div className="page-title-group">
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <Truck size={22} style={{ color: 'var(--primary)' }} />
+            <h1 style={{ margin: 0 }}>Branch Challans</h1>
+          </div>
+        </div>
+
+        <div className="top-bar-actions" style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+          {isOwner ? (
+            branches.length > 0 && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)' }}>Branch:</span>
+                <select
+                  className="input-control"
+                  value={selectedBranchId}
+                  onChange={(e) => setSelectedBranchId(e.target.value)}
+                  style={{ width: '180px', padding: '0.35rem 0.6rem', fontSize: '0.82rem' }}
+                >
+                  <option value="all">All Branches</option>
+                  {branches.map((b) => (
+                    <option key={b.id} value={b.id}>
+                      {b.is_factory ? `🏭 ${b.name}` : `🏪 ${b.name}`}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )
+          ) : (
+            <span
+              className="badge"
+              style={{
+                backgroundColor: '#e0f2fe',
+                color: '#0369a1',
+                border: '1px solid #bae6fd',
+                fontSize: '0.82rem',
+                fontWeight: 600,
+                padding: '0.4rem 0.75rem',
+              }}
+            >
+              🏪 {branches.find((b) => b.id === myBranchId)?.name || 'My Branch'}
+            </span>
+          )}
+
+          {isOwner && (
+            <button className="btn btn-primary" onClick={() => setShowCreateModal(true)}>
+              <Plus size={16} />
+              <span>Create Challan</span>
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* PENDING APPROVAL BANNER (For Owner when requests exist) */}
+      {isOwner && pendingPayments.length > 0 && (
+        <div
+          className="no-print"
+          style={{
+            backgroundColor: '#fffbeb',
+            border: '1px solid #fde68a',
+            borderRadius: 'var(--border-radius)',
+            padding: '0.85rem 1.25rem',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            gap: '1rem',
+            boxShadow: 'var(--shadow-sm)',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+            <div
+              style={{
+                backgroundColor: '#fef3c7',
+                color: '#d97706',
+                width: '36px',
+                height: '36px',
+                borderRadius: '50%',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexShrink: 0,
+              }}
+            >
+              <ShieldCheck size={20} />
+            </div>
+            <div>
+              <div style={{ fontWeight: 700, fontSize: '0.9rem', color: '#92400e' }}>
+                {pendingPayments.length} Payment {pendingPayments.length === 1 ? 'Request' : 'Requests'} Pending Approval
+              </div>
+              <div style={{ fontSize: '0.78rem', color: '#b45309' }}>
+                Total ৳{pendingPayments.reduce((s, p) => s + parseFloat(p.amount), 0).toLocaleString()} submitted by branches.
+              </div>
+            </div>
+          </div>
+          <button
+            type="button"
+            className="btn btn-primary btn-sm"
+            onClick={() => {
+              const firstPending = pendingPayments[0];
+              const targetCh = challans.find((c) => c.id === firstPending?.challan_id);
+              if (targetCh) handleOpenPaymentHistory(targetCh);
+            }}
+            style={{ backgroundColor: '#d97706', borderColor: '#b45309' }}
+          >
+            <span>Review & Approve ({pendingPayments.length})</span>
+          </button>
+        </div>
+      )}
+
+      {/* KPI METRIC CARDS */}
+      <div
+        className="no-print"
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+          gap: '1rem',
+        }}
+      >
+        {/* Total Sent / Received Consignment */}
+        <div className="card" style={{ padding: '1rem 1.25rem', display: 'flex', alignItems: 'center', gap: '1rem' }}>
+          <div
+            style={{
+              width: '44px',
+              height: '44px',
+              borderRadius: '10px',
+              backgroundColor: '#eff6ff',
+              color: '#2563eb',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <Truck size={22} />
+          </div>
+          <div>
+            <div style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
+              {isFactoryPerspective ? 'Total Sent' : 'Total Consignment'}
+            </div>
+            <div style={{ fontSize: '1.3rem', fontWeight: 800, color: 'var(--text-primary)', fontFamily: 'Outfit, sans-serif' }}>
+              ৳{totalDispatchedValue.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+            </div>
+            <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '0.1rem' }}>
+              {challans.length} Challans {isFactoryPerspective ? 'Dispatched' : 'Received'}
+            </div>
+          </div>
+        </div>
+
+        {/* Total Sold Qty */}
+        <div className="card" style={{ padding: '1rem 1.25rem', display: 'flex', alignItems: 'center', gap: '1rem' }}>
+          <div
+            style={{
+              width: '44px',
+              height: '44px',
+              borderRadius: '10px',
+              backgroundColor: '#f0fdf4',
+              color: '#16a34a',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <TrendingUp size={22} />
+          </div>
+          <div>
+            <div style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
+              Total Sold
+            </div>
+            <div style={{ fontSize: '1.3rem', fontWeight: 800, color: '#16a34a', fontFamily: 'Outfit, sans-serif' }}>
+              {totalSoldQty.toLocaleString()} <span style={{ fontSize: '0.8rem', fontWeight: 500, color: 'var(--text-muted)' }}>/ {totalDispatchedQty.toLocaleString()} pcs</span>
+            </div>
+            <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '0.1rem' }}>
+              {totalDispatchedQty > 0 ? `${((totalSoldQty / totalDispatchedQty) * 100).toFixed(1)}% Sold` : 'No items'}
+            </div>
+          </div>
+        </div>
+
+        {/* Total Paid / Received */}
+        <div className="card" style={{ padding: '1rem 1.25rem', display: 'flex', alignItems: 'center', gap: '1rem' }}>
+          <div
+            style={{
+              width: '44px',
+              height: '44px',
+              borderRadius: '10px',
+              backgroundColor: '#ecfdf5',
+              color: '#059669',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <CheckCircle2 size={22} />
+          </div>
+          <div>
+            <div style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
+              {isFactoryPerspective ? 'Total Received' : 'Total Paid'}
+            </div>
+            <div style={{ fontSize: '1.3rem', fontWeight: 800, color: '#059669', fontFamily: 'Outfit, sans-serif' }}>
+              ৳{totalPaidValue.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+            </div>
+            <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '0.1rem' }}>
+              {isFactoryPerspective ? 'Collected from Branches' : 'Approved Payments'}
+            </div>
+          </div>
+        </div>
+
+        {/* Total Due */}
+        <div className="card" style={{ padding: '1rem 1.25rem', display: 'flex', alignItems: 'center', gap: '1rem' }}>
+          <div
+            style={{
+              width: '44px',
+              height: '44px',
+              borderRadius: '10px',
+              backgroundColor: totalDueValue > 0 ? '#fef2f2' : '#f8fafc',
+              color: totalDueValue > 0 ? '#dc2626' : '#64748b',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <AlertCircle size={22} />
+          </div>
+          <div>
+            <div style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
+              {isFactoryPerspective ? 'Total Receivable' : 'Total Payable Due'}
+            </div>
+            <div
+              style={{
+                fontSize: '1.3rem',
+                fontWeight: 800,
+                color: totalDueValue > 0 ? '#dc2626' : 'var(--text-primary)',
+                fontFamily: 'Outfit, sans-serif',
+              }}
+            >
+              ৳{totalDueValue.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+            </div>
+            <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '0.1rem' }}>
+              {totalDueValue > 0 
+                ? (isFactoryPerspective ? 'Outstanding from Branches' : 'Remaining Due to Factory') 
+                : 'All Settled 🎉'}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* CHALLANS LIST TABLE (Direct, No Tabs) */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+        {/* Search & Filter bar */}
+        <div
+          className="no-print card"
+          style={{ padding: '0.75rem 1rem', display: 'flex', gap: '1rem', alignItems: 'center', flexWrap: 'wrap' }}
+        >
+          <div style={{ position: 'relative', flex: 1, minWidth: '240px' }}>
+            <Search
+              size={15}
+              style={{
+                position: 'absolute',
+                left: '0.85rem',
+                top: '50%',
+                transform: 'translateY(-50%)',
+                color: 'var(--text-muted)',
+              }}
+            />
+            <input
+              type="text"
+              className="input-control"
+              style={{ paddingLeft: '2.4rem' }}
+              placeholder="Search by Challan #, Branch, Product, Driver..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+            />
+          </div>
+
+          {/* Status Filter Tabs */}
+          <div style={{ display: 'flex', gap: '0.35rem', backgroundColor: 'var(--bg-app)', padding: '0.25rem', borderRadius: '6px' }}>
+            {[
+              { id: 'all', label: 'All' },
+              { id: 'unpaid', label: 'Unpaid' },
+              { id: 'partial', label: 'Partial' },
+              { id: 'paid', label: 'Paid' },
+            ].map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                className={`btn btn-sm ${statusFilter === tab.id ? 'btn-primary' : 'btn-secondary'}`}
+                style={{ padding: '0.3rem 0.65rem', fontSize: '0.78rem' }}
+                onClick={() => setStatusFilter(tab.id)}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* TABLE */}
+        <div className="no-print table-container card" style={{ padding: 0 }}>
+          <table>
+            <thead>
+              <tr>
+                <th style={{ width: '45px', textAlign: 'center' }}>#</th>
+                <th>Challan & Date</th>
+                <th>Branch</th>
+                <th>Items</th>
+                <th>Sold / Stock</th>
+                <th style={{ textAlign: 'right' }}>Total (৳)</th>
+                <th style={{ textAlign: 'right' }}>{isFactoryPerspective ? 'Received (৳)' : 'Paid (৳)'}</th>
+                <th style={{ textAlign: 'right' }}>{isFactoryPerspective ? 'Receivable (৳)' : 'Due (৳)'}</th>
+                <th style={{ textAlign: 'center' }}>Status</th>
+                <th style={{ width: '210px', textAlign: 'center' }}>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {loading ? (
+                <TableLoading colSpan={10} message="Loading branch challans..." />
+              ) : filteredChallans.length === 0 ? (
+                <tr>
+                  <td colSpan={10} style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-muted)' }}>
+                    No challans found.
+                  </td>
+                </tr>
+              ) : (
+                filteredChallans.map((ch, idx) => {
+                  const totalBill = parseFloat(ch.total_bill_amount) || 0;
+                  const paid = parseFloat(ch.paid_amount) || 0;
+                  const due = parseFloat(ch.due_amount) || 0;
+
+                  const itemsCount = (ch.items || []).length;
+                  const totalQty = (ch.items || []).reduce((s, it) => s + (it.dispatched_qty || 0), 0);
+                  const soldQty = (ch.items || []).reduce((s, it) => s + (it.sold_qty || 0), 0);
+                  const isPaid = ch.payment_status === 'paid' || due <= 0.01;
+
+                  // Check if there are payments submitted for this challan
+                  const paymentsForChallan = branchPayments.filter((p) => p.challan_id === ch.id);
+                  const pendingForChallan = paymentsForChallan.filter((p) => p.status === 'pending');
+                  const pendingAmount = pendingForChallan.reduce((s, p) => s + parseFloat(p.amount), 0);
+
+                  return (
+                    <tr key={ch.id}>
+                      <td style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.8rem' }}>{idx + 1}</td>
+                      <td>
+                        <div style={{ fontWeight: 700, fontFamily: 'monospace', color: 'var(--primary)', fontSize: '0.85rem' }}>
+                          {ch.challan_no}
+                        </div>
+                        <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                          {new Date(ch.challan_date).toLocaleDateString()}
+                        </div>
+                      </td>
+                      <td>
+                        <div style={{ fontWeight: 600 }}>🏪 {ch.to_branch?.name || 'Branch'}</div>
+                        {ch.vehicle_no && (
+                          <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                            🚛 {ch.vehicle_no} {ch.driver_name ? `• ${ch.driver_name}` : ''}
+                          </div>
+                        )}
+                      </td>
+                      <td>
+                        <button
+                          type="button"
+                          className="btn btn-secondary btn-sm"
+                          onClick={() => {
+                            setActiveChallan(ch);
+                            setShowDetailModal(true);
+                          }}
+                          style={{ padding: '0.2rem 0.5rem', fontSize: '0.75rem' }}
+                        >
+                          <Layers size={13} />
+                          <span>
+                            {itemsCount} {itemsCount === 1 ? 'Product' : 'Products'} ({totalQty} pcs)
+                          </span>
+                        </button>
+                      </td>
+                      <td>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem', minWidth: '100px' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', fontWeight: 600 }}>
+                            <span style={{ color: '#16a34a' }}>{soldQty} sold</span>
+                            <span style={{ color: 'var(--text-muted)' }}>{Math.max(0, totalQty - soldQty)} left</span>
+                          </div>
+                          <div style={{ width: '100%', height: '6px', backgroundColor: '#e2e8f0', borderRadius: '3px', overflow: 'hidden' }}>
+                            <div
+                              style={{
+                                width: totalQty > 0 ? `${Math.min(100, (soldQty / totalQty) * 100)}%` : '0%',
+                                height: '100%',
+                                backgroundColor: '#16a34a',
+                              }}
+                            />
+                          </div>
+                        </div>
+                      </td>
+                      <td style={{ textAlign: 'right', fontWeight: 700, fontFamily: 'Outfit, sans-serif' }}>
+                        ৳{totalBill.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                      </td>
+                      <td style={{ textAlign: 'right', color: '#059669', fontWeight: 700, fontFamily: 'Outfit, sans-serif' }}>
+                        ৳{paid.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                      </td>
+                      <td style={{ textAlign: 'right', color: due > 0 ? '#dc2626' : 'var(--text-muted)', fontWeight: 700, fontFamily: 'Outfit, sans-serif' }}>
+                        ৳{due.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                      </td>
+                      <td style={{ textAlign: 'center' }}>
+                        {isPaid ? (
+                          <span className="badge badge-success" style={{ fontSize: '0.75rem' }}>
+                            Paid
+                          </span>
+                        ) : paid > 0 ? (
+                          <span className="badge badge-warning" style={{ fontSize: '0.75rem' }}>
+                            Partial
+                          </span>
+                        ) : (
+                          <span className="badge badge-danger" style={{ fontSize: '0.75rem' }}>
+                            Unpaid
+                          </span>
+                        )}
+
+                        {pendingAmount > 0 && (
+                          <div style={{ marginTop: '0.2rem' }}>
+                            <span
+                              className="badge"
+                              style={{
+                                backgroundColor: '#fef3c7',
+                                color: '#b45309',
+                                fontSize: '0.68rem',
+                                border: '1px solid #fde68a',
+                              }}
+                            >
+                              ⏳ ৳{pendingAmount.toLocaleString()} Pending
+                            </span>
+                          </div>
+                        )}
+                      </td>
+                      <td style={{ textAlign: 'center' }}>
+                        <div style={{ display: 'flex', gap: '0.35rem', justifyContent: 'center', alignItems: 'center' }}>
+                          {/* Payment Button */}
+                          {!isPaid && (
+                            <button
+                              type="button"
+                              className="btn btn-primary btn-sm"
+                              onClick={() => handleOpenPaymentModal(ch)}
+                              title={isFactoryPerspective ? 'Receive / Record payment from branch' : 'Submit payment to factory'}
+                              style={{ padding: '0.25rem 0.55rem', fontSize: '0.75rem' }}
+                            >
+                              <CreditCard size={13} />
+                              <span>{isFactoryPerspective ? 'Receive' : 'Pay'}</span>
+                            </button>
+                          )}
+
+                          {/* Payment History & Approve Action */}
+                          <button
+                            type="button"
+                            className="btn btn-secondary btn-sm"
+                            onClick={() => handleOpenPaymentHistory(ch)}
+                            title="View payments and approve"
+                            style={{
+                              padding: '0.25rem 0.55rem',
+                              fontSize: '0.75rem',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '0.25rem',
+                              borderColor: pendingForChallan.length > 0 ? '#f59e0b' : 'var(--border-color)',
+                              backgroundColor: pendingForChallan.length > 0 ? '#fffbeb' : undefined,
+                            }}
+                          >
+                            <History size={13} style={{ color: pendingForChallan.length > 0 ? '#d97706' : undefined }} />
+                            <span>Payments</span>
+                            {pendingForChallan.length > 0 && (
+                              <span
+                                style={{
+                                  backgroundColor: '#dc2626',
+                                  color: '#ffffff',
+                                  borderRadius: '8px',
+                                  fontSize: '0.65rem',
+                                  fontWeight: 700,
+                                  padding: '0.05rem 0.35rem',
+                                }}
+                              >
+                                {pendingForChallan.length}
+                              </span>
+                            )}
+                          </button>
+
+                          {/* Print Challan */}
+                          <button
+                            type="button"
+                            className="btn btn-secondary btn-sm"
+                            onClick={() => handlePrint(ch)}
+                            title="Print Delivery Challan"
+                            style={{ padding: '0.25rem 0.55rem', fontSize: '0.75rem' }}
+                          >
+                            <Printer size={13} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* PAYMENT HISTORY & APPROVAL MODAL */}
+      {showPaymentHistoryModal && activeChallan && (() => {
+        const currentChallan = challans.find((c) => c.id === activeChallan.id) || activeChallan;
+        const currentPayments = branchPayments.filter((p) => p.challan_id === currentChallan.id);
+        const totalBill = parseFloat(currentChallan.total_bill_amount) || 0;
+        const paid = parseFloat(currentChallan.paid_amount) || 0;
+        const due = parseFloat(currentChallan.due_amount) || 0;
+        const isFullyPaid = currentChallan.payment_status === 'paid' || due <= 0.01;
+
+        return (
+          <div className="modal-overlay">
+            <div className="modal-content modal-lg" style={{ maxWidth: '780px', width: '100%' }}>
+              <div className="modal-header">
+                <h3 className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <History size={18} />
+                  <span>Payments — Challan #{currentChallan.challan_no}</span>
+                </h3>
+                <button
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => setShowPaymentHistoryModal(false)}
+                  style={{ borderRadius: '50%', padding: '0.4rem', border: 'none' }}
+                >
+                  ✕
+                </button>
+              </div>
+
+              <div className="modal-body" style={{ padding: '1.25rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                {/* Summary Row */}
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(4, 1fr)',
+                    gap: '0.75rem',
+                    backgroundColor: '#f8fafc',
+                    padding: '0.85rem 1rem',
+                    borderRadius: '6px',
+                    border: '1px solid var(--border-color)',
+                  }}
+                >
+                  <div>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Branch</div>
+                    <div style={{ fontWeight: 600, fontSize: '0.88rem' }}>🏪 {currentChallan.to_branch?.name}</div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Total Bill</div>
+                    <div style={{ fontWeight: 800, fontSize: '1rem', fontFamily: 'Outfit, sans-serif' }}>
+                      ৳{totalBill.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                    </div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Paid to Factory</div>
+                    <div style={{ fontWeight: 800, fontSize: '1rem', color: '#059669', fontFamily: 'Outfit, sans-serif' }}>
+                      ৳{paid.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                    </div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Remaining Due</div>
+                    <div
+                      style={{
+                        fontWeight: 800,
+                        fontSize: '1rem',
+                        color: due > 0 ? '#dc2626' : '#059669',
+                        fontFamily: 'Outfit, sans-serif',
+                      }}
+                    >
+                      ৳{due.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Payments Table */}
+                <div className="table-container" style={{ border: '1px solid var(--border-color)', borderRadius: '6px', maxHeight: '280px', overflowY: 'auto' }}>
+                  <table>
+                    <thead>
+                      <tr>
+                        <th style={{ width: '35px', textAlign: 'center' }}>#</th>
+                        <th>Payment #</th>
+                        <th>Date</th>
+                        <th>Method</th>
+                        <th>Ref / Trx ID</th>
+                        <th style={{ textAlign: 'right' }}>Amount (৳)</th>
+                        <th style={{ textAlign: 'center' }}>Status</th>
+                        <th>Notes</th>
+                        {isOwner && <th style={{ textAlign: 'center', width: '140px' }}>Action</th>}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {currentPayments.length === 0 ? (
+                        <tr>
+                          <td colSpan={isOwner ? 9 : 8} style={{ textAlign: 'center', padding: '2.5rem', color: 'var(--text-muted)' }}>
+                            No payments recorded for this challan yet.
+                          </td>
+                        </tr>
+                      ) : (
+                        currentPayments.map((p, idx) => {
+                          const st = p.status || 'pending';
+                          return (
+                            <tr key={p.id}>
+                              <td style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.8rem' }}>{idx + 1}</td>
+                              <td style={{ fontWeight: 700, fontFamily: 'monospace', color: 'var(--primary)', fontSize: '0.82rem' }}>
+                                {p.payment_no}
+                              </td>
+                              <td style={{ fontSize: '0.82rem' }}>{new Date(p.payment_date).toLocaleDateString()}</td>
+                              <td>
+                                <span style={{ textTransform: 'capitalize', fontSize: '0.8rem' }}>
+                                  {p.payment_method === 'cash' ? '💵 Cash' : p.payment_method === 'bank' ? '🏦 Bank' : '📱 Mobile'}
+                                </span>
+                              </td>
+                              <td style={{ fontFamily: 'monospace', fontSize: '0.8rem' }}>{p.reference_number || '-'}</td>
+                              <td style={{ textAlign: 'right', fontWeight: 800, fontFamily: 'Outfit, sans-serif', fontSize: '0.92rem' }}>
+                                ৳{parseFloat(p.amount).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                              </td>
+                              <td style={{ textAlign: 'center' }}>
+                                {st === 'approved' ? (
+                                  <span className="badge badge-success" style={{ fontSize: '0.72rem' }}>
+                                    Approved
+                                  </span>
+                                ) : st === 'rejected' ? (
+                                  <span className="badge badge-danger" style={{ fontSize: '0.72rem' }}>
+                                    Rejected
+                                  </span>
+                                ) : (
+                                  <span className="badge badge-warning" style={{ fontSize: '0.72rem' }}>
+                                    Pending
+                                  </span>
+                                )}
+                              </td>
+                              <td style={{ fontSize: '0.78rem', color: 'var(--text-muted)', maxWidth: '140px' }}>
+                                {st === 'rejected' ? `Reason: ${p.rejection_reason || 'Discrepancy'}` : p.notes || '-'}
+                              </td>
+                              {isOwner && (
+                                <td style={{ textAlign: 'center' }}>
+                                  {st === 'pending' ? (
+                                    <div style={{ display: 'flex', gap: '0.35rem', justifyContent: 'center' }}>
+                                      <button
+                                        type="button"
+                                        className="btn btn-primary btn-sm"
+                                        onClick={() => handleApprovePaymentRequest(p)}
+                                        style={{ backgroundColor: '#16a34a', borderColor: '#15803d', padding: '0.2rem 0.5rem', fontSize: '0.75rem' }}
+                                        title="Approve & deduct due"
+                                      >
+                                        <CheckCircle2 size={13} />
+                                        <span>Approve</span>
+                                      </button>
+                                      <button
+                                        type="button"
+                                        className="btn btn-secondary btn-sm"
+                                        onClick={() => handleOpenRejectModal(p)}
+                                        style={{ color: '#dc2626', borderColor: '#fca5a5', padding: '0.2rem 0.5rem', fontSize: '0.75rem' }}
+                                        title="Reject request"
+                                      >
+                                        <XCircle size={13} />
+                                      </button>
+                                    </div>
+                                  ) : (
+                                    <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>—</span>
+                                  )}
+                                </td>
+                              )}
+                            </tr>
+                          );
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div className="modal-footer" style={{ justifyContent: 'space-between' }}>
+                <div>
+                  {!isFullyPaid && (
+                    <button
+                      type="button"
+                      className="btn btn-primary"
+                      onClick={() => {
+                        setShowPaymentHistoryModal(false);
+                        handleOpenPaymentModal(currentChallan);
+                      }}
+                      style={{ fontSize: '0.85rem' }}
+                    >
+                      <CreditCard size={15} />
+                      <span>{isOwner ? 'Take Payment' : 'Submit Payment'}</span>
+                    </button>
+                  )}
+                </div>
+                <button type="button" className="btn btn-secondary" onClick={() => setShowPaymentHistoryModal(false)}>
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* CREATE DELIVERY CHALLAN MODAL */}
+      {showCreateModal && (
+        <div className="modal-overlay">
+          <div className="modal-content modal-lg" style={{ display: 'flex', flexDirection: 'column', maxHeight: '90vh' }}>
+            <div className="modal-header">
+              <h3 className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <Truck size={18} />
+                <span>Create Challan</span>
+              </h3>
+              <button className="btn btn-secondary btn-sm" onClick={() => setShowCreateModal(false)} style={{ borderRadius: '50%', padding: '0.4rem', border: 'none' }}>
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateChallan} style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
+              <div className="modal-body" style={{ flex: 1, overflowY: 'auto', padding: '1.25rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                
+                {/* Branch Routing Row */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                  <div className="form-group" style={{ margin: 0 }}>
+                    <label>From *</label>
+                    <select
+                      className="input-control"
+                      value={fromBranchId}
+                      onChange={(e) => setFromBranchId(e.target.value)}
+                      required
+                    >
+                      {branches.map((b) => (
+                        <option key={b.id} value={b.id}>
+                          {b.is_factory ? `🏭 ${b.name}` : `🏪 ${b.name}`}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="form-group" style={{ margin: 0 }}>
+                    <label>To Branch *</label>
+                    <select
+                      className="input-control"
+                      value={toBranchId}
+                      onChange={(e) => setToBranchId(e.target.value)}
+                      required
+                    >
+                      <option value="">-- Select Branch --</option>
+                      {branches
+                        .filter((b) => b.id !== fromBranchId)
+                        .map((b) => (
+                          <option key={b.id} value={b.id}>
+                            🏪 {b.name}
+                          </option>
+                        ))}
+                    </select>
+                  </div>
+                </div>
+
+                {/* Date & Transport Row */}
+                <div style={{ display: 'grid', gridTemplateColumns: '140px 1fr 1fr', gap: '1rem' }}>
+                  <div className="form-group" style={{ margin: 0 }}>
+                    <label>Date *</label>
+                    <input
+                      type="date"
+                      className="input-control"
+                      value={challanDate}
+                      onChange={(e) => setChallanDate(e.target.value)}
+                      required
+                    />
+                  </div>
+                  <div className="form-group" style={{ margin: 0 }}>
+                    <label>Vehicle No</label>
+                    <input
+                      type="text"
+                      className="input-control"
+                      placeholder="e.g. DHA-11-8976"
+                      value={vehicleNo}
+                      onChange={(e) => setVehicleNo(e.target.value)}
+                    />
+                  </div>
+                  <div className="form-group" style={{ margin: 0 }}>
+                    <label>Driver Name & Phone</label>
+                    <input
+                      type="text"
+                      className="input-control"
+                      placeholder="e.g. Sohel (017xxxxxxxx)"
+                      value={driverName}
+                      onChange={(e) => setDriverName(e.target.value)}
+                    />
+                  </div>
+                </div>
+
+                {/* Product Items Table */}
+                <div style={{ marginTop: '0.5rem' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.4rem' }}>
+                    <label style={{ fontWeight: 700, fontSize: '0.85rem' }}>Products *</label>
+                    <button type="button" className="btn btn-secondary btn-sm" onClick={addItemRow} style={{ padding: '0.25rem 0.6rem', fontSize: '0.78rem' }}>
+                      <Plus size={13} />
+                      <span>Add Product</span>
+                    </button>
+                  </div>
+
+                  <div className="table-container" style={{ border: '1px solid var(--border-color)', borderRadius: '6px', maxHeight: '240px', overflowY: 'auto' }}>
+                    <table>
+                      <thead>
+                        <tr>
+                          <th style={{ width: '30px', textAlign: 'center' }}>#</th>
+                          <th>Product *</th>
+                          <th style={{ width: '90px', textAlign: 'right' }}>Qty *</th>
+                          <th style={{ width: '120px', textAlign: 'right' }}>Price (৳)</th>
+                          <th style={{ width: '120px', textAlign: 'right' }}>Total (৳)</th>
+                          <th style={{ width: '35px' }}></th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {challanItems.map((item, idx) => (
+                          <tr key={idx}>
+                            <td style={{ textAlign: 'center', color: 'var(--text-muted)' }}>{idx + 1}</td>
+                            <td>
+                              <select
+                                className="input-control"
+                                value={item.productId}
+                                onChange={(e) => updateItemRow(idx, 'productId', e.target.value)}
+                                required
+                                style={{ fontSize: '0.82rem', padding: '0.3rem 0.5rem' }}
+                              >
+                                <option value="">-- Choose Product --</option>
+                                {catalogProducts.map((p) => (
+                                  <option key={p.id} value={p.id}>
+                                    {p.sku} - {p.name} {p.category ? `[${p.category}]` : ''}
+                                  </option>
+                                ))}
+                              </select>
+                            </td>
+                            <td>
+                              <input
+                                type="number"
+                                className="input-control"
+                                min="1"
+                                value={item.quantity}
+                                onChange={(e) => updateItemRow(idx, 'quantity', e.target.value)}
+                                style={{ textAlign: 'right', fontSize: '0.82rem', padding: '0.3rem 0.5rem' }}
+                                required
+                              />
+                            </td>
+                            <td>
+                              <input
+                                type="number"
+                                step="0.01"
+                                className="input-control"
+                                min="0"
+                                value={item.unitPrice}
+                                onChange={(e) => updateItemRow(idx, 'unitPrice', e.target.value)}
+                                style={{ textAlign: 'right', fontSize: '0.82rem', padding: '0.3rem 0.5rem' }}
+                                required
+                              />
+                            </td>
+                            <td style={{ textAlign: 'right', fontWeight: 700, fontFamily: 'Outfit, sans-serif' }}>
+                              ৳{(item.totalPrice || 0).toFixed(2)}
+                            </td>
+                            <td style={{ textAlign: 'center' }}>
+                              {challanItems.length > 1 && (
+                                <button
+                                  type="button"
+                                  className="btn btn-secondary btn-sm"
+                                  onClick={() => removeItemRow(idx)}
+                                  style={{ padding: '0.2rem 0.4rem', border: 'none', color: 'var(--danger)' }}
+                                >
+                                  ✕
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {/* Grand Total Bar */}
+                  <div
+                    style={{
+                      display: 'flex',
+                      justifyContent: 'flex-end',
+                      alignItems: 'center',
+                      gap: '1rem',
+                      marginTop: '0.75rem',
+                      padding: '0.65rem 1rem',
+                      backgroundColor: '#f8fafc',
+                      borderRadius: '6px',
+                      border: '1px solid var(--border-color)',
+                    }}
+                  >
+                    <span style={{ fontWeight: 600, fontSize: '0.88rem' }}>Total Amount:</span>
+                    <span style={{ fontSize: '1.2rem', fontWeight: 800, color: 'var(--primary)', fontFamily: 'Outfit, sans-serif' }}>
+                      ৳{getNewChallanGrandTotal().toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label>Notes</label>
+                  <input
+                    type="text"
+                    className="input-control"
+                    placeholder="e.g. Any notes or instructions..."
+                    value={notes}
+                    onChange={(e) => setNotes(e.target.value)}
+                  />
+                </div>
+              </div>
+
+              <div className="modal-footer">
+                <button type="button" className="btn btn-secondary" onClick={() => setShowCreateModal(false)}>
+                  Cancel
+                </button>
+                <button type="submit" className="btn btn-primary" disabled={isSubmittingChallan}>
+                  {isSubmittingChallan ? 'Creating...' : 'Create Challan'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* PAYMENT / SETTLEMENT MODAL */}
+      {showPaymentModal && activeChallan && (
+        <div className="modal-overlay">
+          <div className="modal-content" style={{ maxWidth: '480px', width: '100%' }}>
+            <div className="modal-header">
+              <h3 className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <CreditCard size={18} />
+                <span>{isFactoryPerspective ? 'Receive Payment from Branch' : 'Submit Payment to Factory'}</span>
+              </h3>
+              <button className="btn btn-secondary btn-sm" onClick={() => setShowPaymentModal(false)} style={{ borderRadius: '50%', padding: '0.4rem', border: 'none' }}>
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleRecordPayment}>
+              <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                {/* Summary Box */}
+                <div style={{ backgroundColor: '#f8fafc', padding: '0.85rem', borderRadius: '6px', border: '1px solid var(--border-color)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.35rem' }}>
+                    <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Challan:</span>
+                    <span style={{ fontWeight: 700, fontFamily: 'monospace', color: 'var(--primary)' }}>{activeChallan.challan_no}</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.35rem' }}>
+                    <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                      {isFactoryPerspective ? 'Branch (Payer):' : 'Factory (Receiver):'}
+                    </span>
+                    <span style={{ fontWeight: 600 }}>
+                      {isFactoryPerspective ? `🏪 ${activeChallan.to_branch?.name}` : `🏭 ${activeChallan.from_branch?.name || 'Factory'}`}
+                    </span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px dashed var(--border-color)', paddingTop: '0.35rem', marginTop: '0.35rem' }}>
+                    <span style={{ fontSize: '0.85rem', fontWeight: 700 }}>
+                      {isFactoryPerspective ? 'Current Receivable Due:' : 'Current Payable Due:'}
+                    </span>
+                    <span style={{ fontSize: '1.05rem', fontWeight: 800, color: '#dc2626', fontFamily: 'Outfit, sans-serif' }}>
+                      ৳{parseFloat(activeChallan.due_amount).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label>Amount (৳) *</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0.01"
+                    max={parseFloat(activeChallan.due_amount)}
+                    className="input-control"
+                    value={payAmount}
+                    onChange={(e) => setPayAmount(e.target.value)}
+                    required
+                    style={{ fontSize: '1.1rem', fontWeight: 700, fontFamily: 'Outfit, sans-serif' }}
+                  />
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                  <div className="form-group" style={{ margin: 0 }}>
+                    <label>Payment Method *</label>
+                    <select className="input-control" value={payMethod} onChange={(e) => setPayMethod(e.target.value)}>
+                      <option value="cash">💵 Cash (Driver/Handover)</option>
+                      <option value="bank">🏦 Bank Deposit / Transfer</option>
+                      <option value="mobile_banking">📱 bKash / Nagad</option>
+                    </select>
+                  </div>
+                  <div className="form-group" style={{ margin: 0 }}>
+                    <label>Date *</label>
+                    <input type="date" className="input-control" value={payDate} onChange={(e) => setPayDate(e.target.value)} required />
+                  </div>
+                </div>
+
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label>{isFactoryPerspective ? 'Trx ID / Ref No (Optional)' : 'Trx ID / Ref No *'}</label>
+                  <input
+                    type="text"
+                    className="input-control"
+                    placeholder="e.g. Deposit Slip #1042 or bKash TrxID"
+                    value={payReference}
+                    onChange={(e) => setPayReference(e.target.value)}
+                    required={!isOwner && !isFactoryPerspective}
+                  />
+                </div>
+
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label>Notes</label>
+                  <input
+                    type="text"
+                    className="input-control"
+                    placeholder={isFactoryPerspective ? "e.g. Received via cash handover / bank deposit" : "e.g. Paid from daily sales remittance"}
+                    value={payNotes}
+                    onChange={(e) => setPayNotes(e.target.value)}
+                  />
+                </div>
+              </div>
+
+              <div className="modal-footer">
+                <button type="button" className="btn btn-secondary" onClick={() => setShowPaymentModal(false)}>
+                  Cancel
+                </button>
+                <button type="submit" className="btn btn-primary" disabled={isSubmittingPayment}>
+                  {isSubmittingPayment 
+                    ? (isFactoryPerspective ? 'Recording...' : 'Submitting...') 
+                    : (isFactoryPerspective ? 'Record Received Payment' : 'Submit Payment')}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* REJECT PAYMENT MODAL (For Owner) */}
+      {showRejectModal && selectedPaymentForAction && (
+        <div className="modal-overlay">
+          <div className="modal-content" style={{ maxWidth: '420px', width: '100%' }}>
+            <div className="modal-header">
+              <h3 className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#dc2626' }}>
+                <AlertTriangle size={18} />
+                <span>Reject Payment Request</span>
+              </h3>
+              <button className="btn btn-secondary btn-sm" onClick={() => setShowRejectModal(false)} style={{ borderRadius: '50%', padding: '0.4rem', border: 'none' }}>
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleConfirmRejection}>
+              <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                <p style={{ margin: 0, fontSize: '0.85rem' }}>
+                  Are you sure you want to reject payment <strong>#{selectedPaymentForAction.payment_no}</strong> (৳{parseFloat(selectedPaymentForAction.amount).toLocaleString()}) from <strong>{selectedPaymentForAction.branch?.name}</strong>?
+                </p>
+
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label>Reason for Rejection *</label>
+                  <textarea
+                    className="input-control"
+                    rows="3"
+                    placeholder="e.g. Trx ID not found in bank statement, amount mismatch..."
+                    value={rejectionReason}
+                    onChange={(e) => setRejectionReason(e.target.value)}
+                    required
+                  />
+                </div>
+              </div>
+
+              <div className="modal-footer">
+                <button type="button" className="btn btn-secondary" onClick={() => setShowRejectModal(false)}>
+                  Cancel
+                </button>
+                <button type="submit" className="btn btn-primary" style={{ backgroundColor: '#dc2626', borderColor: '#b91c1c' }}>
+                  Confirm Rejection
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ITEMS DETAILS MODAL */}
+      {showDetailModal && activeChallan && (
+        <div className="modal-overlay">
+          <div className="modal-content" style={{ maxWidth: '650px', width: '100%' }}>
+            <div className="modal-header">
+              <h3 className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <Layers size={18} />
+                <span>Challan #{activeChallan.challan_no} Items</span>
+              </h3>
+              <button className="btn btn-secondary btn-sm" onClick={() => setShowDetailModal(false)} style={{ borderRadius: '50%', padding: '0.4rem', border: 'none' }}>
+                ✕
+              </button>
+            </div>
+            <div className="modal-body" style={{ padding: '1.25rem' }}>
+              <div className="table-container">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>#</th>
+                      <th>Product SKU & Name</th>
+                      <th style={{ textAlign: 'right' }}>Dispatched</th>
+                      <th style={{ textAlign: 'right' }}>Sold</th>
+                      <th style={{ textAlign: 'right' }}>Remaining</th>
+                      <th style={{ textAlign: 'right' }}>Rate (৳)</th>
+                      <th style={{ textAlign: 'right' }}>Total (৳)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(activeChallan.items || []).map((it, idx) => (
+                      <tr key={it.id || idx}>
+                        <td>{idx + 1}</td>
+                        <td>
+                          <div style={{ fontWeight: 600 }}>{it.product?.name}</div>
+                          <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>{it.product?.sku}</div>
+                        </td>
+                        <td style={{ textAlign: 'right', fontWeight: 600 }}>{it.dispatched_qty}</td>
+                        <td style={{ textAlign: 'right', color: '#16a34a', fontWeight: 600 }}>{it.sold_qty || 0}</td>
+                        <td style={{ textAlign: 'right', color: 'var(--text-muted)' }}>{it.remaining_qty || 0}</td>
+                        <td style={{ textAlign: 'right' }}>৳{parseFloat(it.unit_transfer_price).toFixed(2)}</td>
+                        <td style={{ textAlign: 'right', fontWeight: 700 }}>৳{parseFloat(it.total_price).toFixed(2)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button type="button" className="btn btn-primary" onClick={() => setShowDetailModal(false)}>
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* PRINTABLE DELIVERY CHALLAN (Visible on Print) */}
+      {showPrintModal && activeChallan && (
+        <div className="print-only" style={{ padding: '2rem', fontFamily: 'sans-serif', color: '#000' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '2px solid #000', paddingBottom: '1rem', marginBottom: '1.5rem' }}>
+            <div>
+              <h1 style={{ margin: 0, fontSize: '1.6rem', textTransform: 'uppercase' }}>ALMAS ACCESSORIES LTD</h1>
+              <p style={{ margin: '0.2rem 0', fontSize: '0.9rem' }}>Central Factory & Production Hub</p>
+              <p style={{ margin: '0.2rem 0', fontSize: '0.85rem' }}>Chittagong / Dhaka, Bangladesh</p>
+            </div>
+            <div style={{ textAlign: 'right' }}>
+              <h2 style={{ margin: 0, fontSize: '1.4rem', color: '#2563eb' }}>DELIVERY CHALLAN</h2>
+              <p style={{ margin: '0.2rem 0', fontWeight: 'bold' }}>Challan No: {activeChallan.challan_no}</p>
+              <p style={{ margin: '0.2rem 0' }}>Date: {new Date(activeChallan.challan_date).toLocaleDateString()}</p>
+            </div>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2rem', marginBottom: '1.5rem', backgroundColor: '#f8fafc', padding: '1rem', border: '1px solid #e2e8f0' }}>
+            <div>
+              <p style={{ margin: 0, fontWeight: 'bold', textTransform: 'uppercase', fontSize: '0.8rem', color: '#64748b' }}>Delivered From (Origin):</p>
+              <p style={{ margin: '0.2rem 0', fontWeight: 'bold', fontSize: '1rem' }}>🏭 {activeChallan.from_branch?.name || 'Central Factory'}</p>
+            </div>
+            <div>
+              <p style={{ margin: 0, fontWeight: 'bold', textTransform: 'uppercase', fontSize: '0.8rem', color: '#64748b' }}>Delivered To (Destination):</p>
+              <p style={{ margin: '0.2rem 0', fontWeight: 'bold', fontSize: '1rem' }}>🏪 {activeChallan.to_branch?.name || 'Branch Outlet'}</p>
+            </div>
+          </div>
+
+          {activeChallan.vehicle_no && (
+            <div style={{ marginBottom: '1.5rem', padding: '0.75rem', border: '1px solid #cbd5e1' }}>
+              <strong>Transport:</strong> Vehicle #{activeChallan.vehicle_no} | <strong>Driver:</strong> {activeChallan.driver_name || 'N/A'}
+            </div>
+          )}
+
+          <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '1.5rem' }}>
+            <thead>
+              <tr style={{ backgroundColor: '#f1f5f9', borderBottom: '2px solid #cbd5e1' }}>
+                <th style={{ border: '1px solid #cbd5e1', padding: '8px', textAlign: 'left' }}>SL</th>
+                <th style={{ border: '1px solid #cbd5e1', padding: '8px', textAlign: 'left' }}>Product SKU & Description</th>
+                <th style={{ border: '1px solid #cbd5e1', padding: '8px', textAlign: 'right' }}>Dispatched Qty</th>
+                <th style={{ border: '1px solid #cbd5e1', padding: '8px', textAlign: 'right' }}>Transfer Rate (৳)</th>
+                <th style={{ border: '1px solid #cbd5e1', padding: '8px', textAlign: 'right' }}>Total Bill (৳)</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(activeChallan.items || []).map((it, idx) => (
+                <tr key={idx}>
+                  <td style={{ border: '1px solid #cbd5e1', padding: '8px', textAlign: 'center' }}>{idx + 1}</td>
+                  <td style={{ border: '1px solid #cbd5e1', padding: '8px' }}>
+                    <strong>{it.product?.sku}</strong> - {it.product?.name}
+                  </td>
+                  <td style={{ border: '1px solid #cbd5e1', padding: '8px', textAlign: 'right', fontWeight: 'bold' }}>
+                    {it.dispatched_qty} {it.product?.unit || 'pcs'}
+                  </td>
+                  <td style={{ border: '1px solid #cbd5e1', padding: '8px', textAlign: 'right' }}>
+                    ৳{parseFloat(it.unit_transfer_price).toFixed(2)}
+                  </td>
+                  <td style={{ border: '1px solid #cbd5e1', padding: '8px', textAlign: 'right', fontWeight: 'bold' }}>
+                    ৳{parseFloat(it.total_price).toFixed(2)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+            <tfoot>
+              <tr>
+                <td colSpan={4} style={{ border: '1px solid #cbd5e1', padding: '8px', textAlign: 'right', fontWeight: 'bold' }}>Grand Consignment Bill Total:</td>
+                <td style={{ border: '1px solid #cbd5e1', padding: '8px', textAlign: 'right', fontWeight: 'bold', fontSize: '1.1rem' }}>
+                  ৳{parseFloat(activeChallan.total_bill_amount).toFixed(2)}
+                </td>
+              </tr>
+            </tfoot>
+          </table>
+
+          {activeChallan.notes && (
+            <p style={{ fontSize: '0.9rem', marginBottom: '2rem' }}>
+              <strong>Remarks:</strong> {activeChallan.notes}
+            </p>
+          )}
+
+          {/* Signature Rows */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '4rem', paddingTop: '1rem' }}>
+            <div style={{ textAlign: 'center', width: '180px', borderTop: '1px solid #000' }}>
+              <p style={{ margin: '0.4rem 0', fontSize: '0.85rem' }}>Factory Dispatcher</p>
+            </div>
+            <div style={{ textAlign: 'center', width: '180px', borderTop: '1px solid #000' }}>
+              <p style={{ margin: '0.4rem 0', fontSize: '0.85rem' }}>Driver / Carrier</p>
+            </div>
+            <div style={{ textAlign: 'center', width: '180px', borderTop: '1px solid #000' }}>
+              <p style={{ margin: '0.4rem 0', fontSize: '0.85rem' }}>Branch Receiver</p>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

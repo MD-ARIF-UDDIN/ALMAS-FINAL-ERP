@@ -28,19 +28,19 @@ export default function Payments({ userProfile, branches, addToast }) {
 
   const [selectedBranchId, setSelectedBranchId] = useState(() => {
     if (userProfile?.role === 'owner') {
-      return branches.length > 0 ? branches[0].id : '';
+      const factoryBranch = branches.find((b) => b.is_factory || b.name?.toLowerCase().includes('factory'));
+      return factoryBranch ? factoryBranch.id : (branches.length > 0 ? branches[0].id : '');
     }
     return userProfile?.branch_id || (branches.length > 0 ? branches[0].id : '');
   });
 
   useEffect(() => {
-    if (!selectedBranchId) {
+    if (!selectedBranchId && branches.length > 0) {
       if (userProfile?.role === 'owner') {
-        if (branches.length > 0) {
-          setSelectedBranchId(branches[0].id);
-        }
+        const factoryBranch = branches.find((b) => b.is_factory || b.name?.toLowerCase().includes('factory'));
+        setSelectedBranchId(factoryBranch ? factoryBranch.id : branches[0].id);
       } else {
-        setSelectedBranchId(userProfile?.branch_id || (branches.length > 0 ? branches[0].id : ''));
+        setSelectedBranchId(userProfile?.branch_id || branches[0].id);
       }
     }
   }, [branches, userProfile, selectedBranchId]);
@@ -263,7 +263,7 @@ export default function Payments({ userProfile, branches, addToast }) {
               >
                 {branches.map((b) => (
                   <option key={b.id} value={b.id}>
-                    {b.name}
+                    {b.is_factory ? `🏭 ${b.name}` : `🏪 ${b.name}`}
                   </option>
                 ))}
               </select>

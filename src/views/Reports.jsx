@@ -23,7 +23,10 @@ export default function Reports({ userProfile, branches }) {
   const myBranchId = userProfile?.branch_id;
 
   const [selectedBranchId, setSelectedBranchId] = useState(() => {
-    if (role === 'owner') return 'all';
+    if (role === 'owner') {
+      const factoryBranch = branches.find((b) => b.is_factory || b.name?.toLowerCase().includes('factory'));
+      return factoryBranch ? factoryBranch.id : (branches.length > 0 ? branches[0].id : '');
+    }
     return myBranchId || (branches.length > 0 ? branches[0].id : '');
   });
 
@@ -121,11 +124,12 @@ export default function Reports({ userProfile, branches }) {
   const [activeAuditTab, setActiveAuditTab] = useState('sales'); // 'sales', 'purchases', 'expenses'
 
   useEffect(() => {
-    if (!selectedBranchId) {
+    if (!selectedBranchId && branches.length > 0) {
       if (role === 'owner') {
-        setSelectedBranchId('all');
+        const factoryBranch = branches.find((b) => b.is_factory || b.name?.toLowerCase().includes('factory'));
+        setSelectedBranchId(factoryBranch ? factoryBranch.id : branches[0].id);
       } else {
-        setSelectedBranchId(myBranchId || (branches.length > 0 ? branches[0].id : ''));
+        setSelectedBranchId(myBranchId || branches[0].id);
       }
     }
   }, [branches, userProfile, role, myBranchId, selectedBranchId]);
@@ -316,7 +320,7 @@ export default function Reports({ userProfile, branches }) {
                 <option value="all">All Branches</option>
                 {branches.map((b) => (
                   <option key={b.id} value={b.id}>
-                    {b.name}
+                    {b.is_factory ? `🏭 ${b.name}` : `🏪 ${b.name}`}
                   </option>
                 ))}
               </select>

@@ -15,6 +15,7 @@ import {
   LogOut,
   ChevronLeft,
   ChevronRight,
+  Truck,
 } from 'lucide-react';
 
 import { hasPermission } from '../utils/permissions';
@@ -38,6 +39,7 @@ export default function Sidebar({ userProfile, onLogout, branches, isOpen, setIs
     { id: 'contacts', name: 'eContacts', icon: Users, perm: 'contacts.view' },
     { id: 'products', name: 'eProduct', icon: Layers, perm: 'product.view' },
     { id: 'inventory', name: 'eInventory', icon: Package, perm: 'inventory.view' },
+    { id: 'challans', name: 'Branch Challans', icon: Truck, perm: 'inventory.view' },
     { id: 'sales', name: 'eSales', icon: ShoppingCart, perm: 'sales.view' },
     { id: 'purchases', name: 'ePurchases', icon: Download, perm: 'purchases.view' },
     { id: 'payments', name: 'ePayments', icon: CreditCard, perm: 'payments.view' },

@@ -13,6 +13,7 @@ import Payments from './views/Payments';
 import Expenses from './views/Expenses';
 import Reports from './views/Reports';
 import Contacts from './views/Contacts';
+import BranchChallans from './views/BranchChallans';
 import { Menu } from 'lucide-react';
 import logo from './assets/logo.svg';
 
@@ -178,12 +179,13 @@ function App() {
           <Route path="/users" element={<Users branches={branches} fetchBranches={fetchBranches} addToast={addToast} />} />
           <Route path="/products" element={<Product userProfile={userProfile} branches={branches} addToast={addToast} />} />
           <Route path="/inventory" element={<Inventory userProfile={userProfile} branches={branches} addToast={addToast} />} />
+          <Route path="/challans" element={<BranchChallans userProfile={userProfile} branches={branches} addToast={addToast} />} />
           <Route path="/sales" element={<Sales userProfile={userProfile} branches={branches} addToast={addToast} />} />
           <Route path="/purchases" element={<Purchases userProfile={userProfile} branches={branches} addToast={addToast} />} />
           <Route path="/payments" element={<Payments userProfile={userProfile} branches={branches} addToast={addToast} />} />
           <Route path="/expenses" element={<Expenses userProfile={userProfile} branches={branches} addToast={addToast} />} />
           <Route path="/reports" element={<Reports userProfile={userProfile} branches={branches} addToast={addToast} />} />
-          <Route path="/contacts" element={<Contacts userProfile={userProfile} addToast={addToast} />} />
+          <Route path="/contacts" element={<Contacts userProfile={userProfile} branches={branches} addToast={addToast} />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>

@@ -1,9 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { useLocation } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
 import { Search, ShoppingCart, Trash2, Printer, Plus, UserPlus, CreditCard } from 'lucide-react';
 import { TableLoading, LoadingBlock } from '../components/TableLoading';
 
 export default function Sales({ userProfile, branches, addToast }) {
+  const location = useLocation();
   const [products, setProducts] = useState([]);
   const [customers, setCustomers] = useState([]);
   const [cart, setCart] = useState([]);
@@ -13,6 +15,20 @@ export default function Sales({ userProfile, branches, addToast }) {
   // Sales History List & Modal state
   const [salesHistory, setSalesHistory] = useState([]);
   const [showPosModal, setShowPosModal] = useState(false);
+
+  useEffect(() => {
+    if (location.state?.openPos) {
+      setCart([]);
+      setSelectedCustomerId('');
+      setDiscount(0);
+      setTaxRate(0);
+      setPaidAmount('');
+      setReferenceNumber('');
+      setNotes('');
+      setShowPosModal(true);
+      window.history.replaceState({}, document.title);
+    }
+  }, [location.state]);
 
   // POS Search/Select
   const [customerType, setCustomerType] = useState('existing'); // 'existing' or 'new'
@@ -40,24 +56,25 @@ export default function Sales({ userProfile, branches, addToast }) {
 
   const [selectedBranchId, setSelectedBranchId] = useState(() => {
     if (userProfile?.role === 'owner') {
-      return branches.length > 0 ? branches[0].id : '';
+      const factoryBranch = branches.find((b) => b.is_factory || b.name?.toLowerCase().includes('factory'));
+      return factoryBranch ? factoryBranch.id : (branches.length > 0 ? branches[0].id : '');
     }
     return userProfile?.branch_id || (branches.length > 0 ? branches[0].id : '');
   });
 
   useEffect(() => {
-    if (!selectedBranchId) {
+    if (!selectedBranchId && branches.length > 0) {
       if (userProfile?.role === 'owner') {
-        if (branches.length > 0) {
-          setSelectedBranchId(branches[0].id);
-        }
+        const factoryBranch = branches.find((b) => b.is_factory || b.name?.toLowerCase().includes('factory'));
+        setSelectedBranchId(factoryBranch ? factoryBranch.id : branches[0].id);
       } else {
-        setSelectedBranchId(userProfile?.branch_id || (branches.length > 0 ? branches[0].id : ''));
+        setSelectedBranchId(userProfile?.branch_id || branches[0].id);
       }
     }
   }, [branches, userProfile, selectedBranchId]);
 
   const activeBranch = branches.find((b) => b.id === selectedBranchId);
+  const isFactory = Boolean(activeBranch?.is_factory || activeBranch?.name?.toLowerCase().includes('factory'));
 
   // Fetch customers on mount
   useEffect(() => {
@@ -70,7 +87,7 @@ export default function Sales({ userProfile, branches, addToast }) {
       fetchBranchInventory();
       fetchSalesHistory();
     }
-  }, [selectedBranchId]);
+  }, [selectedBranchId, isFactory]);
 
   const showMessage = (text, type) => {
     addToast(text, type === 'error' ? 'error' : type === 'success' ? 'success' : 'info');
@@ -80,25 +97,43 @@ export default function Sales({ userProfile, branches, addToast }) {
     if (!selectedBranchId) return;
     setLoadingInventory(true);
     try {
-      // Fetch products which have stock at this branch
-      const { data, error } = await supabase
-        .from('inventory')
-        .select(`
-          quantity,
-          product_id,
-          products (
-            id,
-            sku,
-            name,
-            sale_price,
-            category,
-            unit
-          )
-        `)
-        .eq('branch_id', selectedBranchId);
+      if (isFactory) {
+        // Factory sells direct make-to-order without inventory restrictions
+        const { data: prods, error } = await supabase
+          .from('products')
+          .select('id, sku, product_code, name, sale_price, purchase_price, category, description')
+          .order('name', { ascending: true });
 
-      if (error) throw error;
-      setProducts(data || []);
+        if (error) throw error;
+        const mapped = (prods || []).map((p) => ({
+          product_id: p.id,
+          quantity: 999999, // indicator of unlimited factory make-and-sell
+          is_factory: true,
+          products: p,
+        }));
+        setProducts(mapped);
+      } else {
+        const { data, error } = await supabase
+          .from('inventory')
+          .select(`
+            quantity,
+            product_id,
+            products (
+              id,
+              sku,
+              product_code,
+              name,
+              sale_price,
+              purchase_price,
+              category,
+              description
+            )
+          `)
+          .eq('branch_id', selectedBranchId);
+
+        if (error) throw error;
+        setProducts(data || []);
+      }
     } catch (err) {
       console.error(err);
       showMessage('Failed to load branch product inventory.', 'error');
@@ -194,8 +229,7 @@ export default function Sales({ userProfile, branches, addToast }) {
     const existingCartItem = cart.find((item) => item.product.id === product.id);
 
     if (existingCartItem) {
-      // Check stock limit
-      if (existingCartItem.quantity >= invItem.quantity) {
+      if (!isFactory && existingCartItem.quantity >= invItem.quantity) {
         showMessage(`Cannot add more. Only ${invItem.quantity} units available in stock.`, 'error');
         return;
       }
@@ -207,11 +241,11 @@ export default function Sales({ userProfile, branches, addToast }) {
         )
       );
     } else {
-      if (invItem.quantity <= 0) {
+      if (!isFactory && invItem.quantity <= 0) {
         showMessage('Item is out of stock.', 'error');
         return;
       }
-      setCart([...cart, { product, quantity: 1, stockLimit: invItem.quantity }]);
+      setCart([...cart, { product, quantity: 1, stockLimit: isFactory ? 999999 : invItem.quantity }]);
     }
   };
 
@@ -224,7 +258,7 @@ export default function Sales({ userProfile, branches, addToast }) {
       cart.map((item) => {
         if (item.product.id === productId) {
           const newQty = item.quantity + amount;
-          if (newQty > item.stockLimit) {
+          if (!isFactory && newQty > item.stockLimit) {
             showMessage(`Only ${item.stockLimit} units available.`, 'error');
             return item;
           }
@@ -360,6 +394,44 @@ export default function Sales({ userProfile, branches, addToast }) {
       const { error: itemsError } = await supabase.from('sale_items').insert(saleItemsData);
       if (itemsError) throw itemsError;
 
+      // 2.1 FIFO deduction on branch_challan_items for this branch (tracks sold vs left on Challans)
+      if (!isFactory) {
+        for (const item of cart) {
+          try {
+            const { data: openChallanItems } = await supabase
+              .from('branch_challan_items')
+              .select('id, dispatched_qty, sold_qty, remaining_qty, challan_id, branch_challans!inner(to_branch_id)')
+              .eq('product_id', item.product.id)
+              .eq('branch_challans.to_branch_id', selectedBranchId)
+              .gt('remaining_qty', 0)
+              .order('created_at', { ascending: true });
+
+            if (openChallanItems && openChallanItems.length > 0) {
+              let qtyToDeduct = item.quantity;
+              for (const chItem of openChallanItems) {
+                if (qtyToDeduct <= 0) break;
+                const availableInChallan = chItem.remaining_qty;
+                const deductFromThis = Math.min(qtyToDeduct, availableInChallan);
+                const newSold = (chItem.sold_qty || 0) + deductFromThis;
+                const newRemaining = chItem.remaining_qty - deductFromThis;
+
+                await supabase
+                  .from('branch_challan_items')
+                  .update({
+                    sold_qty: newSold,
+                    remaining_qty: newRemaining,
+                  })
+                  .eq('id', chItem.id);
+
+                qtyToDeduct -= deductFromThis;
+              }
+            }
+          } catch (challanErr) {
+            console.error('Error updating challan item remaining qty:', challanErr);
+          }
+        }
+      }
+
       // 3. Register payment if initial payment is made
       if (initialPaid > 0) {
         const { error: paymentError } = await supabase.from('payments').insert([
@@ -461,7 +533,7 @@ export default function Sales({ userProfile, branches, addToast }) {
               >
                 {branches.map((b) => (
                   <option key={b.id} value={b.id}>
-                    {b.name}
+                    {b.is_factory ? `🏭 ${b.name}` : `🏪 ${b.name}`}
                   </option>
                 ))}
               </select>

@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react';
+import { useLocation } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
 import { Download, Plus, Search, Trash2, UserPlus, CreditCard } from 'lucide-react';
 import { TableLoading } from '../components/TableLoading';
 
 export default function Purchases({ userProfile, branches, addToast }) {
+  const location = useLocation();
   const [purchases, setPurchases] = useState([]);
   const [suppliers, setSuppliers] = useState([]);
   const [catalogProducts, setCatalogProducts] = useState([]);
@@ -17,6 +19,13 @@ export default function Purchases({ userProfile, branches, addToast }) {
   const [loadingDetails, setLoadingDetails] = useState(false);
   const [showPurchaseModal, setShowPurchaseModal] = useState(false);
   const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (location.state?.openNewPurchase) {
+      setShowPurchaseModal(true);
+      window.history.replaceState({}, document.title);
+    }
+  }, [location.state]);
 
   // Add Purchase Form states
   const [supplierType, setSupplierType] = useState('existing'); // 'existing' or 'new'
@@ -38,19 +47,19 @@ export default function Purchases({ userProfile, branches, addToast }) {
 
   const [selectedBranchId, setSelectedBranchId] = useState(() => {
     if (userProfile?.role === 'owner') {
-      return branches.length > 0 ? branches[0].id : '';
+      const factoryBranch = branches.find((b) => b.is_factory || b.name?.toLowerCase().includes('factory'));
+      return factoryBranch ? factoryBranch.id : (branches.length > 0 ? branches[0].id : '');
     }
     return userProfile?.branch_id || (branches.length > 0 ? branches[0].id : '');
   });
 
   useEffect(() => {
-    if (!selectedBranchId) {
+    if (!selectedBranchId && branches.length > 0) {
       if (userProfile?.role === 'owner') {
-        if (branches.length > 0) {
-          setSelectedBranchId(branches[0].id);
-        }
+        const factoryBranch = branches.find((b) => b.is_factory || b.name?.toLowerCase().includes('factory'));
+        setSelectedBranchId(factoryBranch ? factoryBranch.id : branches[0].id);
       } else {
-        setSelectedBranchId(userProfile?.branch_id || (branches.length > 0 ? branches[0].id : ''));
+        setSelectedBranchId(userProfile?.branch_id || branches[0].id);
       }
     }
   }, [branches, userProfile, selectedBranchId]);
@@ -399,7 +408,7 @@ export default function Purchases({ userProfile, branches, addToast }) {
               >
                 {branches.map((b) => (
                   <option key={b.id} value={b.id}>
-                    {b.name}
+                    {b.is_factory ? `🏭 ${b.name}` : `🏪 ${b.name}`}
                   </option>
                 ))}
               </select>

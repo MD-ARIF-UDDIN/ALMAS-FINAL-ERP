@@ -3,7 +3,7 @@ import { supabase } from '../supabaseClient';
 import { Users, Plus, Search, Trash2, Edit, Building, Mail, Phone, MapPin, Receipt, History, DollarSign } from 'lucide-react';
 import { TableLoading } from '../components/TableLoading';
 
-export default function Contacts({ userProfile, addToast }) {
+export default function Contacts({ userProfile, branches = [], addToast }) {
   const [contacts, setContacts] = useState([]);
   const [sales, setSales] = useState([]);
   const [purchases, setPurchases] = useState([]);
@@ -18,9 +18,23 @@ export default function Contacts({ userProfile, addToast }) {
   const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
   const [address, setAddress] = useState('');
+  const [branchId, setBranchId] = useState(() => {
+    if (userProfile?.role === 'owner') {
+      const factoryBranch = branches.find((b) => b.is_factory || b.name?.toLowerCase().includes('factory'));
+      return factoryBranch ? factoryBranch.id : (branches.length > 0 ? branches[0].id : '');
+    }
+    return userProfile?.branch_id || (branches.length > 0 ? branches[0].id : '');
+  });
 
-  // Search filter
+  // Search and Branch filters
   const [searchQuery, setSearchQuery] = useState('');
+  const [filterBranchId, setFilterBranchId] = useState(() => {
+    if (userProfile?.role === 'owner') {
+      const factoryBranch = branches.find((b) => b.is_factory || b.name?.toLowerCase().includes('factory'));
+      return factoryBranch ? factoryBranch.id : (branches.length > 0 ? branches[0].id : '');
+    }
+    return userProfile?.branch_id || (branches.length > 0 ? branches[0].id : '');
+  });
 
   // History Modal states
   const [showHistoryModal, setShowHistoryModal] = useState(false);
@@ -35,6 +49,17 @@ export default function Contacts({ userProfile, addToast }) {
   useEffect(() => {
     fetchContacts();
   }, []);
+
+  useEffect(() => {
+    if (!filterBranchId && branches.length > 0) {
+      if (userProfile?.role === 'owner') {
+        const factoryBranch = branches.find((b) => b.is_factory || b.name?.toLowerCase().includes('factory'));
+        setFilterBranchId(factoryBranch ? factoryBranch.id : branches[0].id);
+      } else {
+        setFilterBranchId(userProfile?.branch_id || branches[0].id);
+      }
+    }
+  }, [branches, userProfile, filterBranchId]);
 
   const showMessage = (text, type) => {
     addToast(text, type === 'error' ? 'error' : type === 'success' ? 'success' : 'info');
@@ -51,12 +76,12 @@ export default function Contacts({ userProfile, addToast }) {
 
       const { data: salesData, error: salesError } = await supabase
         .from('sales')
-        .select('id, customer_id, net_amount, paid_amount');
+        .select('id, customer_id, branch_id, net_amount, paid_amount');
       if (salesError) throw salesError;
 
       const { data: purchasesData, error: purchasesError } = await supabase
         .from('purchases')
-        .select('id, supplier_id, net_amount, paid_amount');
+        .select('id, supplier_id, branch_id, net_amount, paid_amount');
       if (purchasesError) throw purchasesError;
 
       setContacts(contactsData || []);
@@ -89,33 +114,46 @@ export default function Contacts({ userProfile, addToast }) {
 
     setLoading(true);
     try {
+      const payload = {
+        name: name.trim(),
+        phone: phone.trim() || null,
+        email: email.trim() || null,
+        address: address.trim() || null,
+      };
+      if (branchId) {
+        payload.branch_id = branchId;
+      }
+
       if (isEditing) {
-        const { error } = await supabase
+        let updateRes = await supabase
           .from('contacts')
-          .update({
-            name: name.trim(),
-            phone: phone.trim() || null,
-            email: email.trim() || null,
-            address: address.trim() || null,
-          })
+          .update(payload)
           .eq('id', editingId);
 
-        if (error) throw error;
+        if (updateRes.error && updateRes.error.message?.includes('branch_id')) {
+          delete payload.branch_id;
+          updateRes = await supabase
+            .from('contacts')
+            .update(payload)
+            .eq('id', editingId);
+        }
+
+        if (updateRes.error) throw updateRes.error;
         showMessage('Contact profile updated successfully!', 'success');
       } else {
-        const { error } = await supabase
+        payload.type = activeTab;
+        let insertRes = await supabase
           .from('contacts')
-          .insert([
-            {
-              name: name.trim(),
-              type: activeTab,
-              phone: phone.trim() || null,
-              email: email.trim() || null,
-              address: address.trim() || null,
-            },
-          ]);
+          .insert([payload]);
 
-        if (error) throw error;
+        if (insertRes.error && insertRes.error.message?.includes('branch_id')) {
+          delete payload.branch_id;
+          insertRes = await supabase
+            .from('contacts')
+            .insert([payload]);
+        }
+
+        if (insertRes.error) throw insertRes.error;
         showMessage('New contact added successfully!', 'success');
       }
 
@@ -137,6 +175,7 @@ export default function Contacts({ userProfile, addToast }) {
     setPhone(contact.phone || '');
     setEmail(contact.email || '');
     setAddress(contact.address || '');
+    setBranchId(contact.branch_id || getContactBranch(contact)?.id || '');
     setShowCreateModal(true);
   };
 
@@ -162,6 +201,20 @@ export default function Contacts({ userProfile, addToast }) {
     }
   };
 
+  const getContactBranch = (contact) => {
+    if (contact.branch_id) {
+      return branches.find((b) => b.id === contact.branch_id);
+    }
+    if (contact.type === 'customer') {
+      const match = sales.find((s) => s.customer_id === contact.id && s.branch_id);
+      if (match) return branches.find((b) => b.id === match.branch_id);
+    } else {
+      const match = purchases.find((p) => p.supplier_id === contact.id && p.branch_id);
+      if (match) return branches.find((b) => b.id === match.branch_id);
+    }
+    return null;
+  };
+
   const resetForm = () => {
     setIsEditing(false);
     setEditingId(null);
@@ -169,6 +222,12 @@ export default function Contacts({ userProfile, addToast }) {
     setPhone('');
     setEmail('');
     setAddress('');
+    if (userProfile?.role === 'owner') {
+      const factoryBranch = branches.find((b) => b.is_factory || b.name?.toLowerCase().includes('factory'));
+      setBranchId(factoryBranch ? factoryBranch.id : (branches.length > 0 ? branches[0].id : ''));
+    } else {
+      setBranchId(userProfile?.branch_id || (branches.length > 0 ? branches[0].id : ''));
+    }
   };
 
   const getContactBalance = (contact) => {
@@ -254,13 +313,26 @@ export default function Contacts({ userProfile, addToast }) {
     return 'N/A';
   };
 
-  const filteredContacts = contacts.filter(
-    (c) =>
-      c.type === activeTab &&
-      (c.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        (c.phone && c.phone.toLowerCase().includes(searchQuery.toLowerCase())) ||
-        (c.email && c.email.toLowerCase().includes(searchQuery.toLowerCase())))
-  );
+  const filteredContacts = contacts.filter((c) => {
+    if (c.type !== activeTab) return false;
+    const matchesSearch =
+      c.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (c.phone && c.phone.toLowerCase().includes(searchQuery.toLowerCase())) ||
+      (c.email && c.email.toLowerCase().includes(searchQuery.toLowerCase()));
+    if (!matchesSearch) return false;
+
+    if (role === 'owner') {
+      if (filterBranchId && filterBranchId !== 'all') {
+        const b = getContactBranch(c);
+        if (b?.id !== filterBranchId) return false;
+      }
+    } else {
+      // Branch Manager and staff strictly see only their own branch contacts
+      const b = getContactBranch(c);
+      if (b?.id !== userProfile?.branch_id) return false;
+    }
+    return true;
+  });
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
@@ -281,8 +353,6 @@ export default function Contacts({ userProfile, addToast }) {
           </button>
         </div>
       </div>
-
-
 
       {/* Tab Controls */}
       <div style={{ display: 'flex', borderBottom: '1px solid var(--border-color)', gap: '1rem' }}>
@@ -310,9 +380,9 @@ export default function Contacts({ userProfile, addToast }) {
 
       {/* Directory List occupying full width */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-        {/* Search bar */}
-        <div className="card" style={{ padding: '0.75rem 1rem' }}>
-          <div style={{ position: 'relative' }}>
+        {/* Search bar & Branch filter */}
+        <div className="card" style={{ padding: '0.75rem 1rem', display: 'flex', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}>
+          <div style={{ position: 'relative', flex: 1, minWidth: '220px' }}>
             <Search size={14} style={{ position: 'absolute', left: '0.75rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
             <input
               type="text"
@@ -323,6 +393,42 @@ export default function Contacts({ userProfile, addToast }) {
               onChange={(e) => setSearchQuery(e.target.value)}
             />
           </div>
+          {role === 'owner' ? (
+            branches.length > 0 && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+                <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>Branch:</span>
+                <select
+                  className="input-control"
+                  value={filterBranchId}
+                  onChange={(e) => setFilterBranchId(e.target.value)}
+                  style={{ width: '180px', padding: '0.35rem 0.6rem', fontSize: '0.82rem' }}
+                >
+                  <option value="all">All Branches</option>
+                  {branches.map((b) => (
+                    <option key={b.id} value={b.id}>
+                      {b.is_factory ? `🏭 ${b.name}` : `🏪 ${b.name}`}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )
+          ) : (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+              <span 
+                className="badge" 
+                style={{ 
+                  backgroundColor: '#e0f2fe', 
+                  color: '#0369a1', 
+                  border: '1px solid #bae6fd', 
+                  fontSize: '0.78rem', 
+                  fontWeight: 600,
+                  padding: '0.35rem 0.65rem'
+                }}
+              >
+                🏪 {branches.find(b => b.id === userProfile?.branch_id)?.name || 'My Branch'}
+              </span>
+            </div>
+          )}
         </div>
 
         {/* Table list */}
@@ -332,6 +438,7 @@ export default function Contacts({ userProfile, addToast }) {
               <tr>
                 <th>SL</th>
                 <th>Name / Company</th>
+                <th>Branch</th>
                 <th>Contact Info</th>
                 <th>Outstanding Balance</th>
                 <th style={{ width: '120px', textAlign: 'center' }}>Actions</th>
@@ -339,10 +446,10 @@ export default function Contacts({ userProfile, addToast }) {
             </thead>
             <tbody>
               {loading ? (
-                <TableLoading colSpan={5} message="Fetching contacts records..." />
+                <TableLoading colSpan={6} message="Fetching contacts records..." />
               ) : filteredContacts.length === 0 ? (
                 <tr>
-                  <td colSpan="5" style={{ textAlign: 'center', padding: '2rem' }}>
+                  <td colSpan="6" style={{ textAlign: 'center', padding: '2rem' }}>
                     No contacts found matching the filters.
                   </td>
                 </tr>
@@ -350,6 +457,7 @@ export default function Contacts({ userProfile, addToast }) {
                 filteredContacts.map((c, index) => {
                   const balance = getContactBalance(c);
                   const isCustomer = c.type === 'customer';
+                  const br = getContactBranch(c);
                   return (
                     <tr key={c.id}>
                       <td>{index + 1}</td>
@@ -358,6 +466,27 @@ export default function Contacts({ userProfile, addToast }) {
                         <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
                           Added on {new Date(c.created_at).toLocaleDateString()}
                         </div>
+                      </td>
+                      <td>
+                        {br ? (
+                          <span 
+                            className="badge"
+                            style={{ 
+                              backgroundColor: br.is_factory ? '#fef3c7' : '#e0f2fe',
+                              color: br.is_factory ? '#92400e' : '#0369a1',
+                              border: br.is_factory ? '1px solid #fde68a' : '1px solid #bae6fd',
+                              fontSize: '0.74rem',
+                              fontWeight: 600,
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '0.25rem'
+                            }}
+                          >
+                            {br.is_factory ? '🏭' : '🏪'} {br.name}
+                          </span>
+                        ) : (
+                          <span style={{ color: 'var(--text-muted)', fontSize: '0.78rem' }}>Global / Central</span>
+                        )}
                       </td>
                       <td>
                         {c.phone && (
@@ -505,6 +634,37 @@ export default function Contacts({ userProfile, addToast }) {
                     />
                   </div>
                 </div>
+
+                {role === 'owner' ? (
+                  branches.length > 0 && (
+                    <div className="form-group">
+                      <label>Associated Branch</label>
+                      <select
+                        className="input-control"
+                        value={branchId}
+                        onChange={(e) => setBranchId(e.target.value)}
+                      >
+                        <option value="">-- Global / All Branches --</option>
+                        {branches.map((b) => (
+                          <option key={b.id} value={b.id}>
+                            {b.is_factory ? `🏭 ${b.name}` : `🏪 ${b.name}`}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )
+                ) : (
+                  <div className="form-group">
+                    <label>Branch</label>
+                    <input
+                      type="text"
+                      className="input-control"
+                      value={`🏪 ${branches.find(b => b.id === userProfile?.branch_id)?.name || 'Assigned Branch'}`}
+                      disabled
+                      style={{ backgroundColor: '#f1f5f9', cursor: 'not-allowed' }}
+                    />
+                  </div>
+                )}
               </div>
               <div className="modal-footer">
                 <button 

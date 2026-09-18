@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react';
+import { useLocation } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
 import { Plus, Search, Trash2, Receipt, CreditCard } from 'lucide-react';
 import { TableLoading } from '../components/TableLoading';
 
 export default function Expenses({ userProfile, branches, addToast }) {
+  const location = useLocation();
   const [expenses, setExpenses] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -16,24 +18,31 @@ export default function Expenses({ userProfile, branches, addToast }) {
   const [paymentMethod, setPaymentMethod] = useState('cash');
   const [description, setDescription] = useState('');
 
+  useEffect(() => {
+    if (location.state?.openCreateExpense) {
+      setShowCreateModal(true);
+      window.history.replaceState({}, document.title);
+    }
+  }, [location.state]);
+
   // Search/Filter states
   const [searchQuery, setSearchQuery] = useState('');
 
   const [selectedBranchId, setSelectedBranchId] = useState(() => {
     if (userProfile?.role === 'owner') {
-      return branches.length > 0 ? branches[0].id : '';
+      const factoryBranch = branches.find((b) => b.is_factory || b.name?.toLowerCase().includes('factory'));
+      return factoryBranch ? factoryBranch.id : (branches.length > 0 ? branches[0].id : '');
     }
     return userProfile?.branch_id || (branches.length > 0 ? branches[0].id : '');
   });
 
   useEffect(() => {
-    if (!selectedBranchId) {
+    if (!selectedBranchId && branches.length > 0) {
       if (userProfile?.role === 'owner') {
-        if (branches.length > 0) {
-          setSelectedBranchId(branches[0].id);
-        }
+        const factoryBranch = branches.find((b) => b.is_factory || b.name?.toLowerCase().includes('factory'));
+        setSelectedBranchId(factoryBranch ? factoryBranch.id : branches[0].id);
       } else {
-        setSelectedBranchId(userProfile?.branch_id || (branches.length > 0 ? branches[0].id : ''));
+        setSelectedBranchId(userProfile?.branch_id || branches[0].id);
       }
     }
   }, [branches, userProfile, selectedBranchId]);
@@ -213,7 +222,7 @@ export default function Expenses({ userProfile, branches, addToast }) {
               >
                 {branches.map((b) => (
                   <option key={b.id} value={b.id}>
-                    {b.name}
+                    {b.is_factory ? `🏭 ${b.name}` : `🏪 ${b.name}`}
                   </option>
                 ))}
               </select>

@@ -24,7 +24,8 @@ import {
   CreditCard,
   Users as UsersIcon,
   BarChart3,
-  ArrowRightLeft
+  ArrowRightLeft,
+  Trash2
 } from 'lucide-react';
 import { TableLoading } from '../components/TableLoading';
 import {
@@ -42,9 +43,14 @@ import {
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
 
-// Create a non-session-persisting client so creating users doesn't log the owner out
+// Create a non-session-persisting client with isolated storage so creating users doesn't trigger GoTrue warnings or log the owner out
 const authCreatorClient = createClient(supabaseUrl, supabaseAnonKey, {
-  auth: { persistSession: false },
+  auth: {
+    persistSession: false,
+    autoRefreshToken: false,
+    detectSessionInUrl: false,
+    storageKey: 'sb-admin-creator-isolated-token',
+  },
 });
 
 export default function Users({ branches, fetchBranches, addToast }) {
@@ -79,6 +85,7 @@ export default function Users({ branches, fetchBranches, addToast }) {
   const [branchName, setBranchName] = useState('');
   const [branchAddress, setBranchAddress] = useState('');
   const [branchPhone, setBranchPhone] = useState('');
+  const [isFactory, setIsFactory] = useState(false);
 
   // Role Permissions Matrix State
   const [selectedMatrixRole, setSelectedMatrixRole] = useState('branch_manager'); // 'branch_manager' | 'staff'
@@ -267,9 +274,10 @@ export default function Users({ branches, fetchBranches, addToast }) {
     try {
       const { error } = await supabase.from('branches').insert([
         {
-          name: branchName,
-          address: branchAddress || null,
-          phone: branchPhone || null,
+          name: branchName.trim(),
+          address: branchAddress.trim() || null,
+          phone: branchPhone.trim() || null,
+          is_factory: isFactory,
         },
       ]);
 
@@ -282,6 +290,39 @@ export default function Users({ branches, fetchBranches, addToast }) {
     } catch (err) {
       console.error('Error creating branch:', err);
       showMessage('Failed to create branch location.', 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDeleteBranch = async (branch) => {
+    if (branch.is_factory) {
+      showMessage('The Factory hub cannot be deleted.', 'error');
+      return;
+    }
+
+    const confirm = window.confirm(
+      `Are you sure you want to delete branch "${branch.name}"?\nStaff assigned to this branch will be unlinked.`
+    );
+    if (!confirm) return;
+
+    setLoading(true);
+    try {
+      // 1. Unlink profiles attached to this branch
+      await supabase.from('profiles').update({ branch_id: null }).eq('branch_id', branch.id);
+
+      // 2. Delete inventory records for this branch
+      await supabase.from('inventory').delete().eq('branch_id', branch.id);
+
+      // 3. Delete branch
+      const { error } = await supabase.from('branches').delete().eq('id', branch.id);
+      if (error) throw error;
+
+      showMessage(`Branch "${branch.name}" deleted successfully!`, 'success');
+      fetchBranches();
+    } catch (err) {
+      console.error('Error deleting branch:', err);
+      showMessage(err.message || 'Failed to delete branch.', 'error');
     } finally {
       setLoading(false);
     }
@@ -352,6 +393,7 @@ export default function Users({ branches, fetchBranches, addToast }) {
     setBranchName('');
     setBranchAddress('');
     setBranchPhone('');
+    setIsFactory(false);
   };
 
   const renderModuleIcon = (iconName) => {
@@ -435,7 +477,7 @@ export default function Users({ branches, fetchBranches, addToast }) {
           onClick={() => setActiveTab('permissions')}
         >
           <Shield size={16} />
-          <span>Role & Permissions Matrix</span>
+          <span>Role Permissions</span>
         </button>
       </div>
 
@@ -562,12 +604,13 @@ export default function Users({ branches, fetchBranches, addToast }) {
                     <th>Branch Name</th>
                     <th>Phone</th>
                     <th>Address</th>
+                    <th style={{ width: '80px', textAlign: 'center' }}>Action</th>
                   </tr>
                 </thead>
                 <tbody>
                   {branches.length === 0 ? (
                     <tr>
-                      <td colSpan={5} style={{ textAlign: 'center', padding: '2rem' }}>
+                      <td colSpan={6} style={{ textAlign: 'center', padding: '2rem' }}>
                         No branches registered. Add a branch to link staff profiles.
                       </td>
                     </tr>
@@ -578,9 +621,40 @@ export default function Users({ branches, fetchBranches, addToast }) {
                         <td style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontFamily: 'monospace' }}>
                           {b.id}
                         </td>
-                        <td style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{b.name}</td>
+                        <td style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                            <span>{b.name}</span>
+                            {b.is_factory && (
+                              <span 
+                                className="badge" 
+                                style={{ 
+                                  backgroundColor: '#fef3c7', 
+                                  color: '#92400e', 
+                                  border: '1px solid #fde68a', 
+                                  fontSize: '0.68rem',
+                                  fontWeight: 700 
+                                }}
+                              >
+                                🏭 Factory Hub
+                              </span>
+                            )}
+                          </div>
+                        </td>
                         <td style={{ fontWeight: 500 }}>{b.phone || 'N/A'}</td>
                         <td>{b.address || 'N/A'}</td>
+                        <td style={{ textAlign: 'center' }}>
+                          {!b.is_factory && (
+                            <button
+                              type="button"
+                              className="btn btn-secondary btn-sm"
+                              onClick={() => handleDeleteBranch(b)}
+                              title="Delete Branch"
+                              style={{ color: 'var(--danger)', padding: '0.25rem 0.45rem', border: 'none' }}
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          )}
+                        </td>
                       </tr>
                     ))
                   )}
@@ -1220,6 +1294,18 @@ export default function Users({ branches, fetchBranches, addToast }) {
                       onChange={(e) => setBranchPhone(e.target.value)}
                     />
                   </div>
+                </div>
+
+                <div className="form-group" style={{ marginTop: '0.5rem' }}>
+                  <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', margin: 0, fontWeight: 600, fontSize: '0.88rem' }}>
+                    <input
+                      type="checkbox"
+                      checked={isFactory}
+                      onChange={(e) => setIsFactory(e.target.checked)}
+                      style={{ cursor: 'pointer', accentColor: 'var(--primary)', width: '16px', height: '16px' }}
+                    />
+                    <span>Factory</span>
+                  </label>
                 </div>
               </div>
               <div className="modal-footer">

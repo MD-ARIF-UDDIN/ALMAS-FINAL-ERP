@@ -12,19 +12,11 @@ export const MODULE_SERIAL_PERMISSIONS = [
     bgColor: '#f0f9ff',
     groups: [
       {
-        title: 'Item List',
+        title: 'Product Catalog',
         permissions: [
-          { key: 'product.items_view', label: 'View List' },
-          { key: 'product.items_create', label: 'Create Item' },
+          { key: 'product.items_view', label: 'View Products' },
+          { key: 'product.items_create', label: 'Create Product' },
           { key: 'product.items_delete', label: 'Delete', isDanger: true },
-        ],
-      },
-      {
-        title: 'Shade Book',
-        permissions: [
-          { key: 'product.shades_view', label: 'View Shades' },
-          { key: 'product.shades_create', label: 'Add Shade' },
-          { key: 'product.shades_delete', label: 'Delete', isDanger: true },
         ],
       },
     ],
@@ -40,7 +32,7 @@ export const MODULE_SERIAL_PERMISSIONS = [
       {
         title: 'Stock In Hand',
         permissions: [
-          { key: 'inventory.stock_view', label: 'View Stock Matrix' },
+          { key: 'inventory.stock_view', label: 'View Stock in Hand' },
           { key: 'inventory.adjust', label: 'Manual Adjust' },
         ],
       },
@@ -211,8 +203,6 @@ export const DEFAULT_ROLE_PERMISSIONS = {
   branch_manager: [
     'product.items_view',
     'product.items_create',
-    'product.shades_view',
-    'product.shades_create',
     'inventory.stock_view',
     'inventory.adjust',
     'inventory.transfer_view',
@@ -235,7 +225,6 @@ export const DEFAULT_ROLE_PERMISSIONS = {
   ],
   staff: [
     'product.items_view',
-    'product.shades_view',
     'inventory.stock_view',
     'sales.view',
     'sales.pos_view',
@@ -410,7 +399,7 @@ export function hasPermission(userProfile, permissionKey) {
 
   // Aliases and module-level permission checks
   if (permissionKey === 'product.view') {
-    return perms.includes('product.items_view') || perms.includes('product.shades_view') || perms.includes('inventory.catalog_view');
+    return perms.includes('product.items_view') || perms.includes('inventory.catalog_view');
   }
   if (permissionKey === 'inventory.view') {
     return perms.includes('inventory.stock_view') || perms.includes('inventory.transfer_view') || perms.includes('inventory.logs_view');
