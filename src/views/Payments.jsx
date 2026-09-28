@@ -1,13 +1,24 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../supabaseClient';
 import { CreditCard, TrendingUp, TrendingDown, Plus, Search, HelpCircle, DollarSign } from 'lucide-react';
 import { TableLoading } from '../components/TableLoading';
+import Pagination from '../components/Pagination';
 
 export default function Payments({ userProfile, branches, addToast }) {
   const [activeSubTab, setActiveSubTab] = useState('invoices'); // 'invoices' or 'ledger'
   const [invoiceType, setInvoiceType] = useState('sales'); // 'sales' (receivables) or 'purchases' (payables)
   const [loading, setLoading] = useState(true);
   const [loadingLedger, setLoadingLedger] = useState(false);
+
+  // Invoices tab pagination
+  const [invoicePage, setInvoicePage] = useState(1);
+  const [invoicePageSize, setInvoicePageSize] = useState(25);
+  const [invoiceTotalCount, setInvoiceTotalCount] = useState(0);
+
+  // Ledger tab pagination
+  const [ledgerPage, setLedgerPage] = useState(1);
+  const [ledgerPageSize, setLedgerPageSize] = useState(25);
+  const [ledgerTotalCount, setLedgerTotalCount] = useState(0);
 
   // Data lists
   const [invoices, setInvoices] = useState([]);
@@ -45,21 +56,17 @@ export default function Payments({ userProfile, branches, addToast }) {
     }
   }, [branches, userProfile, selectedBranchId]);
 
-  useEffect(() => {
-    if (selectedBranchId) {
-      fetchInvoices();
-      fetchPaymentsLog();
-    }
-  }, [selectedBranchId, invoiceType, statusFilter]);
-
   const showMessage = (text, type) => {
     addToast(text, type === 'error' ? 'error' : type === 'success' ? 'success' : 'info');
   };
 
-  const fetchInvoices = async () => {
+  const fetchInvoices = useCallback(async () => {
     if (!selectedBranchId) return;
     setLoading(true);
     try {
+      const from = (invoicePage - 1) * invoicePageSize;
+      const to = from + invoicePageSize - 1;
+
       let query;
       if (invoiceType === 'sales') {
         query = supabase
@@ -75,8 +82,7 @@ export default function Payments({ userProfile, branches, addToast }) {
             contacts (
               name
             )
-          `)
-          .eq('branch_id', selectedBranchId);
+          `, { count: 'exact' });
       } else {
         query = supabase
           .from('purchases')
@@ -91,8 +97,15 @@ export default function Payments({ userProfile, branches, addToast }) {
             contacts (
               name
             )
-          `)
-          .eq('branch_id', selectedBranchId);
+          `, { count: 'exact' });
+      }
+
+      if (userProfile?.role === 'owner') {
+        if (selectedBranchId && selectedBranchId !== 'all') {
+          query = query.eq('branch_id', selectedBranchId);
+        }
+      } else if (selectedBranchId) {
+        query = query.eq('branch_id', selectedBranchId);
       }
 
       // Status filters
@@ -100,69 +113,86 @@ export default function Payments({ userProfile, branches, addToast }) {
         query = query.eq('payment_status', 'unpaid');
       } else if (statusFilter === 'partial') {
         query = query.eq('payment_status', 'partial');
-      } else {
-        // exclude 'paid' if we want only outstanding or show all
-        // Let's show all but order by status (unpaid/partial first)
       }
 
-      const { data, error } = await query;
+      if (searchQuery.trim()) {
+        query = query.ilike('invoice_number', `%${searchQuery.trim()}%`);
+      }
+
+      const dateField = invoiceType === 'sales' ? 'sale_date' : 'purchase_date';
+      query = query.order(dateField, { ascending: false }).range(from, to);
+
+      const { data, count, error } = await query;
       if (error) throw error;
 
-      // Sort invoices: unpaid and partial first
-      const sorted = (data || []).sort((a, b) => {
-        if (a.payment_status === b.payment_status) return 0;
-        if (a.payment_status === 'paid') return 1;
-        if (b.payment_status === 'paid') return -1;
-        return 0;
-      });
-
-      setInvoices(sorted);
+      setInvoices(data || []);
+      setInvoiceTotalCount(count || 0);
     } catch (err) {
       console.error(err);
       showMessage('Failed to load invoices.', 'error');
     } finally {
       setLoading(false);
     }
-  };
+  }, [selectedBranchId, invoiceType, statusFilter, invoicePage, invoicePageSize, searchQuery, userProfile?.role]);
 
-  const fetchPaymentsLog = async () => {
+  const fetchPaymentsLog = useCallback(async () => {
     if (!selectedBranchId) return;
     setLoadingLedger(true);
     try {
-      const { data, error } = await supabase
+      const from = (ledgerPage - 1) * ledgerPageSize;
+      const to = from + ledgerPageSize - 1;
+
+      let query = supabase
         .from('payments')
         .select(`
           id,
           payment_number,
-          type,
+          transaction_type,
           payment_date,
           amount,
           payment_method,
-          reference_number,
-          sale_id,
+          reference_invoice_id,
+          notes,
           branch_id,
-          sales (
-            invoice_number
-          ),
-          purchase_id,
-          purchases (
-            invoice_number
+          contacts (
+            id,
+            name
           ),
           profiles (
             full_name
           )
-        `)
-        .eq('branch_id', selectedBranchId)
-        .order('payment_date', { ascending: false });
+        `, { count: 'exact' });
 
+      if (userProfile?.role === 'owner') {
+        if (selectedBranchId && selectedBranchId !== 'all') {
+          query = query.eq('branch_id', selectedBranchId);
+        }
+      } else if (selectedBranchId) {
+        query = query.eq('branch_id', selectedBranchId);
+      }
+
+      query = query.order('payment_date', { ascending: false }).range(from, to);
+
+      const { data, count, error } = await query;
       if (error) throw error;
       setPaymentsLog(data || []);
+      setLedgerTotalCount(count || 0);
     } catch (err) {
       console.error(err);
     } finally {
       setLoadingLedger(false);
     }
-  };
+  }, [selectedBranchId, ledgerPage, ledgerPageSize, userProfile?.role]);
+
+  useEffect(() => {
+    if (selectedBranchId) {
+      if (activeSubTab === 'invoices') {
+        fetchInvoices();
+      } else {
+        fetchPaymentsLog();
+      }
+    }
+  }, [selectedBranchId, activeSubTab, fetchInvoices, fetchPaymentsLog]);
 
   const handleOpenPaymentModal = (invoice) => {
     setSelectedInvoice(invoice);
@@ -192,14 +222,13 @@ export default function Payments({ userProfile, branches, addToast }) {
       const isSale = invoiceType === 'sales';
       const paymentPayload = {
         branch_id: selectedBranchId,
-        type: isSale ? 'customer_payment' : 'supplier_payment',
-        sale_id: isSale ? selectedInvoice.id : null,
-        purchase_id: !isSale ? selectedInvoice.id : null,
+        contact_id: selectedInvoice.customer_id || selectedInvoice.supplier_id || selectedInvoice.contacts?.id,
         payment_date: new Date(paymentDate).toISOString(),
         amount: amountNum,
         payment_method: paymentMethod,
-        reference_number: referenceNumber || null,
-        notes: paymentNotes || null,
+        transaction_type: isSale ? 'customer_collection' : 'supplier_payment',
+        reference_invoice_id: selectedInvoice.id,
+        notes: referenceNumber ? `Ref: ${referenceNumber}${paymentNotes ? ` - ${paymentNotes}` : ''}` : (paymentNotes || null),
         created_by: userProfile.id,
       };
 
@@ -213,11 +242,12 @@ export default function Payments({ userProfile, branches, addToast }) {
       const { error: ledgerError } = await supabase.from('cash_ledger').insert([
         {
           branch_id: selectedBranchId,
-            account_type: paymentMethod,
-            type: isSale ? 'in' : 'out',
-            amount: amountNum,
-            description: `${refLabel}: ${invoiceLabel} #${selectedInvoice.invoice_number || selectedInvoice.id.substring(0, 8).toUpperCase()}`,
-            transaction_date: new Date(paymentDate).toISOString(),
+          amount_in: isSale ? amountNum : 0,
+          amount_out: isSale ? 0 : amountNum,
+          reference_id: selectedInvoice.id,
+          description: `${refLabel}: ${invoiceLabel} #${selectedInvoice.invoice_number || selectedInvoice.id.substring(0, 8).toUpperCase()} (${paymentMethod})`,
+          transaction_date: new Date(paymentDate).toISOString(),
+          created_by: userProfile.id,
         },
       ]);
       if (ledgerError) throw ledgerError;
@@ -293,18 +323,24 @@ export default function Payments({ userProfile, branches, addToast }) {
 
       {/* VIEW: INVOICES OUTSTANDING */}
       {activeSubTab === 'invoices' && (
-        <div className="card">
-          <div className="card-header" style={{ display: 'flex', flexWrap: 'wrap', gap: '1rem', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+          <div className="card-header" style={{ display: 'flex', flexWrap: 'wrap', gap: '1rem', justifyContent: 'space-between', alignItems: 'center', padding: '1rem 1.25rem' }}>
             <div style={{ display: 'flex', gap: '0.5rem' }}>
               <button
                 className={`btn btn-sm ${invoiceType === 'sales' ? 'btn-primary' : 'btn-secondary'}`}
-                onClick={() => setInvoiceType('sales')}
+                onClick={() => {
+                  setInvoiceType('sales');
+                  setInvoicePage(1);
+                }}
               >
                 Customer Receivables (Sales)
               </button>
               <button
                 className={`btn btn-sm ${invoiceType === 'purchases' ? 'btn-primary' : 'btn-secondary'}`}
-                onClick={() => setInvoiceType('purchases')}
+                onClick={() => {
+                  setInvoiceType('purchases');
+                  setInvoicePage(1);
+                }}
               >
                 Supplier Payables (Purchases)
               </button>
@@ -315,7 +351,10 @@ export default function Payments({ userProfile, branches, addToast }) {
                 className="input-control"
                 style={{ width: '150px', padding: '0.35rem 0.5rem', fontSize: '0.85rem' }}
                 value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value)}
+                onChange={(e) => {
+                  setStatusFilter(e.target.value);
+                  setInvoicePage(1);
+                }}
               >
                 <option value="all">All Invoices</option>
                 <option value="unpaid">Unpaid Only</option>
@@ -328,17 +367,20 @@ export default function Payments({ userProfile, branches, addToast }) {
                   <input
                     type="text"
                     className="input-control"
-                    style={{ paddingLeft: '2.2rem', paddingHeight: '34px', fontSize: '0.85rem' }}
-                    placeholder="Search by ID or name..."
+                    style={{ paddingLeft: '2.2rem', fontSize: '0.85rem' }}
+                    placeholder="Search by invoice #..."
                     value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
+                    onChange={(e) => {
+                      setSearchQuery(e.target.value);
+                      setInvoicePage(1);
+                    }}
                   />
                 </div>
               </div>
             </div>
           </div>
 
-          <div className="table-container">
+          <div className="table-container" style={{ borderBottomLeftRadius: 0, borderBottomRightRadius: 0 }}>
             <table>
               <thead>
                 <tr>
@@ -357,18 +399,19 @@ export default function Payments({ userProfile, branches, addToast }) {
               <tbody>
                 {loading ? (
                   <TableLoading colSpan={userProfile?.role === 'owner' ? 10 : 9} message="Fetching invoices..." />
-                ) : filteredInvoices.length === 0 ? (
+                ) : invoices.length === 0 ? (
                   <tr>
                     <td colSpan={userProfile?.role === 'owner' ? 10 : 9} style={{ textAlign: 'center', padding: '2rem' }}>
                       No invoices found matching the current filters.
                     </td>
                   </tr>
                 ) : (
-                  filteredInvoices.map((inv, index) => {
+                  invoices.map((inv, index) => {
                     const due = inv.net_amount - inv.paid_amount;
+                    const rowNumber = (invoicePage - 1) * invoicePageSize + index + 1;
                     return (
                       <tr key={inv.id}>
-                        <td>{index + 1}</td>
+                        <td>{rowNumber}</td>
                         <td style={{ fontFamily: 'monospace', fontSize: '0.82rem', fontWeight: 700 }}>
                           {inv.invoice_number || (invoiceType === 'sales' ? 'INV' : 'PUR') + '#' + inv.id.substring(0, 8).toUpperCase()}
                         </td>
@@ -408,16 +451,23 @@ export default function Payments({ userProfile, branches, addToast }) {
               </tbody>
             </table>
           </div>
+          <Pagination
+            currentPage={invoicePage}
+            totalCount={invoiceTotalCount}
+            pageSize={invoicePageSize}
+            onPageChange={setInvoicePage}
+            onPageSizeChange={setInvoicePageSize}
+          />
         </div>
       )}
 
       {/* VIEW: PAYMENTS TRANSACTION LOG */}
       {activeSubTab === 'ledger' && (
-        <div className="card">
-          <div className="card-header">
-            <h3 className="card-title">Transaction Ledger</h3>
+        <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+          <div className="card-header" style={{ padding: '1rem 1.25rem' }}>
+            <h3 className="card-title" style={{ margin: 0 }}>Transaction Ledger</h3>
           </div>
-          <div className="table-container">
+          <div className="table-container" style={{ borderBottomLeftRadius: 0, borderBottomRightRadius: 0 }}>
             <table>
               <thead>
                 <tr>
@@ -444,11 +494,12 @@ export default function Payments({ userProfile, branches, addToast }) {
                   </tr>
                 ) : (
                   paymentsLog.map((log, index) => {
-                    const isRec = log.type === 'customer_payment';
+                    const isRec = log.transaction_type === 'customer_collection';
+                    const rowNumber = (ledgerPage - 1) * ledgerPageSize + index + 1;
                     return (
                       <tr key={log.id}>
-                        <td>{index + 1}</td>
-                        <td>{new Date(log.payment_date).toLocaleString()}</td>
+                        <td>{rowNumber}</td>
+                        <td>{new Date(log.payment_date).toLocaleDateString()}</td>
                         {userProfile?.role === 'owner' && (
                           <td style={{ fontWeight: 600 }}>{branches.find(b => b.id === log.branch_id)?.name || 'Unknown'}</td>
                         )}
@@ -459,22 +510,18 @@ export default function Payments({ userProfile, branches, addToast }) {
                           <span className={`badge ${isRec ? 'badge-paid' : 'badge-unpaid'}`}>
                             {isRec ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
                             <span style={{ marginLeft: '0.25rem' }}>
-                              {isRec ? 'Received (Customer)' : 'Paid (Supplier)'}
+                              {isRec ? 'Customer Collection' : 'Supplier Payment'}
                             </span>
                           </span>
                         </td>
-                        <td style={{ fontFamily: 'monospace', fontWeight: 600 }}>
-                          {log.sale_id ? (
-                            <span>{log.sales?.invoice_number || `INV#${log.sale_id.substring(0, 8).toUpperCase()}`}</span>
-                          ) : (
-                            <span>{log.purchases?.invoice_number || `PUR#${log.purchase_id.substring(0, 8).toUpperCase()}`}</span>
-                          )}
+                        <td style={{ fontWeight: 600 }}>
+                          {log.contacts?.name || (log.reference_invoice_id ? `REF#${log.reference_invoice_id.substring(0, 8).toUpperCase()}` : 'N/A')}
                         </td>
                         <td style={{ fontWeight: 700, fontFamily: 'Outfit, sans-serif', color: isRec ? 'var(--success-text)' : 'var(--danger-text)' }}>
                           ৳{log.amount.toFixed(2)}
                         </td>
-                        <td style={{ textTransform: 'capitalize' }}>{log.payment_method.replace('_', ' ')}</td>
-                        <td>{log.reference_number || 'N/A'}</td>
+                        <td style={{ textTransform: 'capitalize' }}>{log.payment_method?.replace('_', ' ')}</td>
+                        <td>{log.notes || 'N/A'}</td>
                         <td style={{ fontSize: '0.85rem' }}>{log.profiles?.full_name || 'System'}</td>
                       </tr>
                     );
@@ -483,6 +530,13 @@ export default function Payments({ userProfile, branches, addToast }) {
               </tbody>
             </table>
           </div>
+          <Pagination
+            currentPage={ledgerPage}
+            totalCount={ledgerTotalCount}
+            pageSize={ledgerPageSize}
+            onPageChange={setLedgerPage}
+            onPageSizeChange={setLedgerPageSize}
+          />
         </div>
       )}
 

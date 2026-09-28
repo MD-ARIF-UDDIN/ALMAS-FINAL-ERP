@@ -14,6 +14,7 @@ import Expenses from './views/Expenses';
 import Reports from './views/Reports';
 import Contacts from './views/Contacts';
 import BranchChallans from './views/BranchChallans';
+import Returns from './views/Returns';
 import { Menu } from 'lucide-react';
 import logo from './assets/logo.svg';
 
@@ -181,6 +182,7 @@ function App() {
           <Route path="/inventory" element={<Inventory userProfile={userProfile} branches={branches} addToast={addToast} />} />
           <Route path="/challans" element={<BranchChallans userProfile={userProfile} branches={branches} addToast={addToast} />} />
           <Route path="/sales" element={<Sales userProfile={userProfile} branches={branches} addToast={addToast} />} />
+          <Route path="/returns" element={<Returns userProfile={userProfile} branches={branches} addToast={addToast} />} />
           <Route path="/purchases" element={<Purchases userProfile={userProfile} branches={branches} addToast={addToast} />} />
           <Route path="/payments" element={<Payments userProfile={userProfile} branches={branches} addToast={addToast} />} />
           <Route path="/expenses" element={<Expenses userProfile={userProfile} branches={branches} addToast={addToast} />} />

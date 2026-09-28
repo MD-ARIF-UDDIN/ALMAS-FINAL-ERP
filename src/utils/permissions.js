@@ -73,6 +73,13 @@ export const MODULE_SERIAL_PERMISSIONS = [
           { key: 'sales.create', label: 'Create POS Invoice' },
         ],
       },
+      {
+        title: 'Returns & Exchanges',
+        permissions: [
+          { key: 'returns.view', label: 'View Returns & Exchanges' },
+          { key: 'returns.create', label: 'Process Return / Exchange' },
+        ],
+      },
     ],
   },
   {
@@ -412,6 +419,12 @@ export function hasPermission(userProfile, permissionKey) {
   }
   if (permissionKey === 'inventory.catalog_delete' || permissionKey === 'product.items_delete') {
     return perms.includes('product.items_delete') || perms.includes('inventory.catalog_delete');
+  }
+  if (permissionKey === 'returns.view') {
+    return perms.includes('returns.view') || perms.includes('sales.view');
+  }
+  if (permissionKey === 'returns.create') {
+    return perms.includes('returns.create') || perms.includes('sales.create');
   }
   
   return perms.includes(permissionKey);

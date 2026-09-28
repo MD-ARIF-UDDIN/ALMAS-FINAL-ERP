@@ -1,13 +1,20 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useLocation } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
 import { Plus, Search, Trash2, Receipt, CreditCard } from 'lucide-react';
 import { TableLoading } from '../components/TableLoading';
+import Pagination from '../components/Pagination';
 
 export default function Expenses({ userProfile, branches, addToast }) {
   const location = useLocation();
   const [expenses, setExpenses] = useState([]);
   const [loading, setLoading] = useState(true);
+
+  // Pagination & Search
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
+  const [totalCount, setTotalCount] = useState(0);
+  const [searchQuery, setSearchQuery] = useState('');
 
   // Add Expense states
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -24,9 +31,6 @@ export default function Expenses({ userProfile, branches, addToast }) {
       window.history.replaceState({}, document.title);
     }
   }, [location.state]);
-
-  // Search/Filter states
-  const [searchQuery, setSearchQuery] = useState('');
 
   const [selectedBranchId, setSelectedBranchId] = useState(() => {
     if (userProfile?.role === 'owner') {
@@ -59,40 +63,57 @@ export default function Expenses({ userProfile, branches, addToast }) {
     { id: 'others', name: 'Others (Custom)' },
   ];
 
-  useEffect(() => {
-    if (selectedBranchId) {
-      fetchExpenses();
-    }
-  }, [selectedBranchId]);
-
   const showMessage = (text, type) => {
     addToast(text, type === 'error' ? 'error' : type === 'success' ? 'success' : 'info');
   };
 
-  const fetchExpenses = async () => {
+  const fetchExpenses = useCallback(async () => {
     if (!selectedBranchId) return;
     setLoading(true);
     try {
-      const { data, error } = await supabase
+      const from = (page - 1) * pageSize;
+      const to = from + pageSize - 1;
+
+      let query = supabase
         .from('expenses')
         .select(`
           *,
           profiles (
             full_name
           )
-        `)
-        .eq('branch_id', selectedBranchId)
-        .order('expense_date', { ascending: false });
+        `, { count: 'exact' });
 
+      if (userProfile?.role === 'owner') {
+        if (selectedBranchId && selectedBranchId !== 'all') {
+          query = query.eq('branch_id', selectedBranchId);
+        }
+      } else if (selectedBranchId) {
+        query = query.eq('branch_id', selectedBranchId);
+      }
+
+      if (searchQuery.trim()) {
+        query = query.or(`description.ilike.%${searchQuery.trim()}%,category.ilike.%${searchQuery.trim()}%`);
+      }
+
+      query = query.order('expense_date', { ascending: false }).range(from, to);
+
+      const { data, count, error } = await query;
       if (error) throw error;
       setExpenses(data || []);
+      setTotalCount(count || 0);
     } catch (err) {
       console.error(err);
       showMessage('Failed to load expenses list.', 'error');
     } finally {
       setLoading(false);
     }
-  };
+  }, [selectedBranchId, page, pageSize, searchQuery, userProfile?.role]);
+
+  useEffect(() => {
+    if (selectedBranchId) {
+      fetchExpenses();
+    }
+  }, [selectedBranchId, fetchExpenses]);
 
   const handleCreateExpense = async (e) => {
     e.preventDefault();
@@ -134,11 +155,12 @@ export default function Expenses({ userProfile, branches, addToast }) {
       const { error: ledgerError } = await supabase.from('cash_ledger').insert([
         {
           branch_id: selectedBranchId,
-          account_type: paymentMethod,
-          type: 'out',
-          amount: expenseAmount,
-          description: `Business Expense [${finalCategory.toUpperCase()}]: ${description || 'No details'}`,
+          amount_in: 0,
+          amount_out: expenseAmount,
+          reference_id: expenseId,
+          description: `Business Expense [${finalCategory.toUpperCase()}]: ${description || 'No details'} (${paymentMethod})`,
           transaction_date: new Date(expenseDate).toISOString(),
+          created_by: userProfile.id,
         },
       ]);
 
@@ -171,10 +193,12 @@ export default function Expenses({ userProfile, branches, addToast }) {
       const { error: ledgerError } = await supabase.from('cash_ledger').insert([
         {
           branch_id: selectedBranchId,
-          account_type: expMethod,
-          type: 'in',
-          amount: expAmount,
+          amount_in: expAmount,
+          amount_out: 0,
+          reference_id: id,
           description: `Reversal / Deletion of Expense ID #${id.substring(0, 8).toUpperCase()}`,
+          transaction_date: new Date().toISOString(),
+          created_by: userProfile.id,
         },
       ]);
       if (ledgerError) throw ledgerError;
@@ -197,12 +221,6 @@ export default function Expenses({ userProfile, branches, addToast }) {
     setExpenseDate(new Date().toISOString().split('T')[0]);
     setPaymentMethod('cash');
   };
-
-  const filteredExpenses = expenses.filter(
-    (exp) =>
-      exp.category.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (exp.description && exp.description.toLowerCase().includes(searchQuery.toLowerCase()))
-  );
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
@@ -243,25 +261,28 @@ export default function Expenses({ userProfile, branches, addToast }) {
 
       {/* Expenses List occupying full width */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-        <div className="card">
-          <div className="card-header" style={{ marginBottom: '1rem' }}>
-            <h3 className="card-title">Expense History</h3>
-            <div className="catalog-search-bar" style={{ width: '220px' }}>
+        <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+          <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem', padding: '1rem 1.25rem' }}>
+            <h3 className="card-title" style={{ margin: 0 }}>Expense History</h3>
+            <div className="catalog-search-bar" style={{ width: '240px' }}>
               <div style={{ position: 'relative', width: '100%' }}>
                 <Search size={16} style={{ position: 'absolute', left: '0.75rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
                 <input
                   type="text"
                   className="input-control"
-                  style={{ paddingLeft: '2.2rem', paddingHeight: '34px', fontSize: '0.85rem' }}
+                  style={{ paddingLeft: '2.2rem', fontSize: '0.85rem' }}
                   placeholder="Filter expenses..."
                   value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
+                  onChange={(e) => {
+                    setSearchQuery(e.target.value);
+                    setPage(1);
+                  }}
                 />
               </div>
             </div>
           </div>
 
-          <div className="table-container">
+          <div className="table-container" style={{ borderBottomLeftRadius: 0, borderBottomRightRadius: 0 }}>
             <table>
               <thead>
                 <tr>
@@ -277,45 +298,55 @@ export default function Expenses({ userProfile, branches, addToast }) {
               <tbody>
                 {loading ? (
                   <TableLoading colSpan={7} message="Fetching expense records..." />
-                ) : filteredExpenses.length === 0 ? (
+                ) : expenses.length === 0 ? (
                   <tr>
-                    <td colSpan="7" style={{ textAlign: 'center', padding: '2rem' }}>
+                    <td colSpan={7} style={{ textAlign: 'center', padding: '2rem' }}>
                       No expenses logged for this branch.
                     </td>
                   </tr>
                 ) : (
-                  filteredExpenses.map((exp, index) => (
-                    <tr key={exp.id}>
-                      <td>{index + 1}</td>
-                      <td>{new Date(exp.expense_date).toLocaleDateString()}</td>
-                      <td style={{ fontWeight: 600, color: 'var(--text-primary)', textTransform: 'capitalize' }}>
-                        {exp.category.replace('_', ' ')}
-                      </td>
-                      <td style={{ fontSize: '0.85rem' }}>{exp.description || 'N/A'}</td>
-                      <td style={{ fontWeight: 700, fontFamily: 'Outfit, sans-serif', color: 'var(--danger-text)' }}>
-                        -৳{exp.amount.toFixed(2)}
-                      </td>
-                      <td style={{ textTransform: 'capitalize', fontSize: '0.8rem' }}>
-                        {exp.payment_method.replace('_', ' ')}
-                      </td>
-                      <td>
-                        <div style={{ display: 'flex', justifyContent: 'center' }}>
-                          <button
-                            className="btn btn-secondary btn-sm btn-icon"
-                            style={{ color: 'var(--danger)' }}
-                            onClick={() => handleDeleteExpense(exp.id, exp.amount, exp.payment_method)}
-                            title="Delete Log"
-                          >
-                            <Trash2 size={14} />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))
+                  expenses.map((exp, index) => {
+                    const rowNumber = (page - 1) * pageSize + index + 1;
+                    return (
+                      <tr key={exp.id}>
+                        <td>{rowNumber}</td>
+                        <td>{new Date(exp.expense_date).toLocaleDateString()}</td>
+                        <td style={{ fontWeight: 600, color: 'var(--text-primary)', textTransform: 'capitalize' }}>
+                          {exp.category.replace('_', ' ')}
+                        </td>
+                        <td style={{ fontSize: '0.85rem' }}>{exp.description || 'N/A'}</td>
+                        <td style={{ fontWeight: 700, fontFamily: 'Outfit, sans-serif', color: 'var(--danger-text)' }}>
+                          -৳{exp.amount.toFixed(2)}
+                        </td>
+                        <td style={{ textTransform: 'capitalize', fontSize: '0.8rem' }}>
+                          {exp.payment_method.replace('_', ' ')}
+                        </td>
+                        <td>
+                          <div style={{ display: 'flex', justifyContent: 'center' }}>
+                            <button
+                              className="btn btn-secondary btn-sm btn-icon"
+                              style={{ color: 'var(--danger)' }}
+                              onClick={() => handleDeleteExpense(exp.id, exp.amount, exp.payment_method)}
+                              title="Delete Log"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })
                 )}
               </tbody>
             </table>
           </div>
+          <Pagination
+            currentPage={page}
+            totalCount={totalCount}
+            pageSize={pageSize}
+            onPageChange={setPage}
+            onPageSizeChange={setPageSize}
+          />
         </div>
       </div>
 

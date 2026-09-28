@@ -1,8 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useLocation } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
 import { Download, Plus, Search, Trash2, UserPlus, CreditCard } from 'lucide-react';
 import { TableLoading } from '../components/TableLoading';
+import Pagination from '../components/Pagination';
 
 export default function Purchases({ userProfile, branches, addToast }) {
   const location = useLocation();
@@ -10,6 +11,12 @@ export default function Purchases({ userProfile, branches, addToast }) {
   const [suppliers, setSuppliers] = useState([]);
   const [catalogProducts, setCatalogProducts] = useState([]);
   
+  // Pagination & Search states
+  const [purchasesPage, setPurchasesPage] = useState(1);
+  const [purchasesPageSize, setPurchasesPageSize] = useState(25);
+  const [purchasesTotalCount, setPurchasesTotalCount] = useState(0);
+  const [purchaseSearchQuery, setPurchaseSearchQuery] = useState('');
+
   // View states
   // View Details states
   const [selectedPurchase, setSelectedPurchase] = useState(null);
@@ -70,22 +77,18 @@ export default function Purchases({ userProfile, branches, addToast }) {
     fetchCatalogProducts();
   }, []);
 
-  // Branch purchases fetched whenever selected branch changes
-  useEffect(() => {
-    if (selectedBranchId) {
-      fetchPurchases();
-    }
-  }, [selectedBranchId]);
-
   const showMessage = (text, type) => {
     addToast(text, type === 'error' ? 'error' : type === 'success' ? 'success' : 'info');
   };
 
-  const fetchPurchases = async () => {
+  const fetchPurchases = useCallback(async () => {
     if (!selectedBranchId) return;
     setLoading(true);
     try {
-      const { data, error } = await supabase
+      const from = (purchasesPage - 1) * purchasesPageSize;
+      const to = from + purchasesPageSize - 1;
+
+      let query = supabase
         .from('purchases')
         .select(`
           *,
@@ -95,19 +98,40 @@ export default function Purchases({ userProfile, branches, addToast }) {
             address,
             email
           )
-        `)
-        .eq('branch_id', selectedBranchId)
-        .order('purchase_date', { ascending: false });
+        `, { count: 'exact' })
+        .order('purchase_date', { ascending: false })
+        .range(from, to);
 
+      if (userProfile?.role === 'owner') {
+        if (selectedBranchId && selectedBranchId !== 'all') {
+          query = query.eq('branch_id', selectedBranchId);
+        }
+      } else if (selectedBranchId) {
+        query = query.eq('branch_id', selectedBranchId);
+      }
+
+      if (purchaseSearchQuery.trim()) {
+        query = query.ilike('invoice_number', `%${purchaseSearchQuery.trim()}%`);
+      }
+
+      const { data, count, error } = await query;
       if (error) throw error;
       setPurchases(data || []);
+      setPurchasesTotalCount(count || 0);
     } catch (err) {
       console.error(err);
       showMessage('Failed to load purchases history.', 'error');
     } finally {
       setLoading(false);
     }
-  };
+  }, [selectedBranchId, purchasesPage, purchasesPageSize, purchaseSearchQuery, userProfile?.role]);
+
+  // Branch purchases fetched whenever selected branch changes
+  useEffect(() => {
+    if (selectedBranchId) {
+      fetchPurchases();
+    }
+  }, [selectedBranchId, fetchPurchases]);
 
   const fetchSuppliers = async () => {
     try {
@@ -281,14 +305,52 @@ export default function Purchases({ userProfile, branches, addToast }) {
     try {
       // Create contact if it's a new supplier
       if (supplierType === 'new') {
+        const trimmedSupName = newSupName.trim();
+        const trimmedSupPhone = newSupPhone.trim();
+        const trimmedSupAddress = newSupAddress.trim();
+
+        if (!trimmedSupName) {
+          showMessage('Please enter the supplier name.', 'error');
+          setLoading(false);
+          return;
+        }
+
+        if (!trimmedSupPhone) {
+          showMessage('Supplier phone number is mandatory.', 'error');
+          setLoading(false);
+          return;
+        }
+
+        if (!/^\+?[0-9\s\-()]{7,15}$/.test(trimmedSupPhone)) {
+          showMessage('Please enter a valid supplier phone number (7-15 digits).', 'error');
+          setLoading(false);
+          return;
+        }
+
+        // Duplicate phone check for supplier
+        const { data: dupSup, error: dupErr } = await supabase
+          .from('contacts')
+          .select('id, name, phone')
+          .eq('phone', trimmedSupPhone)
+          .eq('type', 'supplier');
+
+        if (dupErr) throw dupErr;
+
+        if (dupSup && dupSup.length > 0) {
+          showMessage(`A supplier with phone "${trimmedSupPhone}" already exists (${dupSup[0].name}). Please select them from the supplier list.`, 'error');
+          setLoading(false);
+          return;
+        }
+
         const { data: contactData, error: contactError } = await supabase
           .from('contacts')
           .insert([
             {
               type: 'supplier',
-              name: newSupName.trim(),
-              phone: newSupPhone.trim() || null,
-              address: newSupAddress.trim() || null,
+              name: trimmedSupName,
+              phone: trimmedSupPhone,
+              address: trimmedSupAddress || null,
+              branch_id: selectedBranchId,
             }
           ])
           .select()
@@ -341,11 +403,12 @@ export default function Purchases({ userProfile, branches, addToast }) {
         const { error: paymentError } = await supabase.from('payments').insert([
           {
             branch_id: selectedBranchId,
-            type: 'supplier_payment',
-            purchase_id: purchaseId,
+            contact_id: supplierId,
             amount: initialPaid,
             payment_method: paymentMethod,
-            reference_number: referenceNumber || null,
+            transaction_type: 'supplier_payment',
+            reference_invoice_id: purchaseId,
+            notes: referenceNumber ? `Trx Ref: ${referenceNumber}` : null,
             created_by: userProfile.id,
           },
         ]);
@@ -355,10 +418,12 @@ export default function Purchases({ userProfile, branches, addToast }) {
         const { error: ledgerError } = await supabase.from('cash_ledger').insert([
           {
             branch_id: selectedBranchId,
-            account_type: paymentMethod,
-            type: 'out',
-            amount: initialPaid,
-            description: `Supplier Purchase Payout: Bill #${purData[0].invoice_number || purchaseId.substring(0, 8)}`,
+            amount_in: 0,
+            amount_out: initialPaid,
+            reference_id: purchaseId,
+            description: `Supplier Purchase Payout: Bill #${purData[0].invoice_number || purchaseId.substring(0, 8)} (${paymentMethod})`,
+            transaction_date: new Date().toISOString(),
+            created_by: userProfile.id,
           },
         ]);
         if (ledgerError) throw ledgerError;
@@ -436,11 +501,25 @@ export default function Purchases({ userProfile, branches, addToast }) {
       </div>
 
       {/* VIEW: PURCHASE LIST */}
-      <div className="card">
-          <div className="card-header">
-            <h3 className="card-title">Purchase History</h3>
+      <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+          <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem', padding: '1rem 1.25rem' }}>
+            <h3 className="card-title" style={{ margin: 0 }}>Purchase History</h3>
+            <div style={{ position: 'relative', width: '260px' }}>
+              <Search size={14} style={{ position: 'absolute', left: '0.75rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+              <input
+                type="text"
+                className="input-control"
+                style={{ paddingLeft: '2.25rem', padding: '0.35rem 0.6rem 0.35rem 2.25rem', fontSize: '0.82rem' }}
+                placeholder="Search purchase bill #..."
+                value={purchaseSearchQuery}
+                onChange={(e) => {
+                  setPurchaseSearchQuery(e.target.value);
+                  setPurchasesPage(1);
+                }}
+              />
+            </div>
           </div>
-          <div className="table-container">
+          <div className="table-container" style={{ borderBottomLeftRadius: 0, borderBottomRightRadius: 0 }}>
             <table>
               <thead>
                 <tr>
@@ -465,41 +544,51 @@ export default function Purchases({ userProfile, branches, addToast }) {
                     </td>
                   </tr>
                 ) : (
-                  purchases.map((p, index) => (
-                    <tr key={p.id}>
-                      <td>{index + 1}</td>
-                      <td style={{ fontFamily: 'monospace', fontSize: '0.82rem', fontWeight: 700 }}>
-                        {p.invoice_number || `PUR#${p.id.substring(0, 8).toUpperCase()}`}
-                      </td>
-                      {userProfile?.role === 'owner' && (
-                        <td style={{ fontWeight: 600 }}>{branches.find(b => b.id === p.branch_id)?.name || 'Unknown'}</td>
-                      )}
-                      <td>{new Date(p.purchase_date).toLocaleDateString()}</td>
-                      <td style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
-                        {p.contacts?.name || 'Unknown Supplier'}
-                      </td>
-                      <td style={{ fontFamily: 'Outfit, sans-serif' }}>৳{p.net_amount.toFixed(2)}</td>
-                      <td style={{ fontFamily: 'Outfit, sans-serif', color: 'var(--success-text)' }}>
-                        ৳{p.paid_amount.toFixed(2)}
-                      </td>
-                      <td>
-                        <span className={`badge badge-${p.payment_status}`}>{p.payment_status}</span>
-                      </td>
-                      <td style={{ textAlign: 'center' }}>
-                        <button
-                          className="btn btn-secondary btn-sm"
-                          onClick={() => handleViewPurchaseDetails(p)}
-                          title="View Details & Payments"
-                        >
-                          View
-                        </button>
-                      </td>
-                    </tr>
-                  ))
+                  purchases.map((p, index) => {
+                    const rowNumber = (purchasesPage - 1) * purchasesPageSize + index + 1;
+                    return (
+                      <tr key={p.id}>
+                        <td>{rowNumber}</td>
+                        <td style={{ fontFamily: 'monospace', fontSize: '0.82rem', fontWeight: 700 }}>
+                          {p.invoice_number || `PUR#${p.id.substring(0, 8).toUpperCase()}`}
+                        </td>
+                        {userProfile?.role === 'owner' && (
+                          <td style={{ fontWeight: 600 }}>{branches.find(b => b.id === p.branch_id)?.name || 'Unknown'}</td>
+                        )}
+                        <td>{new Date(p.purchase_date).toLocaleDateString()}</td>
+                        <td style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
+                          {p.contacts?.name || 'Unknown Supplier'}
+                        </td>
+                        <td style={{ fontFamily: 'Outfit, sans-serif' }}>৳{p.net_amount.toFixed(2)}</td>
+                        <td style={{ fontFamily: 'Outfit, sans-serif', color: 'var(--success-text)' }}>
+                          ৳{p.paid_amount.toFixed(2)}
+                        </td>
+                        <td>
+                          <span className={`badge badge-${p.payment_status}`}>{p.payment_status}</span>
+                        </td>
+                        <td style={{ textAlign: 'center' }}>
+                          <button
+                            className="btn btn-secondary btn-sm"
+                            onClick={() => handleViewPurchaseDetails(p)}
+                            title="View Details & Payments"
+                          >
+                            View
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })
                 )}
               </tbody>
             </table>
           </div>
+          <Pagination
+            currentPage={purchasesPage}
+            totalCount={purchasesTotalCount}
+            pageSize={purchasesPageSize}
+            onPageChange={setPurchasesPage}
+            onPageSizeChange={setPurchasesPageSize}
+          />
         </div>
 
       {/* RECORD NEW PURCHASE MODAL */}
@@ -575,13 +664,14 @@ export default function Purchases({ userProfile, branches, addToast }) {
                     />
                   </div>
                   <div className="form-group">
-                    <label>Supplier Contact Phone</label>
+                    <label>Supplier Contact Phone *</label>
                     <input
                       type="text"
                       className="input-control"
                       placeholder="e.g. 01712345678"
                       value={newSupPhone}
                       onChange={(e) => setNewSupPhone(e.target.value)}
+                      required={supplierType === 'new'}
                     />
                   </div>
                 </div>

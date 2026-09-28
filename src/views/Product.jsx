@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../supabaseClient';
 import { 
   Package, 
@@ -9,13 +9,20 @@ import {
   Layers
 } from 'lucide-react';
 import { TableLoading } from '../components/TableLoading';
+import Pagination from '../components/Pagination';
 import { hasPermission } from '../utils/permissions';
 
 export default function Product({ userProfile, branches, addToast }) {
   const [products, setProducts] = useState([]);
+  const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('all');
+
+  // Pagination states
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
+  const [totalCount, setTotalCount] = useState(0);
 
   // Modal & Form State
   const [showModal, setShowModal] = useState(false);
@@ -36,31 +43,61 @@ export default function Product({ userProfile, branches, addToast }) {
   const canCreate = hasPermission(userProfile, 'product.items_create') || hasPermission(userProfile, 'inventory.catalog_create');
   const canDelete = hasPermission(userProfile, 'product.items_delete') || hasPermission(userProfile, 'inventory.catalog_delete');
 
-  useEffect(() => {
-    fetchProducts();
-  }, []);
-
   const showMessage = (text, type) => {
     addToast(text, type === 'error' ? 'error' : type === 'success' ? 'success' : 'info');
   };
 
-  const fetchProducts = async () => {
+  const fetchCategories = async () => {
+    try {
+      const { data } = await supabase.from('products').select('category');
+      if (data) {
+        const unique = [...new Set(data.map((p) => p.category).filter(Boolean))].sort();
+        setCategories(unique);
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const fetchProducts = useCallback(async () => {
     setLoading(true);
     try {
-      const { data, error } = await supabase
-        .from('products')
-        .select('*')
-        .order('created_at', { ascending: false });
+      const from = (page - 1) * pageSize;
+      const to = from + pageSize - 1;
 
+      let query = supabase
+        .from('products')
+        .select('*', { count: 'exact' });
+
+      if (categoryFilter !== 'all') {
+        query = query.eq('category', categoryFilter);
+      }
+
+      if (searchQuery.trim()) {
+        query = query.or(`name.ilike.%${searchQuery.trim()}%,sku.ilike.%${searchQuery.trim()}%,product_code.ilike.%${searchQuery.trim()}%,category.ilike.%${searchQuery.trim()}%`);
+      }
+
+      query = query.order('created_at', { ascending: false }).range(from, to);
+
+      const { data, count, error } = await query;
       if (error) throw error;
       setProducts(data || []);
+      setTotalCount(count || 0);
     } catch (err) {
       console.error('Error fetching products:', err);
       showMessage('Failed to load product list.', 'error');
     } finally {
       setLoading(false);
     }
-  };
+  }, [page, pageSize, categoryFilter, searchQuery]);
+
+  useEffect(() => {
+    fetchCategories();
+  }, []);
+
+  useEffect(() => {
+    fetchProducts();
+  }, [fetchProducts]);
 
   const resetForm = () => {
     setProductCode('');
@@ -160,12 +197,32 @@ export default function Product({ userProfile, branches, addToast }) {
   };
 
   const handleDeleteProduct = async (prodId, prodName) => {
-    if (!window.confirm(`Are you sure you want to delete "${prodName}"? This will remove all linked inventory records.`)) {
-      return;
-    }
-
-    setLoading(true);
     try {
+      // 1. Check for sales or purchase records
+      const { count: salesCount } = await supabase
+        .from('sales_items')
+        .select('*', { count: 'exact', head: true })
+        .eq('product_id', prodId);
+
+      if (salesCount && salesCount > 0) {
+        showMessage(`Cannot delete "${prodName}": Linked with ${salesCount} sales transaction${salesCount > 1 ? 's' : ''}.`, 'error');
+        return;
+      }
+
+      const { count: purCount } = await supabase
+        .from('purchase_items')
+        .select('*', { count: 'exact', head: true })
+        .eq('product_id', prodId);
+
+      if (purCount && purCount > 0) {
+        showMessage(`Cannot delete "${prodName}": Linked with ${purCount} purchase record${purCount > 1 ? 's' : ''}.`, 'error');
+        return;
+      }
+
+      if (!window.confirm(`Are you sure you want to delete "${prodName}"?`)) {
+        return;
+      }
+
       const { error } = await supabase.from('products').delete().eq('id', prodId);
       if (error) throw error;
 
@@ -173,25 +230,9 @@ export default function Product({ userProfile, branches, addToast }) {
       fetchProducts();
     } catch (err) {
       console.error('Error deleting product:', err);
-      showMessage('Cannot delete product with linked sales or purchase transactions.', 'error');
-    } finally {
-      setLoading(false);
+      showMessage('Cannot delete product with linked transactions or records.', 'error');
     }
   };
-
-  const categories = Array.from(new Set(products.map((p) => p.category).filter(Boolean)));
-
-  const filteredProducts = products.filter((p) => {
-    const q = searchQuery.toLowerCase();
-    const codeMatch = (p.product_code || p.sku || '').toLowerCase().includes(q);
-    const nameMatch = (p.name || '').toLowerCase().includes(q);
-    const descMatch = (p.description || '').toLowerCase().includes(q);
-    const catMatch = (p.category || '').toLowerCase().includes(q);
-    const matchesSearch = codeMatch || nameMatch || descMatch || catMatch;
-
-    const matchesCategory = categoryFilter === 'all' || p.category === categoryFilter;
-    return matchesSearch && matchesCategory;
-  });
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
@@ -246,10 +287,6 @@ export default function Product({ userProfile, branches, addToast }) {
               </select>
             )}
           </div>
-
-          <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', fontWeight: 600 }}>
-            Showing {filteredProducts.length} of {products.length} products
-          </div>
         </div>
 
         {/* Products Table */}
@@ -270,7 +307,7 @@ export default function Product({ userProfile, branches, addToast }) {
             <tbody>
               {loading ? (
                 <TableLoading colSpan={8} message="Loading products..." />
-              ) : filteredProducts.length === 0 ? (
+              ) : products.length === 0 ? (
                 <tr>
                   <td colSpan={8} style={{ textAlign: 'center', padding: '3rem 1rem', color: 'var(--text-muted)' }}>
                     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.5rem' }}>
@@ -285,10 +322,10 @@ export default function Product({ userProfile, branches, addToast }) {
                   </td>
                 </tr>
               ) : (
-                filteredProducts.map((p, index) => (
+                products.map((p, index) => (
                   <tr key={p.id}>
                     <td style={{ textAlign: 'center', color: 'var(--text-muted)', fontWeight: 600 }}>
-                      {index + 1}
+                      {(page - 1) * pageSize + index + 1}
                     </td>
                     <td>
                       <span
@@ -354,6 +391,17 @@ export default function Product({ userProfile, branches, addToast }) {
             </tbody>
           </table>
         </div>
+
+        <Pagination 
+          page={page}
+          totalCount={totalCount}
+          pageSize={pageSize}
+          onPageChange={setPage}
+          onPageSizeChange={(newSize) => {
+            setPageSize(newSize);
+            setPage(1);
+          }}
+        />
       </div>
 
       {/* CREATE / EDIT PRODUCT MODAL */}

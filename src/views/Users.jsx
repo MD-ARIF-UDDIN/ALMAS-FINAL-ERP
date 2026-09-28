@@ -28,6 +28,7 @@ import {
   Trash2
 } from 'lucide-react';
 import { TableLoading } from '../components/TableLoading';
+import Pagination from '../components/Pagination';
 import {
   MODULE_SERIAL_PERMISSIONS,
   ALL_PERMISSIONS,
@@ -57,6 +58,11 @@ export default function Users({ branches, fetchBranches, addToast }) {
   const [profiles, setProfiles] = useState([]);
   const [activeTab, setActiveTab] = useState('users'); // 'users', 'branches', 'permissions'
   const [loading, setLoading] = useState(true);
+
+  // Pagination states for users list
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
+  const [totalCount, setTotalCount] = useState(0);
 
   // Modal display states
   const [showUserModal, setShowUserModal] = useState(false);
@@ -91,25 +97,21 @@ export default function Users({ branches, fetchBranches, addToast }) {
   const [selectedMatrixRole, setSelectedMatrixRole] = useState('branch_manager'); // 'branch_manager' | 'staff'
   const [matrixPermissions, setMatrixPermissions] = useState(() => getRolePermissions('branch_manager'));
 
-  useEffect(() => {
-    fetchProfiles();
-  }, []);
-
-  // Sync matrix permissions when selected role changes
-  useEffect(() => {
-    setMatrixPermissions(getRolePermissions(selectedMatrixRole));
-  }, [selectedMatrixRole]);
-
   const fetchProfiles = async () => {
     setLoading(true);
     try {
-      const { data, error } = await supabase
+      const from = (page - 1) * pageSize;
+      const to = from + pageSize - 1;
+
+      const { data, count, error } = await supabase
         .from('profiles')
-        .select('*')
-        .order('created_at', { ascending: false });
+        .select('*', { count: 'exact' })
+        .order('created_at', { ascending: false })
+        .range(from, to);
 
       if (error) throw error;
       setProfiles(data || []);
+      setTotalCount(count || 0);
     } catch (err) {
       console.error('Error fetching profiles:', err);
       showMessage('Failed to load user profiles.', 'error');
@@ -117,6 +119,15 @@ export default function Users({ branches, fetchBranches, addToast }) {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    fetchProfiles();
+  }, [page, pageSize]);
+
+  // Sync matrix permissions when selected role changes
+  useEffect(() => {
+    setMatrixPermissions(getRolePermissions(selectedMatrixRole));
+  }, [selectedMatrixRole]);
 
   const showMessage = (text, type) => {
     addToast(text, type === 'error' ? 'error' : type === 'success' ? 'success' : 'info');
@@ -518,7 +529,7 @@ export default function Users({ branches, fetchBranches, addToast }) {
 
                       return (
                         <tr key={p.id}>
-                          <td>{index + 1}</td>
+                          <td>{(page - 1) * pageSize + index + 1}</td>
                           <td style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{p.full_name || 'N/A'}</td>
                           <td style={{ fontSize: '0.85rem' }}>{p.email}</td>
                           <td>
@@ -584,6 +595,17 @@ export default function Users({ branches, fetchBranches, addToast }) {
                 </tbody>
               </table>
             </div>
+
+            <Pagination 
+              page={page}
+              totalCount={totalCount}
+              pageSize={pageSize}
+              onPageChange={setPage}
+              onPageSizeChange={(newSize) => {
+                setPageSize(newSize);
+                setPage(1);
+              }}
+            />
           </div>
         </div>
       )}

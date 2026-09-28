@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../supabaseClient';
 import { Users, Plus, Search, Trash2, Edit, Building, Mail, Phone, MapPin, Receipt, History, DollarSign } from 'lucide-react';
 import { TableLoading } from '../components/TableLoading';
+import Pagination from '../components/Pagination';
 
 export default function Contacts({ userProfile, branches = [], addToast }) {
   const [contacts, setContacts] = useState([]);
@@ -9,6 +10,11 @@ export default function Contacts({ userProfile, branches = [], addToast }) {
   const [purchases, setPurchases] = useState([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('customer'); // 'customer' or 'supplier'
+
+  // Pagination states
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
+  const [totalCount, setTotalCount] = useState(0);
 
   // Form states
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -30,8 +36,7 @@ export default function Contacts({ userProfile, branches = [], addToast }) {
   const [searchQuery, setSearchQuery] = useState('');
   const [filterBranchId, setFilterBranchId] = useState(() => {
     if (userProfile?.role === 'owner') {
-      const factoryBranch = branches.find((b) => b.is_factory || b.name?.toLowerCase().includes('factory'));
-      return factoryBranch ? factoryBranch.id : (branches.length > 0 ? branches[0].id : '');
+      return 'all';
     }
     return userProfile?.branch_id || (branches.length > 0 ? branches[0].id : '');
   });
@@ -46,79 +51,155 @@ export default function Contacts({ userProfile, branches = [], addToast }) {
 
   const role = userProfile?.role || 'staff';
 
-  useEffect(() => {
-    fetchContacts();
-  }, []);
-
-  useEffect(() => {
-    if (!filterBranchId && branches.length > 0) {
-      if (userProfile?.role === 'owner') {
-        const factoryBranch = branches.find((b) => b.is_factory || b.name?.toLowerCase().includes('factory'));
-        setFilterBranchId(factoryBranch ? factoryBranch.id : branches[0].id);
-      } else {
-        setFilterBranchId(userProfile?.branch_id || branches[0].id);
-      }
-    }
-  }, [branches, userProfile, filterBranchId]);
-
   const showMessage = (text, type) => {
     addToast(text, type === 'error' ? 'error' : type === 'success' ? 'success' : 'info');
   };
 
-  const fetchContacts = async () => {
+  const fetchContacts = useCallback(async () => {
     setLoading(true);
     try {
-      const { data: contactsData, error: contactsError } = await supabase
+      const from = (page - 1) * pageSize;
+      const to = from + pageSize - 1;
+
+      let query = supabase
         .from('contacts')
-        .select('*')
-        .order('name', { ascending: true });
+        .select('*', { count: 'exact' })
+        .eq('type', activeTab)
+        .order('name', { ascending: true })
+        .range(from, to);
+
+      if (searchQuery.trim()) {
+        query = query.or(`name.ilike.%${searchQuery.trim()}%,phone.ilike.%${searchQuery.trim()}%,email.ilike.%${searchQuery.trim()}%`);
+      }
+
+      if (role === 'owner') {
+        if (filterBranchId && filterBranchId !== 'all') {
+          query = query.eq('branch_id', filterBranchId);
+        }
+      } else if (userProfile?.branch_id) {
+        query = query.eq('branch_id', userProfile.branch_id);
+      }
+
+      const { data: contactsData, count, error: contactsError } = await query;
       if (contactsError) throw contactsError;
 
-      const { data: salesData, error: salesError } = await supabase
-        .from('sales')
-        .select('id, customer_id, branch_id, net_amount, paid_amount');
-      if (salesError) throw salesError;
-
-      const { data: purchasesData, error: purchasesError } = await supabase
-        .from('purchases')
-        .select('id, supplier_id, branch_id, net_amount, paid_amount');
-      if (purchasesError) throw purchasesError;
-
       setContacts(contactsData || []);
-      setSales(salesData || []);
-      setPurchases(purchasesData || []);
+      setTotalCount(count || 0);
+
+      // Fetch financial summaries for visible contacts
+      if (contactsData && contactsData.length > 0) {
+        const contactIds = contactsData.map((c) => c.id);
+        if (activeTab === 'customer') {
+          let salesQuery = supabase
+            .from('sales')
+            .select('id, customer_id, branch_id, net_amount, paid_amount')
+            .in('customer_id', contactIds);
+
+          if (role !== 'owner' && userProfile?.branch_id) {
+            salesQuery = salesQuery.eq('branch_id', userProfile.branch_id);
+          } else if (role === 'owner' && filterBranchId && filterBranchId !== 'all') {
+            salesQuery = salesQuery.eq('branch_id', filterBranchId);
+          }
+
+          const { data: salesData } = await salesQuery;
+          setSales(salesData || []);
+        } else {
+          let purchasesQuery = supabase
+            .from('purchases')
+            .select('id, supplier_id, branch_id, net_amount, paid_amount')
+            .in('supplier_id', contactIds);
+
+          if (role !== 'owner' && userProfile?.branch_id) {
+            purchasesQuery = purchasesQuery.eq('branch_id', userProfile.branch_id);
+          } else if (role === 'owner' && filterBranchId && filterBranchId !== 'all') {
+            purchasesQuery = purchasesQuery.eq('branch_id', filterBranchId);
+          }
+
+          const { data: purchasesData } = await purchasesQuery;
+          setPurchases(purchasesData || []);
+        }
+      } else {
+        setSales([]);
+        setPurchases([]);
+      }
     } catch (err) {
       console.error(err);
       showMessage('Failed to load contacts and financial balances.', 'error');
     } finally {
       setLoading(false);
     }
-  };
+  }, [page, pageSize, activeTab, searchQuery, filterBranchId, role, userProfile?.branch_id]);
+
+  useEffect(() => {
+    fetchContacts();
+  }, [fetchContacts]);
+
+  useEffect(() => {
+    if (!filterBranchId && branches.length > 0) {
+      if (userProfile?.role === 'owner') {
+        setFilterBranchId('all');
+      } else {
+        setFilterBranchId(userProfile?.branch_id || branches[0].id);
+      }
+    }
+  }, [branches, userProfile, filterBranchId]);
 
   const handleSaveContact = async (e) => {
     e.preventDefault();
-    if (!name.trim()) {
+    const trimmedName = name.trim();
+    const trimmedPhone = phone.trim();
+    const trimmedEmail = email.trim();
+    const trimmedAddress = address.trim();
+
+    if (!trimmedName) {
       showMessage('Please enter a valid name.', 'error');
       return;
     }
 
-    if (phone.trim() && !/^\+?[0-9\s\-()]{7,15}$/.test(phone.trim())) {
+    if (!trimmedPhone) {
+      showMessage('Phone number is mandatory. Please enter a valid phone number.', 'error');
+      return;
+    }
+
+    if (!/^\+?[0-9\s\-()]{7,15}$/.test(trimmedPhone)) {
       showMessage('Please enter a valid phone number (7-15 digits).', 'error');
       return;
     }
 
-    if (email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+    if (trimmedEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) {
       showMessage('Please enter a valid email address.', 'error');
       return;
     }
 
     setLoading(true);
     try {
+      // Duplicate phone check
+      let dupQuery = supabase
+        .from('contacts')
+        .select('id, name, phone, type')
+        .eq('phone', trimmedPhone)
+        .eq('type', activeTab);
+
+      if (isEditing && editingId) {
+        dupQuery = dupQuery.neq('id', editingId);
+      }
+
+      const { data: dupData, error: dupError } = await dupQuery;
+      if (dupError) throw dupError;
+
+      if (dupData && dupData.length > 0) {
+        const existing = dupData[0];
+        const typeLabel = activeTab === 'customer' ? 'Buyer' : 'Supplier';
+        showMessage(`A ${typeLabel} with phone "${trimmedPhone}" already exists (${existing.name}).`, 'error');
+        setLoading(false);
+        return;
+      }
+
       const payload = {
-        name: name.trim(),
-        phone: phone.trim() || null,
-        email: email.trim() || null,
-        address: address.trim() || null,
+        name: trimmedName,
+        phone: trimmedPhone,
+        email: trimmedEmail || null,
+        address: trimmedAddress || null,
       };
       if (branchId) {
         payload.branch_id = branchId;
@@ -179,25 +260,95 @@ export default function Contacts({ userProfile, branches = [], addToast }) {
     setShowCreateModal(true);
   };
 
-  const handleDelete = async (id, contactName) => {
-    if (!window.confirm(`Are you sure you want to delete contact "${contactName}"?`)) return;
+  const handleDelete = async (contact) => {
+    const contactId = typeof contact === 'object' ? contact.id : contact;
+    const contactName = typeof contact === 'object' ? contact.name : 'this contact';
+    const contactType = typeof contact === 'object' ? contact.type : activeTab;
 
-    setLoading(true);
+    // 1. Instant check against in-memory dues for the contact
+    const inMemoryDue = typeof contact === 'object' ? getContactBalance(contact) : 0;
+    if (inMemoryDue > 0.01) {
+      showMessage(
+        `Cannot delete "${contactName}": Outstanding balance of ৳${inMemoryDue.toLocaleString(undefined, { minimumFractionDigits: 2 })}. Settle all dues first.`,
+        'error'
+      );
+      return;
+    }
+
     try {
+      // 2. Validate against transaction history
+      if (contactType === 'customer') {
+        const { data: salesData, error: sErr } = await supabase
+          .from('sales')
+          .select('id, net_amount, paid_amount')
+          .eq('customer_id', contactId);
+
+        if (sErr) throw sErr;
+
+        if (salesData && salesData.length > 0) {
+          const totalDue = salesData.reduce(
+            (sum, s) => sum + (parseFloat(s.net_amount || 0) - parseFloat(s.paid_amount || 0)),
+            0
+          );
+          if (totalDue > 0.01) {
+            showMessage(
+              `Cannot delete "${contactName}": Outstanding due of ৳${totalDue.toLocaleString(undefined, { minimumFractionDigits: 2 })}. Settle all dues first.`,
+              'error'
+            );
+            return;
+          }
+          showMessage(
+            `Cannot delete "${contactName}": Linked with ${salesData.length} invoice record${salesData.length > 1 ? 's' : ''}. Editing or archiving is recommended.`,
+            'error'
+          );
+          return;
+        }
+      } else {
+        const { data: purchasesData, error: pErr } = await supabase
+          .from('purchases')
+          .select('id, net_amount, paid_amount')
+          .eq('supplier_id', contactId);
+
+        if (pErr) throw pErr;
+
+        if (purchasesData && purchasesData.length > 0) {
+          const totalDue = purchasesData.reduce(
+            (sum, p) => sum + (parseFloat(p.net_amount || 0) - parseFloat(p.paid_amount || 0)),
+            0
+          );
+          if (totalDue > 0.01) {
+            showMessage(
+              `Cannot delete "${contactName}": Outstanding payable of ৳${totalDue.toLocaleString(undefined, { minimumFractionDigits: 2 })}. Settle all dues first.`,
+              'error'
+            );
+            return;
+          }
+          showMessage(
+            `Cannot delete "${contactName}": Linked with ${purchasesData.length} purchase bill${purchasesData.length > 1 ? 's' : ''}. Editing or archiving is recommended.`,
+            'error'
+          );
+          return;
+        }
+      }
+
+      if (!window.confirm(`Are you sure you want to delete ${contactType === 'customer' ? 'buyer' : 'supplier'} "${contactName}"?`)) {
+        return;
+      }
+
       const { error } = await supabase
         .from('contacts')
         .delete()
-        .eq('id', id);
+        .eq('id', contactId);
 
       if (error) throw error;
-      showMessage('Contact profile deleted successfully.', 'success');
+      showMessage(`${contactType === 'customer' ? 'Buyer' : 'Supplier'} profile deleted successfully.`, 'success');
+      
+      // Fetch only after successful deletion
       fetchContacts();
-      if (editingId === id) resetForm();
+      if (editingId === contactId) resetForm();
     } catch (err) {
       console.error(err);
-      showMessage('Cannot delete contact. It might be referenced in active invoices.', 'error');
-    } finally {
-      setLoading(false);
+      showMessage('Cannot delete contact. It is referenced in active records.', 'error');
     }
   };
 
@@ -313,27 +464,6 @@ export default function Contacts({ userProfile, branches = [], addToast }) {
     return 'N/A';
   };
 
-  const filteredContacts = contacts.filter((c) => {
-    if (c.type !== activeTab) return false;
-    const matchesSearch =
-      c.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (c.phone && c.phone.toLowerCase().includes(searchQuery.toLowerCase())) ||
-      (c.email && c.email.toLowerCase().includes(searchQuery.toLowerCase()));
-    if (!matchesSearch) return false;
-
-    if (role === 'owner') {
-      if (filterBranchId && filterBranchId !== 'all') {
-        const b = getContactBranch(c);
-        if (b?.id !== filterBranchId) return false;
-      }
-    } else {
-      // Branch Manager and staff strictly see only their own branch contacts
-      const b = getContactBranch(c);
-      if (b?.id !== userProfile?.branch_id) return false;
-    }
-    return true;
-  });
-
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
       <div className="top-bar">
@@ -360,6 +490,7 @@ export default function Contacts({ userProfile, branches = [], addToast }) {
           className={`btn ${activeTab === 'customer' ? 'btn-primary' : 'btn-secondary'}`}
           onClick={() => {
             setActiveTab('customer');
+            setPage(1);
             resetForm();
           }}
         >
@@ -370,6 +501,7 @@ export default function Contacts({ userProfile, branches = [], addToast }) {
           className={`btn ${activeTab === 'supplier' ? 'btn-primary' : 'btn-secondary'}`}
           onClick={() => {
             setActiveTab('supplier');
+            setPage(1);
             resetForm();
           }}
         >
@@ -390,7 +522,10 @@ export default function Contacts({ userProfile, branches = [], addToast }) {
               style={{ paddingLeft: '2.25rem' }}
               placeholder={`Search ${activeTab === 'customer' ? 'buyers' : 'suppliers'} by name, phone, or email...`}
               value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
+              onChange={(e) => {
+                setSearchQuery(e.target.value);
+                setPage(1);
+              }}
             />
           </div>
           {role === 'owner' ? (
@@ -400,7 +535,10 @@ export default function Contacts({ userProfile, branches = [], addToast }) {
                 <select
                   className="input-control"
                   value={filterBranchId}
-                  onChange={(e) => setFilterBranchId(e.target.value)}
+                  onChange={(e) => {
+                    setFilterBranchId(e.target.value);
+                    setPage(1);
+                  }}
                   style={{ width: '180px', padding: '0.35rem 0.6rem', fontSize: '0.82rem' }}
                 >
                   <option value="all">All Branches</option>
@@ -432,7 +570,7 @@ export default function Contacts({ userProfile, branches = [], addToast }) {
         </div>
 
         {/* Table list */}
-        <div className="table-container">
+        <div className="table-container" style={{ borderBottomLeftRadius: 0, borderBottomRightRadius: 0 }}>
           <table>
             <thead>
               <tr>
@@ -447,20 +585,21 @@ export default function Contacts({ userProfile, branches = [], addToast }) {
             <tbody>
               {loading ? (
                 <TableLoading colSpan={6} message="Fetching contacts records..." />
-              ) : filteredContacts.length === 0 ? (
+              ) : contacts.length === 0 ? (
                 <tr>
                   <td colSpan="6" style={{ textAlign: 'center', padding: '2rem' }}>
                     No contacts found matching the filters.
                   </td>
                 </tr>
               ) : (
-                filteredContacts.map((c, index) => {
+                contacts.map((c, index) => {
                   const balance = getContactBalance(c);
                   const isCustomer = c.type === 'customer';
                   const br = getContactBranch(c);
+                  const rowNumber = (page - 1) * pageSize + index + 1;
                   return (
                     <tr key={c.id}>
-                      <td>{index + 1}</td>
+                      <td>{rowNumber}</td>
                       <td>
                         <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{c.name}</div>
                         <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
@@ -541,7 +680,7 @@ export default function Contacts({ userProfile, branches = [], addToast }) {
                               type="button"
                               className="btn btn-secondary btn-sm btn-icon"
                               style={{ color: 'var(--danger)' }}
-                              onClick={() => handleDelete(c.id, c.name)}
+                              onClick={() => handleDelete(c)}
                               title="Delete Profile"
                             >
                               <Trash2 size={14} />
@@ -556,6 +695,15 @@ export default function Contacts({ userProfile, branches = [], addToast }) {
             </tbody>
           </table>
         </div>
+
+        {/* Server-Side Pagination */}
+        <Pagination
+          currentPage={page}
+          totalCount={totalCount}
+          pageSize={pageSize}
+          onPageChange={setPage}
+          onPageSizeChange={setPageSize}
+        />
       </div>
 
       {/* CREATE / EDIT CONTACT MODAL */}
@@ -592,7 +740,7 @@ export default function Contacts({ userProfile, branches = [], addToast }) {
                 </div>
 
                 <div className="form-group">
-                  <label>Contact Phone Number</label>
+                  <label>Contact Phone Number *</label>
                   <div style={{ position: 'relative' }}>
                     <Phone size={14} style={{ position: 'absolute', left: '0.75rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
                     <input
@@ -602,6 +750,7 @@ export default function Contacts({ userProfile, branches = [], addToast }) {
                       placeholder="+8801xxxxxxxxx"
                       value={phone}
                       onChange={(e) => setPhone(e.target.value)}
+                      required
                     />
                   </div>
                 </div>
@@ -721,7 +870,7 @@ export default function Contacts({ userProfile, branches = [], addToast }) {
               >
                 <div style={{ textAlign: 'center' }}>
                   <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', display: 'block', fontWeight: 500 }}>
-                    {historyContact.type === 'customer' ? 'Total Sales Invoiced' : 'Total Procurement Billed'}
+                    {historyContact.type === 'customer' ? 'Total Sales' : 'Total Purchases'}
                   </span>
                   <span style={{ fontFamily: 'Outfit, sans-serif', fontSize: '1.25rem', fontWeight: 700, color: 'var(--text-primary)' }}>
                     ৳{(historyContact.type === 'customer' ? historySales : historyPurchases).reduce((sum, item) => sum + item.net_amount, 0).toFixed(2)}
@@ -729,7 +878,7 @@ export default function Contacts({ userProfile, branches = [], addToast }) {
                 </div>
                 <div style={{ textAlign: 'center', borderLeft: '1px solid var(--border-color)', borderRight: '1px solid var(--border-color)' }}>
                   <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', display: 'block', fontWeight: 500 }}>
-                    Total Payments Logged
+                    Total Paid
                   </span>
                   <span style={{ fontFamily: 'Outfit, sans-serif', fontSize: '1.25rem', fontWeight: 700, color: 'var(--success-text)' }}>
                     ৳{historyPayments.reduce((sum, p) => sum + p.amount, 0).toFixed(2)}
@@ -737,7 +886,7 @@ export default function Contacts({ userProfile, branches = [], addToast }) {
                 </div>
                 <div style={{ textAlign: 'center' }}>
                   <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', display: 'block', fontWeight: 500 }}>
-                    Outstanding Net Due
+                    Total Due
                   </span>
                   <span 
                     style={{ 
@@ -754,7 +903,7 @@ export default function Contacts({ userProfile, branches = [], addToast }) {
 
               {loadingHistory ? (
                 <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-secondary)' }}>
-                  Loading transaction history ledger logs...
+                  Loading history...
                 </div>
               ) : (
                 <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '1.5rem', alignItems: 'start' }}>
@@ -763,7 +912,7 @@ export default function Contacts({ userProfile, branches = [], addToast }) {
                   <div>
                     <h4 style={{ fontSize: '0.9rem', fontWeight: 700, marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
                       <Receipt size={16} className="text-muted" />
-                      <span>{historyContact.type === 'customer' ? 'Sales Invoices Log' : 'Procurement Bills Log'}</span>
+                      <span>{historyContact.type === 'customer' ? 'Sales Invoices' : 'Purchase Bills'}</span>
                     </h4>
                     <div className="table-container" style={{ overflowY: 'auto' }}>
                       <table style={{ fontSize: '0.8rem' }}>
@@ -771,6 +920,7 @@ export default function Contacts({ userProfile, branches = [], addToast }) {
                           <tr>
                             <th>SL</th>
                             <th>Invoice ID</th>
+                            <th>Branch</th>
                             <th>Date</th>
                             <th>Net Total</th>
                             <th>Due</th>
@@ -780,16 +930,20 @@ export default function Contacts({ userProfile, branches = [], addToast }) {
                         <tbody>
                           {(historyContact.type === 'customer' ? historySales : historyPurchases).length === 0 ? (
                             <tr>
-                              <td colSpan="6" style={{ textAlign: 'center', padding: '1.5rem' }}>No bills logged.</td>
+                              <td colSpan="7" style={{ textAlign: 'center', padding: '1.5rem' }}>No records found.</td>
                             </tr>
                           ) : (
                             (historyContact.type === 'customer' ? historySales : historyPurchases).map((inv, index) => {
                               const due = inv.net_amount - inv.paid_amount;
+                              const invBranch = branches.find((b) => b.id === inv.branch_id);
                               return (
                                 <tr key={inv.id}>
                                   <td>{index + 1}</td>
                                   <td style={{ fontFamily: 'monospace', fontWeight: 700 }}>
                                     {inv.invoice_number || `ID-${inv.id.substring(0, 5).toUpperCase()}`}
+                                  </td>
+                                  <td style={{ fontSize: '0.75rem', fontWeight: 600 }}>
+                                    {invBranch ? (invBranch.is_factory ? `🏭 ${invBranch.name}` : `🏪 ${invBranch.name}`) : '—'}
                                   </td>
                                   <td>{new Date(inv.sale_date || inv.purchase_date).toLocaleDateString()}</td>
                                   <td style={{ fontFamily: 'Outfit, sans-serif' }}>৳{inv.net_amount.toFixed(2)}</td>
@@ -814,7 +968,7 @@ export default function Contacts({ userProfile, branches = [], addToast }) {
                   <div>
                     <h4 style={{ fontSize: '0.9rem', fontWeight: 700, marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
                       <DollarSign size={16} className="text-muted" />
-                      <span>Payment Transactions Ledger</span>
+                      <span>Payment History</span>
                     </h4>
                     <div className="table-container" style={{ overflowY: 'auto' }}>
                       <table style={{ fontSize: '0.8rem' }}>
@@ -831,7 +985,7 @@ export default function Contacts({ userProfile, branches = [], addToast }) {
                         <tbody>
                           {historyPayments.length === 0 ? (
                             <tr>
-                              <td colSpan="6" style={{ textAlign: 'center', padding: '1.5rem' }}>No transactions recorded.</td>
+                              <td colSpan="6" style={{ textAlign: 'center', padding: '1.5rem' }}>No payments found.</td>
                             </tr>
                           ) : (
                             historyPayments.map((pay, index) => (
@@ -870,7 +1024,7 @@ export default function Contacts({ userProfile, branches = [], addToast }) {
                   setHistoryContact(null);
                 }}
               >
-                Close Ledger
+                Close
               </button>
             </div>
           </div>

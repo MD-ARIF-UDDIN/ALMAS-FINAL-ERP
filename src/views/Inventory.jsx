@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../supabaseClient';
 import { 
   Package, 
@@ -10,16 +10,27 @@ import {
   Store
 } from 'lucide-react';
 import { TableLoading } from '../components/TableLoading';
+import Pagination from '../components/Pagination';
 import { hasPermission } from '../utils/permissions';
 
 export default function Inventory({ userProfile, branches, addToast }) {
-  const [products, setProducts] = useState([]);
-  const [stockLevels, setStockLevels] = useState([]);
+  const [stockItems, setStockItems] = useState([]);
   const [movements, setMovements] = useState([]);
+  const [allProductsForAdjustment, setAllProductsForAdjustment] = useState([]);
   const [activeTab, setActiveTab] = useState('stock'); // 'stock', 'logs'
-  const [loading, setLoading] = useState(true);
   const [loadingStock, setLoadingStock] = useState(false);
   const [loadingMovements, setLoadingMovements] = useState(false);
+  const [submittingAdjustment, setSubmittingAdjustment] = useState(false);
+
+  // Pagination states - Stock
+  const [stockPage, setStockPage] = useState(1);
+  const [stockPageSize, setStockPageSize] = useState(25);
+  const [stockTotalCount, setStockTotalCount] = useState(0);
+
+  // Pagination states - Movements
+  const [logsPage, setLogsPage] = useState(1);
+  const [logsPageSize, setLogsPageSize] = useState(25);
+  const [logsTotalCount, setLogsTotalCount] = useState(0);
 
   // Filtering states
   const role = userProfile?.role || 'staff';
@@ -57,82 +68,115 @@ export default function Inventory({ userProfile, branches, addToast }) {
     }
   }, [branches, retailBranches, selectedBranchId]);
 
-  useEffect(() => {
-    fetchProducts();
-  }, []);
-
-  useEffect(() => {
-    if (selectedBranchId) {
-      fetchStockLevels();
-      fetchMovements();
-    }
-  }, [selectedBranchId]);
-
   const showMessage = (text, type) => {
     addToast(text, type === 'error' ? 'error' : type === 'success' ? 'success' : 'info');
   };
 
-  const fetchProducts = async () => {
-    setLoading(true);
+  // Fetch product list for dropdown in manual adjustment modal
+  const fetchProductsForModal = async () => {
     try {
-      const { data, error } = await supabase
+      const { data } = await supabase
         .from('products')
-        .select('*')
+        .select('id, name, sku, product_code')
         .order('name', { ascending: true });
-
-      if (error) throw error;
-      setProducts(data || []);
+      setAllProductsForAdjustment(data || []);
     } catch (err) {
       console.error(err);
-      showMessage('Failed to load products.', 'error');
-    } finally {
-      setLoading(false);
     }
   };
 
-  const fetchStockLevels = async () => {
+  useEffect(() => {
+    fetchProductsForModal();
+  }, []);
+
+  // Fetch paginated stock items for the selected branch
+  const fetchStockLevels = useCallback(async () => {
     if (!selectedBranchId) return;
     setLoadingStock(true);
     try {
-      const { data, error } = await supabase
-        .from('inventory')
+      const from = (stockPage - 1) * stockPageSize;
+      const to = from + stockPageSize - 1;
+
+      let query = supabase
+        .from('products')
         .select(`
           id,
-          branch_id,
-          quantity,
-          min_stock_level,
-          product_id,
-          products (
-            id,
-            sku,
-            product_code,
-            name,
-            category,
-            purchase_price,
-            sale_price
-          ),
-          branches (
-            name,
-            is_factory
-          )
-        `)
-        .eq('branch_id', selectedBranchId);
+          sku,
+          product_code,
+          name,
+          category,
+          purchase_price,
+          sale_price
+        `, { count: 'exact' });
 
-      if (error) throw error;
-      setStockLevels(data || []);
+      if (searchQuery.trim()) {
+        const cleanQuery = searchQuery.trim().replace(/[%_]/g, '');
+        query = query.or(`name.ilike.%${cleanQuery}%,product_code.ilike.%${cleanQuery}%,sku.ilike.%${cleanQuery}%,category.ilike.%${cleanQuery}%`);
+      }
+
+      const { data: prodData, count, error: prodError } = await query
+        .order('name', { ascending: true })
+        .range(from, to);
+
+      if (prodError) throw prodError;
+      setStockTotalCount(count || 0);
+
+      const prods = prodData || [];
+      if (prods.length === 0) {
+        setStockItems([]);
+        return;
+      }
+
+      // Fetch inventory quantities for these products in selected branch
+      const prodIds = prods.map((p) => p.id);
+      const { data: invData, error: invError } = await supabase
+        .from('inventory')
+        .select('id, product_id, quantity, min_stock_level')
+        .eq('branch_id', selectedBranchId)
+        .in('product_id', prodIds);
+
+      if (invError) throw invError;
+
+      const invMap = {};
+      (invData || []).forEach((inv) => {
+        invMap[inv.product_id] = inv;
+      });
+
+      const merged = prods.map((p) => {
+        const inv = invMap[p.id];
+        const qty = inv ? inv.quantity : 0;
+        const minStock = inv?.min_stock_level ?? 5;
+        const isOutOfStock = qty <= 0;
+        const isLowStock = !isOutOfStock && qty <= minStock;
+
+        return {
+          ...p,
+          inventoryId: inv?.id,
+          quantity: qty,
+          minStock,
+          isOutOfStock,
+          isLowStock,
+        };
+      });
+
+      setStockItems(merged);
     } catch (err) {
       console.error(err);
       showMessage('Failed to load stock levels.', 'error');
     } finally {
       setLoadingStock(false);
     }
-  };
+  }, [selectedBranchId, stockPage, stockPageSize, searchQuery]);
 
-  const fetchMovements = async () => {
+  // Fetch paginated movement logs for the selected branch
+  const fetchMovements = useCallback(async () => {
     if (!selectedBranchId) return;
     setLoadingMovements(true);
     try {
-      const { data, error } = await supabase
+      const from = (logsPage - 1) * logsPageSize;
+      const to = from + logsPageSize - 1;
+
+      let query = supabase
         .from('inventory_movements')
         .select(`
           id,
@@ -152,20 +196,46 @@ export default function Inventory({ userProfile, branches, addToast }) {
           profiles (
             full_name
           )
-        `)
-        .eq('branch_id', selectedBranchId)
+        `, { count: 'exact' })
+        .eq('branch_id', selectedBranchId);
+
+      if (movementFilter !== 'all') {
+        query = query.eq('type', movementFilter);
+      }
+
+      if (searchQuery.trim()) {
+        const cleanQuery = searchQuery.trim().replace(/[%_]/g, '');
+        query = query.or(`description.ilike.%${cleanQuery}%`);
+      }
+
+      const { data, count, error } = await query
         .order('created_at', { ascending: false })
-        .limit(100);
+        .range(from, to);
 
       if (error) throw error;
       setMovements(data || []);
+      setLogsTotalCount(count || 0);
     } catch (err) {
       console.error(err);
       showMessage('Failed to load stock movement ledger.', 'error');
     } finally {
       setLoadingMovements(false);
     }
-  };
+  }, [selectedBranchId, logsPage, logsPageSize, movementFilter, searchQuery]);
+
+  // Reset page when search or filters change
+  useEffect(() => {
+    setStockPage(1);
+    setLogsPage(1);
+  }, [searchQuery, movementFilter, selectedBranchId]);
+
+  useEffect(() => {
+    if (activeTab === 'stock') {
+      fetchStockLevels();
+    } else {
+      fetchMovements();
+    }
+  }, [activeTab, fetchStockLevels, fetchMovements]);
 
   // ====================================================================
   // MANUAL STOCK ADJUSTMENT
@@ -188,7 +258,7 @@ export default function Inventory({ userProfile, branches, addToast }) {
       return;
     }
 
-    setLoading(true);
+    setSubmittingAdjustment(true);
     try {
       const isOut = adjustmentType === 'adjustment_out';
       const actualQtyChange = isOut ? -qtyNum : qtyNum;
@@ -236,48 +306,11 @@ export default function Inventory({ userProfile, branches, addToast }) {
       console.error(err);
       showMessage('Failed to complete stock adjustment.', 'error');
     } finally {
-      setLoading(false);
+      setSubmittingAdjustment(false);
     }
   };
 
   const selectedBranchObj = branches.find((b) => b.id === selectedBranchId);
-
-  // Combined stock list for the selected independent branch
-  const branchStockList = products.map((p) => {
-    const inv = stockLevels.find((s) => s.product_id === p.id);
-    const qty = inv ? inv.quantity : 0;
-    const minStock = inv?.min_stock_level ?? 5;
-    const isOutOfStock = qty <= 0;
-    const isLowStock = !isOutOfStock && qty <= minStock;
-
-    return {
-      ...p,
-      inventoryId: inv?.id,
-      quantity: qty,
-      minStock,
-      isOutOfStock,
-      isLowStock,
-    };
-  });
-
-  const filteredBranchStock = branchStockList.filter(
-    (item) =>
-      item.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      item.sku?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (item.product_code && item.product_code.toLowerCase().includes(searchQuery.toLowerCase())) ||
-      (item.category && item.category.toLowerCase().includes(searchQuery.toLowerCase()))
-  );
-
-  const filteredMovements = movements.filter((m) => {
-    const q = searchQuery.toLowerCase();
-    const matchSearch =
-      m.products?.name?.toLowerCase().includes(q) ||
-      m.products?.sku?.toLowerCase().includes(q) ||
-      m.description?.toLowerCase().includes(q);
-
-    const matchType = movementFilter === 'all' || m.type === movementFilter;
-    return matchSearch && matchType;
-  });
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
@@ -330,8 +363,6 @@ export default function Inventory({ userProfile, branches, addToast }) {
         </div>
       </div>
 
-
-
       {/* Tab Navigation */}
       <div style={{ display: 'flex', borderBottom: '1px solid var(--border-color)', gap: '0.5rem', flexWrap: 'wrap' }}>
         {canViewStock && (
@@ -377,7 +408,7 @@ export default function Inventory({ userProfile, branches, addToast }) {
               </div>
 
               <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', fontWeight: 600 }}>
-                Showing stock for <strong>{selectedBranchObj?.name || 'Branch'}</strong> ({filteredBranchStock.length} items)
+                Showing stock for <strong>{selectedBranchObj?.name || 'Branch'}</strong>
               </div>
             </div>
 
@@ -394,18 +425,20 @@ export default function Inventory({ userProfile, branches, addToast }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {loading || loadingStock ? (
+                  {loadingStock ? (
                     <TableLoading colSpan={6} message={`Fetching stock for ${selectedBranchObj?.name || 'branch'}...`} />
-                  ) : filteredBranchStock.length === 0 ? (
+                  ) : stockItems.length === 0 ? (
                     <tr>
                       <td colSpan={6} style={{ textAlign: 'center', padding: '2.5rem', color: 'var(--text-muted)' }}>
                         No product stock records found.
                       </td>
                     </tr>
                   ) : (
-                    filteredBranchStock.map((item, index) => (
+                    stockItems.map((item, index) => (
                       <tr key={item.id}>
-                        <td style={{ textAlign: 'center', color: 'var(--text-muted)' }}>{index + 1}</td>
+                        <td style={{ textAlign: 'center', color: 'var(--text-muted)' }}>
+                          {(stockPage - 1) * stockPageSize + index + 1}
+                        </td>
                         <td>
                           <span style={{ fontWeight: 700, fontFamily: 'monospace', fontSize: '0.85rem', color: 'var(--primary)' }}>
                             {item.product_code || item.sku}
@@ -448,6 +481,17 @@ export default function Inventory({ userProfile, branches, addToast }) {
                 </tbody>
               </table>
             </div>
+
+            <Pagination 
+              page={stockPage}
+              totalCount={stockTotalCount}
+              pageSize={stockPageSize}
+              onPageChange={setStockPage}
+              onPageSizeChange={(newSize) => {
+                setStockPageSize(newSize);
+                setStockPage(1);
+              }}
+            />
           </div>
         </div>
       )}
@@ -464,7 +508,7 @@ export default function Inventory({ userProfile, branches, addToast }) {
                 type="text"
                 className="input-control"
                 style={{ paddingLeft: '2.2rem', fontSize: '0.85rem' }}
-                placeholder="Search movements by product, description..."
+                placeholder="Search movements by description..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
               />
@@ -502,18 +546,20 @@ export default function Inventory({ userProfile, branches, addToast }) {
               <tbody>
                 {loadingMovements ? (
                   <TableLoading colSpan={7} message={`Loading movement ledger for ${selectedBranchObj?.name || 'branch'}...`} />
-                ) : filteredMovements.length === 0 ? (
+                ) : movements.length === 0 ? (
                   <tr>
                     <td colSpan={7} style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>
                       No stock movements recorded for this branch.
                     </td>
                   </tr>
                 ) : (
-                  filteredMovements.map((m, index) => {
+                  movements.map((m, index) => {
                     const isIn = ['purchase', 'adjustment_in', 'transfer_in'].includes(m.type);
                     return (
                       <tr key={m.id}>
-                        <td style={{ textAlign: 'center', color: 'var(--text-muted)' }}>{index + 1}</td>
+                        <td style={{ textAlign: 'center', color: 'var(--text-muted)' }}>
+                          {(logsPage - 1) * logsPageSize + index + 1}
+                        </td>
                         <td style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
                           {new Date(m.created_at).toLocaleString()}
                         </td>
@@ -541,6 +587,17 @@ export default function Inventory({ userProfile, branches, addToast }) {
               </tbody>
             </table>
           </div>
+
+          <Pagination 
+            page={logsPage}
+            totalCount={logsTotalCount}
+            pageSize={logsPageSize}
+            onPageChange={setLogsPage}
+            onPageSizeChange={(newSize) => {
+              setLogsPageSize(newSize);
+              setLogsPage(1);
+            }}
+          />
         </div>
       )}
 
@@ -567,7 +624,7 @@ export default function Inventory({ userProfile, branches, addToast }) {
                     required
                   >
                     <option value="">-- Choose Product --</option>
-                    {products.map((p) => (
+                    {allProductsForAdjustment.map((p) => (
                       <option key={p.id} value={p.id}>
                         {p.product_code || p.sku} - {p.name || 'Unnamed'}
                       </option>
@@ -618,8 +675,8 @@ export default function Inventory({ userProfile, branches, addToast }) {
                 <button type="button" className="btn btn-secondary" onClick={() => setShowAdjustmentModal(false)}>
                   Cancel
                 </button>
-                <button type="submit" className="btn btn-primary" disabled={loading}>
-                  Save Adjustment
+                <button type="submit" className="btn btn-primary" disabled={submittingAdjustment}>
+                  {submittingAdjustment ? 'Saving...' : 'Save Adjustment'}
                 </button>
               </div>
             </form>

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../supabaseClient';
 import {
   Truck,
@@ -28,6 +28,7 @@ import {
   AlertTriangle
 } from 'lucide-react';
 import { TableLoading } from '../components/TableLoading';
+import Pagination from '../components/Pagination';
 
 export default function BranchChallans({ userProfile, branches = [], addToast }) {
   const role = userProfile?.role || 'staff';
@@ -61,6 +62,11 @@ export default function BranchChallans({ userProfile, branches = [], addToast })
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all'); // 'all', 'unpaid', 'partial', 'paid'
+
+  // Pagination states
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
+  const [totalCount, setTotalCount] = useState(0);
 
   // Modals
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -96,27 +102,6 @@ export default function BranchChallans({ userProfile, branches = [], addToast })
   const [payNotes, setPayNotes] = useState('');
   const [isSubmittingPayment, setIsSubmittingPayment] = useState(false);
 
-  useEffect(() => {
-    if (!selectedBranchId && branches.length > 0) {
-      if (isOwner) {
-        const factoryBranch = branches.find((b) => b.is_factory || b.name?.toLowerCase().includes('factory'));
-        setSelectedBranchId(factoryBranch ? factoryBranch.id : branches[0].id);
-      } else {
-        setSelectedBranchId(myBranchId || branches[0].id);
-      }
-    }
-    if (!fromBranchId && branches.length > 0) {
-      const factoryBranch = branches.find((b) => b.is_factory || b.name?.toLowerCase().includes('factory'));
-      setFromBranchId(factoryBranch ? factoryBranch.id : branches[0].id);
-    }
-  }, [branches, isOwner, myBranchId, selectedBranchId, fromBranchId]);
-
-  useEffect(() => {
-    fetchChallans();
-    fetchBranchPayments();
-    fetchCatalogProducts();
-  }, [selectedBranchId, statusFilter]);
-
   const showMessage = (text, type = 'info') => {
     addToast(text, type === 'error' ? 'error' : type === 'success' ? 'success' : 'info');
   };
@@ -134,9 +119,12 @@ export default function BranchChallans({ userProfile, branches = [], addToast })
     }
   };
 
-  const fetchChallans = async () => {
+  const fetchChallans = useCallback(async () => {
     setLoading(true);
     try {
+      const from = (page - 1) * pageSize;
+      const to = from + pageSize - 1;
+
       let query = supabase
         .from('branch_challans')
         .select(`
@@ -153,7 +141,7 @@ export default function BranchChallans({ userProfile, branches = [], addToast })
             total_price,
             product:products (id, sku, product_code, name, category)
           )
-        `)
+        `, { count: 'exact' })
         .order('created_at', { ascending: false });
 
       if (!isOwner && myBranchId) {
@@ -166,16 +154,22 @@ export default function BranchChallans({ userProfile, branches = [], addToast })
         query = query.eq('payment_status', statusFilter);
       }
 
-      const { data, error } = await query;
+      if (searchQuery.trim()) {
+        const cleanQuery = searchQuery.trim().replace(/[%_]/g, '');
+        query = query.or(`challan_no.ilike.%${cleanQuery}%,driver_name.ilike.%${cleanQuery}%,vehicle_no.ilike.%${cleanQuery}%`);
+      }
+
+      const { data, count, error } = await query.range(from, to);
       if (error) throw error;
       setChallans(data || []);
+      setTotalCount(count || 0);
     } catch (err) {
       console.error('Error loading challans:', err);
       showMessage('Failed to load branch delivery challans.', 'error');
     } finally {
       setLoading(false);
     }
-  };
+  }, [page, pageSize, isOwner, myBranchId, selectedBranchId, statusFilter, searchQuery]);
 
   const fetchBranchPayments = async () => {
     try {
@@ -184,14 +178,21 @@ export default function BranchChallans({ userProfile, branches = [], addToast })
         .select(`
           *,
           branch:branches (id, name, is_factory),
-          challan:branch_challans (id, challan_no, total_bill_amount, due_amount)
+          challan:branch_challans (
+            id,
+            challan_no,
+            total_bill_amount,
+            due_amount,
+            from_branch_id,
+            to_branch_id,
+            from_branch:branches!branch_challans_from_branch_id_fkey (id, name, is_factory),
+            to_branch:branches!branch_challans_to_branch_id_fkey (id, name, is_factory)
+          )
         `)
         .order('created_at', { ascending: false });
 
       if (!isOwner && myBranchId) {
         query = query.eq('branch_id', myBranchId);
-      } else if (isOwner && selectedBranchId && selectedBranchId !== 'all') {
-        query = query.eq('branch_id', selectedBranchId);
       }
 
       const { data, error } = await query;
@@ -201,6 +202,34 @@ export default function BranchChallans({ userProfile, branches = [], addToast })
       console.error('Error loading payments:', err);
     }
   };
+
+  useEffect(() => {
+    if (!selectedBranchId && branches.length > 0) {
+      if (isOwner) {
+        const factoryBranch = branches.find((b) => b.is_factory || b.name?.toLowerCase().includes('factory'));
+        setSelectedBranchId(factoryBranch ? factoryBranch.id : branches[0].id);
+      } else {
+        setSelectedBranchId(myBranchId || branches[0].id);
+      }
+    }
+    if (!fromBranchId && branches.length > 0) {
+      const factoryBranch = branches.find((b) => b.is_factory || b.name?.toLowerCase().includes('factory'));
+      setFromBranchId(factoryBranch ? factoryBranch.id : branches[0].id);
+    }
+  }, [branches, isOwner, myBranchId, selectedBranchId, fromBranchId]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [selectedBranchId, statusFilter, searchQuery]);
+
+  useEffect(() => {
+    fetchChallans();
+  }, [fetchChallans]);
+
+  useEffect(() => {
+    fetchBranchPayments();
+    fetchCatalogProducts();
+  }, []);
 
   // Pending payments awaiting Owner approval
   const pendingPayments = branchPayments.filter((p) => (p.status || 'approved') === 'pending');
@@ -391,6 +420,7 @@ export default function BranchChallans({ userProfile, branches = [], addToast })
   // Open Payment History Modal for a specific challan
   const handleOpenPaymentHistory = (challan) => {
     setActiveChallan(challan);
+    fetchBranchPayments();
     setShowPaymentHistoryModal(true);
   };
 
@@ -462,11 +492,12 @@ export default function BranchChallans({ userProfile, branches = [], addToast })
     await supabase.from('cash_ledger').insert([
       {
         branch_id: challanObj.from_branch_id || selectedBranchId,
-        account_type: method,
-        type: 'in',
-        amount: amountNum,
-        description: `Settlement Approved: Challan #${challanObj.challan_no} from ${challanObj.to_branch?.name || 'Branch'}`,
+        amount_in: amountNum,
+        amount_out: 0,
+        reference_id: challanObj.id,
+        description: `Settlement Approved: Challan #${challanObj.challan_no} from ${challanObj.to_branch?.name || 'Branch'} (${method})`,
         transaction_date: new Date(date).toISOString(),
+        created_by: userProfile?.id,
       },
     ]);
 
@@ -571,9 +602,6 @@ export default function BranchChallans({ userProfile, branches = [], addToast })
   const handlePrint = (challan) => {
     setActiveChallan(challan);
     setShowPrintModal(true);
-    setTimeout(() => {
-      window.print();
-    }, 400);
   };
 
   return (
@@ -892,14 +920,14 @@ export default function BranchChallans({ userProfile, branches = [], addToast })
             <tbody>
               {loading ? (
                 <TableLoading colSpan={10} message="Loading branch challans..." />
-              ) : filteredChallans.length === 0 ? (
+              ) : challans.length === 0 ? (
                 <tr>
                   <td colSpan={10} style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-muted)' }}>
                     No challans found.
                   </td>
                 </tr>
               ) : (
-                filteredChallans.map((ch, idx) => {
+                challans.map((ch, idx) => {
                   const totalBill = parseFloat(ch.total_bill_amount) || 0;
                   const paid = parseFloat(ch.paid_amount) || 0;
                   const due = parseFloat(ch.due_amount) || 0;
@@ -916,7 +944,9 @@ export default function BranchChallans({ userProfile, branches = [], addToast })
 
                   return (
                     <tr key={ch.id}>
-                      <td style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.8rem' }}>{idx + 1}</td>
+                      <td style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.8rem' }}>
+                        {(page - 1) * pageSize + idx + 1}
+                      </td>
                       <td>
                         <div style={{ fontWeight: 700, fontFamily: 'monospace', color: 'var(--primary)', fontSize: '0.85rem' }}>
                           {ch.challan_no}
@@ -1075,6 +1105,17 @@ export default function BranchChallans({ userProfile, branches = [], addToast })
             </tbody>
           </table>
         </div>
+
+        <Pagination 
+          page={page}
+          totalCount={totalCount}
+          pageSize={pageSize}
+          onPageChange={setPage}
+          onPageSizeChange={(newSize) => {
+            setPageSize(newSize);
+            setPage(1);
+          }}
+        />
       </div>
 
       {/* PAYMENT HISTORY & APPROVAL MODAL */}
@@ -1701,94 +1742,145 @@ export default function BranchChallans({ userProfile, branches = [], addToast })
         </div>
       )}
 
-      {/* PRINTABLE DELIVERY CHALLAN (Visible on Print) */}
+      {/* PRINTABLE DELIVERY CHALLAN PREVIEW MODAL */}
       {showPrintModal && activeChallan && (
-        <div className="print-only" style={{ padding: '2rem', fontFamily: 'sans-serif', color: '#000' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '2px solid #000', paddingBottom: '1rem', marginBottom: '1.5rem' }}>
-            <div>
-              <h1 style={{ margin: 0, fontSize: '1.6rem', textTransform: 'uppercase' }}>ALMAS ACCESSORIES LTD</h1>
-              <p style={{ margin: '0.2rem 0', fontSize: '0.9rem' }}>Central Factory & Production Hub</p>
-              <p style={{ margin: '0.2rem 0', fontSize: '0.85rem' }}>Chittagong / Dhaka, Bangladesh</p>
+        <div className="modal-overlay">
+          <div className="modal-content modal-lg" style={{ maxWidth: '850px', width: '95%', maxHeight: '95vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+            <div className="modal-header no-print">
+              <h3 className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <Printer size={18} />
+                <span>Delivery Challan Preview — #{activeChallan.challan_no}</span>
+              </h3>
+              <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                <button
+                  type="button"
+                  className="btn btn-primary btn-sm"
+                  onClick={() => window.print()}
+                >
+                  <Printer size={14} />
+                  <span>Print Document</span>
+                </button>
+                <button
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => setShowPrintModal(false)}
+                  style={{ borderRadius: '50%', padding: '0.4rem', border: 'none' }}
+                >
+                  ✕
+                </button>
+              </div>
             </div>
-            <div style={{ textAlign: 'right' }}>
-              <h2 style={{ margin: 0, fontSize: '1.4rem', color: '#2563eb' }}>DELIVERY CHALLAN</h2>
-              <p style={{ margin: '0.2rem 0', fontWeight: 'bold' }}>Challan No: {activeChallan.challan_no}</p>
-              <p style={{ margin: '0.2rem 0' }}>Date: {new Date(activeChallan.challan_date).toLocaleDateString()}</p>
-            </div>
-          </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2rem', marginBottom: '1.5rem', backgroundColor: '#f8fafc', padding: '1rem', border: '1px solid #e2e8f0' }}>
-            <div>
-              <p style={{ margin: 0, fontWeight: 'bold', textTransform: 'uppercase', fontSize: '0.8rem', color: '#64748b' }}>Delivered From (Origin):</p>
-              <p style={{ margin: '0.2rem 0', fontWeight: 'bold', fontSize: '1rem' }}>🏭 {activeChallan.from_branch?.name || 'Central Factory'}</p>
-            </div>
-            <div>
-              <p style={{ margin: 0, fontWeight: 'bold', textTransform: 'uppercase', fontSize: '0.8rem', color: '#64748b' }}>Delivered To (Destination):</p>
-              <p style={{ margin: '0.2rem 0', fontWeight: 'bold', fontSize: '1rem' }}>🏪 {activeChallan.to_branch?.name || 'Branch Outlet'}</p>
-            </div>
-          </div>
+            <div className="modal-body" style={{ overflowY: 'auto', padding: '1.5rem', backgroundColor: '#f1f5f9' }}>
+              <div
+                style={{
+                  backgroundColor: '#ffffff',
+                  padding: '2.5rem',
+                  borderRadius: '6px',
+                  boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
+                  fontFamily: 'sans-serif',
+                  color: '#000',
+                  margin: '0 auto',
+                  maxWidth: '760px',
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '2px solid #000', paddingBottom: '1rem', marginBottom: '1.5rem' }}>
+                  <div>
+                    <h1 style={{ margin: 0, fontSize: '1.5rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.5px' }}>ALMAS ACCESSORIES LTD</h1>
+                    <p style={{ margin: '0.2rem 0', fontSize: '0.85rem', color: '#475569' }}>Central Factory & Production Hub</p>
+                    <p style={{ margin: '0.2rem 0', fontSize: '0.82rem', color: '#64748b' }}>Chittagong / Dhaka, Bangladesh</p>
+                  </div>
+                  <div style={{ textAlign: 'right' }}>
+                    <h2 style={{ margin: 0, fontSize: '1.3rem', color: '#2563eb', fontWeight: 800 }}>DELIVERY CHALLAN</h2>
+                    <p style={{ margin: '0.2rem 0', fontWeight: 'bold', fontFamily: 'monospace', fontSize: '0.95rem' }}>#{activeChallan.challan_no}</p>
+                    <p style={{ margin: '0.2rem 0', fontSize: '0.85rem', color: '#475569' }}>Date: {new Date(activeChallan.challan_date).toLocaleDateString()}</p>
+                  </div>
+                </div>
 
-          {activeChallan.vehicle_no && (
-            <div style={{ marginBottom: '1.5rem', padding: '0.75rem', border: '1px solid #cbd5e1' }}>
-              <strong>Transport:</strong> Vehicle #{activeChallan.vehicle_no} | <strong>Driver:</strong> {activeChallan.driver_name || 'N/A'}
-            </div>
-          )}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem', marginBottom: '1.5rem', backgroundColor: '#f8fafc', padding: '1rem', border: '1px solid #e2e8f0', borderRadius: '4px' }}>
+                  <div>
+                    <p style={{ margin: 0, fontWeight: 'bold', textTransform: 'uppercase', fontSize: '0.75rem', color: '#64748b' }}>Delivered From (Origin):</p>
+                    <p style={{ margin: '0.2rem 0', fontWeight: 'bold', fontSize: '0.95rem' }}>🏭 {activeChallan.from_branch?.name || 'Central Factory'}</p>
+                  </div>
+                  <div>
+                    <p style={{ margin: 0, fontWeight: 'bold', textTransform: 'uppercase', fontSize: '0.75rem', color: '#64748b' }}>Delivered To (Destination):</p>
+                    <p style={{ margin: '0.2rem 0', fontWeight: 'bold', fontSize: '0.95rem' }}>🏪 {activeChallan.to_branch?.name || 'Branch Outlet'}</p>
+                  </div>
+                </div>
 
-          <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '1.5rem' }}>
-            <thead>
-              <tr style={{ backgroundColor: '#f1f5f9', borderBottom: '2px solid #cbd5e1' }}>
-                <th style={{ border: '1px solid #cbd5e1', padding: '8px', textAlign: 'left' }}>SL</th>
-                <th style={{ border: '1px solid #cbd5e1', padding: '8px', textAlign: 'left' }}>Product SKU & Description</th>
-                <th style={{ border: '1px solid #cbd5e1', padding: '8px', textAlign: 'right' }}>Dispatched Qty</th>
-                <th style={{ border: '1px solid #cbd5e1', padding: '8px', textAlign: 'right' }}>Transfer Rate (৳)</th>
-                <th style={{ border: '1px solid #cbd5e1', padding: '8px', textAlign: 'right' }}>Total Bill (৳)</th>
-              </tr>
-            </thead>
-            <tbody>
-              {(activeChallan.items || []).map((it, idx) => (
-                <tr key={idx}>
-                  <td style={{ border: '1px solid #cbd5e1', padding: '8px', textAlign: 'center' }}>{idx + 1}</td>
-                  <td style={{ border: '1px solid #cbd5e1', padding: '8px' }}>
-                    <strong>{it.product?.sku}</strong> - {it.product?.name}
-                  </td>
-                  <td style={{ border: '1px solid #cbd5e1', padding: '8px', textAlign: 'right', fontWeight: 'bold' }}>
-                    {it.dispatched_qty} {it.product?.unit || 'pcs'}
-                  </td>
-                  <td style={{ border: '1px solid #cbd5e1', padding: '8px', textAlign: 'right' }}>
-                    ৳{parseFloat(it.unit_transfer_price).toFixed(2)}
-                  </td>
-                  <td style={{ border: '1px solid #cbd5e1', padding: '8px', textAlign: 'right', fontWeight: 'bold' }}>
-                    ৳{parseFloat(it.total_price).toFixed(2)}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-            <tfoot>
-              <tr>
-                <td colSpan={4} style={{ border: '1px solid #cbd5e1', padding: '8px', textAlign: 'right', fontWeight: 'bold' }}>Grand Consignment Bill Total:</td>
-                <td style={{ border: '1px solid #cbd5e1', padding: '8px', textAlign: 'right', fontWeight: 'bold', fontSize: '1.1rem' }}>
-                  ৳{parseFloat(activeChallan.total_bill_amount).toFixed(2)}
-                </td>
-              </tr>
-            </tfoot>
-          </table>
+                {activeChallan.vehicle_no && (
+                  <div style={{ marginBottom: '1.5rem', padding: '0.65rem 0.85rem', border: '1px solid #cbd5e1', borderRadius: '4px', fontSize: '0.85rem', backgroundColor: '#fafafa' }}>
+                    <strong>Transport:</strong> Vehicle #{activeChallan.vehicle_no} {activeChallan.driver_name ? ` | Driver: ${activeChallan.driver_name}` : ''}
+                  </div>
+                )}
 
-          {activeChallan.notes && (
-            <p style={{ fontSize: '0.9rem', marginBottom: '2rem' }}>
-              <strong>Remarks:</strong> {activeChallan.notes}
-            </p>
-          )}
+                <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '1.5rem', fontSize: '0.85rem' }}>
+                  <thead>
+                    <tr style={{ backgroundColor: '#f1f5f9', borderBottom: '2px solid #cbd5e1' }}>
+                      <th style={{ border: '1px solid #cbd5e1', padding: '8px', textAlign: 'left', width: '35px' }}>SL</th>
+                      <th style={{ border: '1px solid #cbd5e1', padding: '8px', textAlign: 'left' }}>Product SKU & Description</th>
+                      <th style={{ border: '1px solid #cbd5e1', padding: '8px', textAlign: 'right', width: '100px' }}>Dispatched</th>
+                      <th style={{ border: '1px solid #cbd5e1', padding: '8px', textAlign: 'right', width: '110px' }}>Transfer Rate (৳)</th>
+                      <th style={{ border: '1px solid #cbd5e1', padding: '8px', textAlign: 'right', width: '120px' }}>Total Bill (৳)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(activeChallan.items || []).map((it, idx) => (
+                      <tr key={idx}>
+                        <td style={{ border: '1px solid #cbd5e1', padding: '8px', textAlign: 'center' }}>{idx + 1}</td>
+                        <td style={{ border: '1px solid #cbd5e1', padding: '8px' }}>
+                          <strong style={{ fontFamily: 'monospace' }}>{it.product?.sku}</strong> - {it.product?.name}
+                        </td>
+                        <td style={{ border: '1px solid #cbd5e1', padding: '8px', textAlign: 'right', fontWeight: 'bold' }}>
+                          {it.dispatched_qty} {it.product?.unit || 'pcs'}
+                        </td>
+                        <td style={{ border: '1px solid #cbd5e1', padding: '8px', textAlign: 'right' }}>
+                          ৳{parseFloat(it.unit_transfer_price).toFixed(2)}
+                        </td>
+                        <td style={{ border: '1px solid #cbd5e1', padding: '8px', textAlign: 'right', fontWeight: 'bold' }}>
+                          ৳{parseFloat(it.total_price).toFixed(2)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    <tr style={{ backgroundColor: '#f8fafc' }}>
+                      <td colSpan={4} style={{ border: '1px solid #cbd5e1', padding: '10px 8px', textAlign: 'right', fontWeight: 'bold' }}>Grand Consignment Bill Total:</td>
+                      <td style={{ border: '1px solid #cbd5e1', padding: '10px 8px', textAlign: 'right', fontWeight: 800, fontSize: '1.05rem', color: '#1e293b' }}>
+                        ৳{parseFloat(activeChallan.total_bill_amount).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                      </td>
+                    </tr>
+                  </tfoot>
+                </table>
 
-          {/* Signature Rows */}
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '4rem', paddingTop: '1rem' }}>
-            <div style={{ textAlign: 'center', width: '180px', borderTop: '1px solid #000' }}>
-              <p style={{ margin: '0.4rem 0', fontSize: '0.85rem' }}>Factory Dispatcher</p>
+                {activeChallan.notes && (
+                  <p style={{ fontSize: '0.85rem', marginBottom: '2rem', color: '#475569' }}>
+                    <strong>Remarks:</strong> {activeChallan.notes}
+                  </p>
+                )}
+
+                {/* Signature Rows */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '4rem', paddingTop: '1rem' }}>
+                  <div style={{ textAlign: 'center', width: '160px', borderTop: '1px solid #000' }}>
+                    <p style={{ margin: '0.4rem 0', fontSize: '0.82rem', fontWeight: 600 }}>Factory Dispatcher</p>
+                  </div>
+                  <div style={{ textAlign: 'center', width: '160px', borderTop: '1px solid #000' }}>
+                    <p style={{ margin: '0.4rem 0', fontSize: '0.82rem', fontWeight: 600 }}>Driver / Carrier</p>
+                  </div>
+                  <div style={{ textAlign: 'center', width: '160px', borderTop: '1px solid #000' }}>
+                    <p style={{ margin: '0.4rem 0', fontSize: '0.82rem', fontWeight: 600 }}>Branch Receiver</p>
+                  </div>
+                </div>
+              </div>
             </div>
-            <div style={{ textAlign: 'center', width: '180px', borderTop: '1px solid #000' }}>
-              <p style={{ margin: '0.4rem 0', fontSize: '0.85rem' }}>Driver / Carrier</p>
-            </div>
-            <div style={{ textAlign: 'center', width: '180px', borderTop: '1px solid #000' }}>
-              <p style={{ margin: '0.4rem 0', fontSize: '0.85rem' }}>Branch Receiver</p>
+
+            <div className="modal-footer no-print" style={{ justifyContent: 'space-between' }}>
+              <button type="button" className="btn btn-secondary" onClick={() => setShowPrintModal(false)}>
+                Close
+              </button>
+              <button type="button" className="btn btn-primary" onClick={() => window.print()}>
+                <Printer size={15} />
+                <span>Print Document</span>
+              </button>
             </div>
           </div>
         </div>
