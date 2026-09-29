@@ -317,10 +317,7 @@ export default function Inventory({ userProfile, branches, addToast }) {
       {/* Top Header */}
       <div className="top-bar">
         <div className="page-title-group">
-          <h1>Stock & Inventory</h1>
-          <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: '0.2rem' }}>
-            Branch physical inventory tracking & movement audits
-          </div>
+          <h1>Inventory</h1>
         </div>
 
         <div className="top-bar-actions" style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}>
@@ -608,7 +605,7 @@ export default function Inventory({ userProfile, branches, addToast }) {
         <div className="modal-overlay">
           <div className="modal-content" style={{ maxWidth: '480px', width: '95vw' }}>
             <div className="modal-header">
-              <h3 className="modal-title">Manual Stock Adjustment ({selectedBranchObj?.name})</h3>
+              <h3 className="modal-title">Stock Adjustment ({selectedBranchObj?.name})</h3>
               <button className="btn btn-secondary btn-sm" onClick={() => setShowAdjustmentModal(false)} style={{ borderRadius: '50%', padding: '0.35rem 0.5rem', border: 'none' }}>
                 ✕
               </button>
@@ -623,7 +620,7 @@ export default function Inventory({ userProfile, branches, addToast }) {
                     onChange={(e) => setAdjustmentProductId(e.target.value)}
                     required
                   >
-                    <option value="">-- Choose Product --</option>
+                    <option value="">-- Select Product --</option>
                     {allProductsForAdjustment.map((p) => (
                       <option key={p.id} value={p.id}>
                         {p.product_code || p.sku} - {p.name || 'Unnamed'}
@@ -634,7 +631,7 @@ export default function Inventory({ userProfile, branches, addToast }) {
 
                 <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '0.75rem' }}>
                   <div className="form-group">
-                    <label>Adjustment Type *</label>
+                    <label>Type *</label>
                     <select
                       className="input-control"
                       value={adjustmentType}
@@ -659,11 +656,11 @@ export default function Inventory({ userProfile, branches, addToast }) {
                 </div>
 
                 <div className="form-group">
-                  <label>Reason / Notes *</label>
+                  <label>Reason *</label>
                   <textarea
                     className="input-control"
                     style={{ minHeight: '65px' }}
-                    placeholder="e.g. Damage, winding loss, physical audit count..."
+                    placeholder="Enter reason for adjustment..."
                     value={adjustmentReason}
                     onChange={(e) => setAdjustmentReason(e.target.value)}
                     required

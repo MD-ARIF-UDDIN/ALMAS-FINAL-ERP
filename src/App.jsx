@@ -16,7 +16,7 @@ import Contacts from './views/Contacts';
 import BranchChallans from './views/BranchChallans';
 import Returns from './views/Returns';
 import { Menu } from 'lucide-react';
-import logo from './assets/logo.svg';
+import logo from './assets/almas_logo.jpg';
 
 function App() {
   const navigate = useNavigate();
@@ -149,11 +149,13 @@ function App() {
         <button className="mobile-menu-btn" onClick={() => setIsSidebarOpen(true)}>
           <Menu size={20} />
         </button>
-        <div className="mobile-logo" style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-          <img src={logo} alt="Almas Logo" style={{ width: '22px', height: '22px' }} />
-          <span>ALMAS ERP</span>
+        <div className="mobile-logo" style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+          <img src={logo} alt="Almas Logo" style={{ width: '26px', height: '26px', objectFit: 'contain', borderRadius: '4px' }} />
+          <span style={{ fontWeight: 800, fontFamily: 'Outfit, sans-serif', color: '#0369a1' }}>ALMAS ERP</span>
         </div>
-        <div style={{ width: 20 }}></div>
+        <div style={{ fontSize: '0.72rem', fontWeight: 600, color: 'var(--text-muted)' }}>
+          {userProfile?.role === 'owner' ? 'Owner' : (branches.find(b => b.id === userProfile?.branch_id)?.name || '')}
+        </div>
       </div>
 
       {/* Backdrop Overlay for Mobile Sidebar */}

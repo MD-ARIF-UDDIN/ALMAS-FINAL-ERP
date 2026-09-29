@@ -51,7 +51,7 @@ export default function Returns({ userProfile, branches, addToast }) {
 
   // Resolution mode: 'refund' vs 'exchange'
   const [resolutionMode, setResolutionMode] = useState('refund');
-  const [refundMethod, setRefundMethod] = useState('deduct_due');
+  const [refundMethod, setRefundMethod] = useState('cash');
   const [returnReason, setReturnReason] = useState('Customer Exchange / Return');
   const [returnNotes, setReturnNotes] = useState('');
 
@@ -206,10 +206,28 @@ export default function Returns({ userProfile, branches, addToast }) {
 
       if (error) throw error;
 
+      const branchIdToUse = invoice.branch_id || activeBranchId;
+      const productIds = (data || []).map((it) => it.product_id).filter(Boolean);
+      let stockMap = {};
+      if (productIds.length > 0) {
+        const { data: stockData } = await supabase
+          .from('inventory')
+          .select('product_id, quantity')
+          .eq('branch_id', branchIdToUse)
+          .in('product_id', productIds);
+
+        if (stockData) {
+          stockData.forEach((s) => {
+            stockMap[s.product_id] = s.quantity;
+          });
+        }
+      }
+
       setReturnItems(
         (data || []).map((it) => ({
           ...it,
           returnQty: 0,
+          currentStock: stockMap[it.product_id] ?? 0,
         }))
       );
     } catch (err) {
@@ -528,12 +546,12 @@ export default function Returns({ userProfile, branches, addToast }) {
       {/* TOP ACTION BAR */}
       <div className="no-print top-bar">
         <div className="page-title-group">
-          <h1>eReturn — Sales Returns & Exchanges</h1>
+          <h1>Returns & Exchanges</h1>
         </div>
         <div className="top-bar-actions" style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
           {userProfile?.role === 'owner' && (
             <div className="form-group" style={{ marginBottom: 0, flexDirection: 'row', alignItems: 'center', gap: '0.5rem' }}>
-              <label style={{ whiteSpace: 'nowrap' }}>Active Branch:</label>
+              <label style={{ whiteSpace: 'nowrap' }}>Branch:</label>
               <select
                 className="input-control"
                 value={activeBranchId}
@@ -555,54 +573,22 @@ export default function Returns({ userProfile, branches, addToast }) {
         </div>
       </div>
 
-      {/* KPI METRIC CARDS */}
-      <div style={{
-        display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-        gap: '1rem',
-      }}>
-        <div className="card" style={{ display: 'flex', alignItems: 'center', gap: '1rem', padding: '1.25rem' }}>
-          <div style={{ width: '48px', height: '48px', borderRadius: '12px', background: 'rgba(217, 119, 6, 0.1)', color: 'var(--warning-text, #d97706)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <RotateCcw size={24} />
-          </div>
-          <div>
-            <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', textTransform: 'uppercase', fontWeight: 600 }}>Total Restocked Logs</div>
-            <div style={{ fontSize: '1.4rem', fontWeight: 800 }}>{totalCount}</div>
-          </div>
-        </div>
-
-        <div className="card" style={{ display: 'flex', alignItems: 'center', gap: '1rem', padding: '1.25rem' }}>
-          <div style={{ width: '48px', height: '48px', borderRadius: '12px', background: 'rgba(37, 99, 235, 0.1)', color: 'var(--primary-color, #2563eb)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <RefreshCw size={24} />
-          </div>
-          <div>
-            <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', textTransform: 'uppercase', fontWeight: 600 }}>Active Resolution Modes</div>
-            <div style={{ fontSize: '1.1rem', fontWeight: 700 }}>Refund & Product Swap</div>
-          </div>
-        </div>
-
-        <div className="card" style={{ display: 'flex', alignItems: 'center', gap: '1rem', padding: '1.25rem' }}>
-          <div style={{ width: '48px', height: '48px', borderRadius: '12px', background: 'rgba(16, 185, 129, 0.1)', color: 'var(--success-text, #10b981)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <Package size={24} />
-          </div>
-          <div>
-            <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', textTransform: 'uppercase', fontWeight: 600 }}>Stock Restocking</div>
-            <div style={{ fontSize: '1.1rem', fontWeight: 700 }}>Automatic Physical Sync</div>
-          </div>
-        </div>
-      </div>
-
       {/* RETURNS & EXCHANGES HISTORY TABLE */}
-      <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-        <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem', padding: '1rem 1.25rem' }}>
-          <h3 className="card-title" style={{ margin: 0 }}>Returns & Restock Movements Ledger</h3>
+      <div className="no-print card" style={{ padding: 0, overflow: 'hidden' }}>
+        <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem', padding: '0.85rem 1.25rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+            <h3 className="card-title" style={{ margin: 0, fontSize: '0.98rem' }}>Return & Exchange History</h3>
+            <span className="badge badge-info" style={{ fontSize: '0.75rem', padding: '0.15rem 0.5rem' }}>
+              {totalCount} Total
+            </span>
+          </div>
           <div style={{ position: 'relative', width: '280px' }}>
             <Search size={14} style={{ position: 'absolute', left: '0.75rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
             <input
               type="text"
               className="input-control"
               style={{ paddingLeft: '2.25rem', padding: '0.35rem 0.6rem 0.35rem 2.25rem', fontSize: '0.82rem' }}
-              placeholder="Search by voucher # or invoice..."
+              placeholder="Search voucher or invoice #..."
               value={searchQuery}
               onChange={(e) => {
                 setSearchQuery(e.target.value);
@@ -616,13 +602,13 @@ export default function Returns({ userProfile, branches, addToast }) {
           <table>
             <thead>
               <tr>
-                <th>SL</th>
-                <th>Date & Time</th>
-                <th>Product Description</th>
-                {userProfile?.role === 'owner' && <th>Branch</th>}
-                <th style={{ textAlign: 'center' }}>Restock Qty</th>
-                <th>Movement Type</th>
-                <th>Voucher / Description Notes</th>
+                <th style={{ width: '50px' }}>SL</th>
+                <th style={{ width: '130px' }}>Date</th>
+                <th>Product</th>
+                {userProfile?.role === 'owner' && <th style={{ width: '120px' }}>Branch</th>}
+                <th style={{ textAlign: 'center', width: '90px' }}>Qty</th>
+                <th style={{ width: '130px' }}>Type</th>
+                <th>Details / Reason</th>
               </tr>
             </thead>
             <tbody>
@@ -683,21 +669,21 @@ export default function Returns({ userProfile, branches, addToast }) {
       {/* NEW RETURN / EXCHANGE MODAL */}
       {showModal && (
         <div className="modal-overlay">
-          <div className="modal-content modal-xl" style={{ maxHeight: '95vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-            <div className="modal-header">
+          <div className="modal-content modal-xl" style={{ maxHeight: '94vh', maxWidth: '1080px', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+            <div className="modal-header" style={{ padding: '0.65rem 1rem' }}>
               <div>
-                <h3 className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                  <RotateCcw size={18} style={{ color: 'var(--warning-text, #d97706)' }} />
-                  {modalStep === 1 ? 'Step 1: Select Sales Invoice' : 'Step 2: Configure Return & Exchange'}
+                <h3 className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', fontSize: '1.05rem' }}>
+                  <RotateCcw size={17} style={{ color: 'var(--warning-text, #d97706)' }} />
+                  {modalStep === 1 ? 'Select Invoice' : 'Return & Exchange'}
                 </h3>
-                <div style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', marginTop: '0.2rem' }}>
-                  {modalStep === 1 ? 'Search and select the customer invoice to process return against' : `Invoice #${selectedInvoice?.invoice_number} • Customer: ${selectedInvoice?.contacts?.name || 'Walk-in'}`}
+                <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', marginTop: '0.1rem' }}>
+                  {modalStep === 1 ? 'Search and select invoice to return' : `Invoice #${selectedInvoice?.invoice_number} • Customer: ${selectedInvoice?.contacts?.name || 'Walk-in Customer'}`}
                 </div>
               </div>
               <button
                 className="btn btn-secondary btn-sm"
                 onClick={() => setShowModal(false)}
-                style={{ borderRadius: '50%', padding: '0.4rem', border: 'none' }}
+                style={{ borderRadius: '50%', padding: '0.35rem 0.5rem', border: 'none', lineHeight: 1 }}
               >
                 ✕
               </button>
@@ -705,14 +691,14 @@ export default function Returns({ userProfile, branches, addToast }) {
 
             {modalStep === 1 ? (
               /* STEP 1: SELECT INVOICE */
-              <div className="modal-body" style={{ flex: 1, overflowY: 'auto', padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              <div className="modal-body" style={{ flex: 1, overflowY: 'auto', padding: '0.85rem 1rem', display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
                 <div style={{ position: 'relative' }}>
-                  <Search size={16} style={{ position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+                  <Search size={15} style={{ position: 'absolute', left: '0.75rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
                   <input
                     type="text"
                     className="input-control"
-                    style={{ paddingLeft: '2.5rem' }}
-                    placeholder="Search by invoice number (e.g. INV-1234) or customer notes..."
+                    style={{ padding: '0.35rem 0.6rem 0.35rem 2.2rem', fontSize: '0.85rem' }}
+                    placeholder="Search invoice number..."
                     value={invoiceSearch}
                     onChange={(e) => {
                       setInvoiceSearch(e.target.value);
@@ -721,17 +707,17 @@ export default function Returns({ userProfile, branches, addToast }) {
                   />
                 </div>
 
-                <div className="table-container" style={{ maxHeight: '380px', overflowY: 'auto' }}>
+                <div className="table-container" style={{ maxHeight: '360px', overflowY: 'auto' }}>
                   <table>
                     <thead>
                       <tr>
                         <th>Invoice #</th>
                         <th>Date</th>
-                        <th>Buyer Name</th>
-                        <th>Net Value</th>
+                        <th>Customer</th>
+                        <th>Net Total</th>
                         <th>Paid</th>
                         <th>Due</th>
-                        <th style={{ textAlign: 'center' }}>Action</th>
+                        <th style={{ textAlign: 'center', width: '90px' }}>Action</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -739,7 +725,7 @@ export default function Returns({ userProfile, branches, addToast }) {
                         <TableLoading colSpan={7} message="Searching invoices..." />
                       ) : invoiceSearchResults.length === 0 ? (
                         <tr>
-                          <td colSpan={7} style={{ textAlign: 'center', padding: '2rem' }}>
+                          <td colSpan={7} style={{ textAlign: 'center', padding: '1.5rem', fontSize: '0.85rem' }}>
                             No matching invoices found.
                           </td>
                         </tr>
@@ -760,10 +746,11 @@ export default function Returns({ userProfile, branches, addToast }) {
                                 <button
                                   type="button"
                                   className="btn btn-primary btn-sm"
+                                  style={{ padding: '0.25rem 0.55rem', fontSize: '0.78rem' }}
                                   onClick={() => handleSelectInvoice(inv)}
                                 >
                                   <span>Select</span>
-                                  <ArrowRight size={13} style={{ marginLeft: '0.25rem' }} />
+                                  <ArrowRight size={12} style={{ marginLeft: '0.2rem' }} />
                                 </button>
                               </td>
                             </tr>
@@ -777,244 +764,280 @@ export default function Returns({ userProfile, branches, addToast }) {
             ) : (
               /* STEP 2: CONFIGURE RETURN & RESOLUTION */
               <form onSubmit={handleSubmitReturnOrExchange} style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden', margin: 0 }}>
-                <div className="modal-body" style={{ flex: 1, overflowY: 'auto', padding: '1.25rem', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+                <div className="modal-body" style={{ flex: 1, overflowY: 'auto', padding: '0.75rem 1rem', display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
                   
                   {/* INVOICE SUMMARY BANNER */}
                   <div style={{
-                    display: 'grid',
-                    gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))',
-                    gap: '0.75rem',
-                    padding: '0.85rem 1rem',
-                    background: 'var(--bg-secondary)',
-                    borderRadius: 'var(--radius-md)',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    flexWrap: 'wrap',
+                    gap: '0.5rem',
+                    padding: '0.4rem 0.75rem',
+                    background: '#f8fafc',
+                    borderRadius: 'var(--border-radius-sm)',
                     border: '1px solid var(--border-color)',
-                    fontSize: '0.85rem',
+                    fontSize: '0.8rem',
                   }}>
                     <div>
-                      <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem', textTransform: 'uppercase', fontWeight: 600 }}>Date</div>
-                      <div style={{ fontWeight: 600 }}>{new Date(selectedInvoice.sale_date).toLocaleDateString()}</div>
+                      <span style={{ fontWeight: 700 }}>INV #{selectedInvoice.invoice_number}</span>
+                      <span style={{ color: 'var(--text-muted)', marginLeft: '0.4rem' }}>• {new Date(selectedInvoice.sale_date).toLocaleDateString()} • {selectedInvoice?.contacts?.name || 'Walk-in Customer'}</span>
                     </div>
-                    <div>
-                      <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem', textTransform: 'uppercase', fontWeight: 600 }}>Total Bill</div>
-                      <div style={{ fontWeight: 700 }}>৳{(selectedInvoice.net_amount || 0).toFixed(2)}</div>
-                    </div>
-                    <div>
-                      <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem', textTransform: 'uppercase', fontWeight: 600 }}>Paid</div>
-                      <div style={{ fontWeight: 700, color: 'var(--success-text)' }}>৳{(selectedInvoice.paid_amount || 0).toFixed(2)}</div>
-                    </div>
-                    <div>
-                      <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem', textTransform: 'uppercase', fontWeight: 600 }}>Due</div>
-                      <div style={{ fontWeight: 700, color: (selectedInvoice.net_amount - selectedInvoice.paid_amount) > 0 ? 'var(--danger-text)' : 'inherit' }}>
-                        ৳{Math.max(0, (selectedInvoice.net_amount || 0) - (selectedInvoice.paid_amount || 0)).toFixed(2)}
-                      </div>
+                    <div style={{ display: 'flex', gap: '0.85rem', alignItems: 'center' }}>
+                      <div><span style={{ color: 'var(--text-muted)' }}>Bill: </span><span style={{ fontWeight: 700 }}>৳{(selectedInvoice.net_amount || 0).toFixed(2)}</span></div>
+                      <div><span style={{ color: 'var(--text-muted)' }}>Paid: </span><span style={{ fontWeight: 700, color: 'var(--success-text)' }}>৳{(selectedInvoice.paid_amount || 0).toFixed(2)}</span></div>
+                      <div><span style={{ color: 'var(--text-muted)' }}>Due: </span><span style={{ fontWeight: 700, color: (selectedInvoice.net_amount - selectedInvoice.paid_amount) > 0 ? 'var(--danger-text)' : 'inherit' }}>৳{Math.max(0, (selectedInvoice.net_amount || 0) - (selectedInvoice.paid_amount || 0)).toFixed(2)}</span></div>
                     </div>
                   </div>
 
-                  {/* 1. SELECT RETURN ITEMS */}
-                  <div>
-                    <label style={{ display: 'block', fontWeight: 600, marginBottom: '0.4rem', fontSize: '0.9rem' }}>
-                      Items to Return:
-                    </label>
-                    {loadingInvoiceItems ? (
-                      <LoadingBlock message="Loading items..." />
-                    ) : (
-                      <div className="table-container" style={{ maxHeight: '200px', overflowY: 'auto' }}>
-                        <table>
-                          <thead>
-                            <tr>
-                              <th>Product</th>
-                              <th style={{ textAlign: 'center', width: '90px' }}>Sold</th>
-                              <th style={{ textAlign: 'right', width: '100px' }}>Price</th>
-                              <th style={{ textAlign: 'center', width: '130px' }}>Return Qty</th>
-                              <th style={{ textAlign: 'right', width: '110px' }}>Total</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {returnItems.map((item, idx) => {
-                              const retQty = parseInt(item.returnQty || 0, 10);
-                              const price = parseFloat(item.unit_price || 0);
-                              const lineCredit = retQty * price;
+                  {/* ACTION TYPE SELECTOR TABS */}
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
+                    <button
+                      type="button"
+                      onClick={() => setResolutionMode('refund')}
+                      style={{
+                        padding: '0.45rem 0.85rem',
+                        borderRadius: 'var(--border-radius-sm)',
+                        border: `1.5px solid ${resolutionMode === 'refund' ? 'var(--primary, #0284c7)' : 'var(--border-color)'}`,
+                        background: resolutionMode === 'refund' ? '#f0f9ff' : '#ffffff',
+                        color: resolutionMode === 'refund' ? '#0284c7' : '#475569',
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '0.45rem',
+                        fontSize: '0.84rem',
+                        transition: 'var(--transition)',
+                      }}
+                    >
+                      <DollarSign size={16} />
+                      <span>Refund / Money Return</span>
+                    </button>
 
-                              return (
-                                <tr key={item.id || idx}>
-                                  <td>
-                                    <div style={{ fontWeight: 600 }}>{item.products?.name}</div>
-                                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>SKU: {item.products?.sku || 'N/A'}</div>
-                                  </td>
-                                  <td style={{ textAlign: 'center', fontWeight: 600 }}>{item.quantity}</td>
-                                  <td style={{ textAlign: 'right' }}>৳{price.toFixed(2)}</td>
-                                  <td style={{ textAlign: 'center' }}>
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', justifyContent: 'center' }}>
-                                      <input
-                                        type="number"
-                                        min="0"
-                                        max={item.quantity}
-                                        value={item.returnQty === '' ? '' : item.returnQty}
-                                        onChange={(e) => {
-                                          const val = e.target.value;
-                                          setReturnItems((prev) =>
-                                            prev.map((it, i) => {
-                                              if (i === idx) {
-                                                if (val === '') return { ...it, returnQty: '' };
-                                                const parsed = parseInt(val, 10);
-                                                if (isNaN(parsed) || parsed < 0) return { ...it, returnQty: 0 };
-                                                if (parsed > it.quantity) return { ...it, returnQty: it.quantity };
-                                                return { ...it, returnQty: parsed };
-                                              }
-                                              return it;
-                                            })
-                                          );
-                                        }}
-                                        className="input-control"
-                                        style={{ width: '65px', textAlign: 'center', padding: '0.25rem 0.4rem', fontSize: '0.85rem' }}
-                                      />
-                                      <button
-                                        type="button"
-                                        className="btn btn-secondary btn-sm"
-                                        style={{ padding: '0.2rem 0.4rem', fontSize: '0.72rem' }}
-                                        onClick={() => {
-                                          setReturnItems((prev) =>
-                                            prev.map((it, i) => (i === idx ? { ...it, returnQty: it.quantity } : it))
-                                          );
-                                        }}
-                                      >
-                                        All
-                                      </button>
-                                    </div>
-                                  </td>
-                                  <td style={{ textAlign: 'right', fontWeight: 700, color: lineCredit > 0 ? 'var(--warning-text, #d97706)' : 'inherit' }}>
-                                    ৳{lineCredit.toFixed(2)}
-                                  </td>
-                                </tr>
-                              );
-                            })}
-                          </tbody>
-                        </table>
-                      </div>
-                    )}
+                    <button
+                      type="button"
+                      onClick={() => setResolutionMode('exchange')}
+                      style={{
+                        padding: '0.45rem 0.85rem',
+                        borderRadius: 'var(--border-radius-sm)',
+                        border: `1.5px solid ${resolutionMode === 'exchange' ? 'var(--primary, #0284c7)' : 'var(--border-color)'}`,
+                        background: resolutionMode === 'exchange' ? '#f0f9ff' : '#ffffff',
+                        color: resolutionMode === 'exchange' ? '#0284c7' : '#475569',
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '0.45rem',
+                        fontSize: '0.84rem',
+                        transition: 'var(--transition)',
+                      }}
+                    >
+                      <RefreshCw size={16} />
+                      <span>Product Return & Exchange</span>
+                    </button>
                   </div>
 
-                  {/* 2. CHOOSE RESOLUTION MODE */}
-                  <div>
-                    <label style={{ display: 'block', fontWeight: 600, marginBottom: '0.5rem', fontSize: '0.9rem' }}>
-                      Option:
-                    </label>
-                    <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
-                      <div
-                        onClick={() => setResolutionMode('refund')}
-                        style={{
-                          flex: 1,
-                          minWidth: '200px',
-                          padding: '0.85rem 1rem',
-                          borderRadius: 'var(--radius-md)',
-                          border: `2px solid ${resolutionMode === 'refund' ? 'var(--primary-color)' : 'var(--border-color)'}`,
-                          background: resolutionMode === 'refund' ? 'rgba(37, 99, 235, 0.05)' : 'var(--bg-secondary)',
-                          cursor: 'pointer',
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '0.75rem',
-                        }}
-                      >
-                        <DollarSign size={22} style={{ color: 'var(--primary-color)' }} />
-                        <div>
-                          <div style={{ fontWeight: 700, fontSize: '0.92rem' }}>Refund / Credit</div>
-                          <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>Money back or deduct from due</div>
+                  {/* WORKFLOW PANELS: SIDE-BY-SIDE IF EXCHANGE, SINGLE FOCUSED IF REFUND */}
+                  {resolutionMode === 'exchange' ? (
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(290px, 1fr))', gap: '0.65rem', minHeight: 0 }}>
+                      
+                      {/* PANEL 1: RETURN ITEMS (FROM CUSTOMER) */}
+                      <div style={{
+                        display: 'flex',
+                        flexDirection: 'column',
+                        border: '1.5px solid #fed7aa',
+                        background: '#fffaf5',
+                        borderRadius: 'var(--border-radius-sm)',
+                        padding: '0.55rem',
+                        gap: '0.4rem',
+                      }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <span style={{ fontWeight: 700, color: '#c2410c', fontSize: '0.84rem' }}>
+                            ⬅️ 1. Returning Items (From Customer)
+                          </span>
+                          <span style={{ fontSize: '0.72rem', color: '#9a3412' }}>Set return qty</span>
                         </div>
-                      </div>
 
-                      <div
-                        onClick={() => setResolutionMode('exchange')}
-                        style={{
-                          flex: 1,
-                          minWidth: '200px',
-                          padding: '0.85rem 1rem',
-                          borderRadius: 'var(--radius-md)',
-                          border: `2px solid ${resolutionMode === 'exchange' ? 'var(--primary-color)' : 'var(--border-color)'}`,
-                          background: resolutionMode === 'exchange' ? 'rgba(37, 99, 235, 0.05)' : 'var(--bg-secondary)',
-                          cursor: 'pointer',
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '0.75rem',
-                        }}
-                      >
-                        <RefreshCw size={22} style={{ color: 'var(--primary-color)' }} />
-                        <div>
-                          <div style={{ fontWeight: 700, fontSize: '0.92rem' }}>Product Exchange</div>
-                          <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>Replace with new items</div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* 3. EXCHANGE PRODUCT PICKER (IF EXCHANGE MODE) */}
-                  {resolutionMode === 'exchange' && (
-                    <div style={{ padding: '1rem', background: 'var(--bg-secondary)', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
-                      <div style={{ fontWeight: 600, fontSize: '0.88rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                        <ShoppingCart size={15} />
-                        Choose Replacement Products:
-                      </div>
-
-                      {/* Search replacement items */}
-                      <div style={{ position: 'relative' }}>
-                        <Search size={14} style={{ position: 'absolute', left: '0.75rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
-                        <input
-                          type="text"
-                          className="input-control"
-                          style={{ paddingLeft: '2.25rem', fontSize: '0.85rem' }}
-                          placeholder="Search product name or SKU..."
-                          value={catalogSearch}
-                          onChange={(e) => setCatalogSearch(e.target.value)}
-                        />
-                      </div>
-
-                      {/* Replacement catalog grid */}
-                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: '0.5rem', maxHeight: '160px', overflowY: 'auto' }}>
-                        {branchCatalog
-                          .filter((c) =>
-                            c.products?.name?.toLowerCase().includes(catalogSearch.toLowerCase()) ||
-                            c.products?.sku?.toLowerCase().includes(catalogSearch.toLowerCase())
-                          )
-                          .map((item) => (
-                            <div
-                              key={item.product_id}
-                              onClick={() => addToExchangeCart(item)}
-                              style={{
-                                padding: '0.5rem 0.75rem',
-                                background: 'var(--bg-card)',
-                                borderRadius: 'var(--radius-sm)',
-                                border: '1px solid var(--border-color)',
-                                cursor: 'pointer',
-                                fontSize: '0.82rem',
-                              }}
-                            >
-                              <div style={{ fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{item.products?.name}</div>
-                              <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '0.25rem', color: 'var(--text-muted)', fontSize: '0.75rem' }}>
-                                <span>৳{item.products?.sale_price?.toFixed(2)}</span>
-                                <span>Stock: {item.quantity}</span>
-                              </div>
-                            </div>
-                          ))}
-                      </div>
-
-                      {/* Selected Exchange Replacement Items Cart */}
-                      {exchangeCart.length > 0 && (
-                        <div>
-                          <div style={{ fontWeight: 600, fontSize: '0.85rem', marginBottom: '0.4rem' }}>Selected Replacement Items:</div>
-                          <div className="table-container" style={{ maxHeight: '150px', overflowY: 'auto' }}>
+                        {loadingInvoiceItems ? (
+                          <LoadingBlock message="Loading items..." />
+                        ) : (
+                          <div className="table-container" style={{ flex: 1, maxHeight: '180px', overflowY: 'auto', background: '#ffffff' }}>
                             <table>
                               <thead>
                                 <tr>
-                                  <th>Item</th>
-                                  <th style={{ width: '90px', textAlign: 'center' }}>Qty</th>
-                                  <th style={{ width: '100px', textAlign: 'right' }}>Price</th>
-                                  <th style={{ width: '110px', textAlign: 'right' }}>Total</th>
-                                  <th style={{ width: '40px' }}></th>
+                                  <th>Product</th>
+                                  <th style={{ textAlign: 'center', width: '55px' }}>Avail</th>
+                                  <th style={{ textAlign: 'center', width: '55px' }}>Sold</th>
+                                  <th style={{ textAlign: 'right', width: '75px' }}>Price</th>
+                                  <th style={{ textAlign: 'center', width: '105px' }}>Return Qty</th>
+                                  <th style={{ textAlign: 'right', width: '80px' }}>Total</th>
                                 </tr>
                               </thead>
                               <tbody>
-                                {exchangeCart.map((it, idx) => (
+                                {returnItems.map((item, idx) => {
+                                  const retQty = parseInt(item.returnQty || 0, 10);
+                                  const price = parseFloat(item.unit_price || 0);
+                                  const lineCredit = retQty * price;
+
+                                  return (
+                                    <tr key={item.id || idx}>
+                                      <td>
+                                        <div style={{ fontWeight: 600, fontSize: '0.8rem' }}>{item.products?.name}</div>
+                                        <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>SKU: {item.products?.sku || 'N/A'}</div>
+                                      </td>
+                                      <td style={{ textAlign: 'center', fontWeight: 600, color: 'var(--primary, #0284c7)', fontSize: '0.8rem' }}>
+                                        {item.currentStock ?? 0}
+                                      </td>
+                                      <td style={{ textAlign: 'center', fontWeight: 600, fontSize: '0.8rem' }}>{item.quantity}</td>
+                                      <td style={{ textAlign: 'right', fontSize: '0.8rem' }}>৳{price.toFixed(2)}</td>
+                                      <td style={{ textAlign: 'center' }}>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.2rem', justifyContent: 'center' }}>
+                                          <input
+                                            type="number"
+                                            min="0"
+                                            max={item.quantity}
+                                            value={item.returnQty === '' ? '' : item.returnQty}
+                                            onChange={(e) => {
+                                              const val = e.target.value;
+                                              setReturnItems((prev) =>
+                                                prev.map((it, i) => {
+                                                  if (i === idx) {
+                                                    if (val === '') return { ...it, returnQty: '' };
+                                                    const parsed = parseInt(val, 10);
+                                                    if (isNaN(parsed) || parsed < 0) return { ...it, returnQty: 0 };
+                                                    if (parsed > it.quantity) return { ...it, returnQty: it.quantity };
+                                                    return { ...it, returnQty: parsed };
+                                                  }
+                                                  return it;
+                                                })
+                                              );
+                                            }}
+                                            className="input-control"
+                                            style={{ width: '48px', textAlign: 'center', padding: '0.15rem 0.25rem', fontSize: '0.8rem' }}
+                                          />
+                                          <button
+                                            type="button"
+                                            className="btn btn-secondary btn-sm"
+                                            style={{ padding: '0.1rem 0.3rem', fontSize: '0.68rem' }}
+                                            onClick={() => {
+                                              setReturnItems((prev) =>
+                                                prev.map((it, i) => (i === idx ? { ...it, returnQty: it.quantity } : it))
+                                              );
+                                            }}
+                                          >
+                                            All
+                                          </button>
+                                        </div>
+                                      </td>
+                                      <td style={{ textAlign: 'right', fontWeight: 700, fontSize: '0.82rem', color: lineCredit > 0 ? 'var(--warning-text, #d97706)' : 'inherit' }}>
+                                        ৳{lineCredit.toFixed(2)}
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.35rem 0.6rem', background: '#ffedd5', borderRadius: '4px', border: '1px solid #fed7aa' }}>
+                          <span style={{ fontWeight: 600, fontSize: '0.8rem', color: '#9a3412' }}>Total Return Credit:</span>
+                          <span style={{ fontWeight: 800, fontSize: '0.92rem', color: '#c2410c' }}>
+                            ৳{totalReturnCredit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* PANEL 2: REPLACEMENT ITEMS (TO CUSTOMER) */}
+                      <div style={{
+                        display: 'flex',
+                        flexDirection: 'column',
+                        border: '1.5px solid #bae6fd',
+                        background: '#f0f9ff',
+                        borderRadius: 'var(--border-radius-sm)',
+                        padding: '0.55rem',
+                        gap: '0.4rem',
+                      }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <span style={{ fontWeight: 700, color: '#0369a1', fontSize: '0.84rem' }}>
+                            ➡️ 2. Replacement Items (To Customer)
+                          </span>
+                          <span style={{ fontSize: '0.72rem', color: '#0284c7' }}>Pick new items</span>
+                        </div>
+
+                        {/* Search replacement items */}
+                        <div style={{ position: 'relative' }}>
+                          <Search size={13} style={{ position: 'absolute', left: '0.55rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+                          <input
+                            type="text"
+                            className="input-control"
+                            style={{ padding: '0.2rem 0.4rem 0.2rem 1.75rem', fontSize: '0.78rem', background: '#ffffff' }}
+                            placeholder="Search replacement product..."
+                            value={catalogSearch}
+                            onChange={(e) => setCatalogSearch(e.target.value)}
+                          />
+                        </div>
+
+                        {/* Replacement Catalog Quick Grid */}
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(135px, 1fr))', gap: '0.25rem', maxHeight: '75px', overflowY: 'auto' }}>
+                          {branchCatalog
+                            .filter((c) =>
+                              c.products?.name?.toLowerCase().includes(catalogSearch.toLowerCase()) ||
+                              c.products?.sku?.toLowerCase().includes(catalogSearch.toLowerCase())
+                            )
+                            .map((item) => (
+                              <div
+                                key={item.product_id}
+                                onClick={() => addToExchangeCart(item)}
+                                style={{
+                                  padding: '0.25rem 0.45rem',
+                                  background: '#ffffff',
+                                  borderRadius: 'var(--border-radius-sm)',
+                                  border: '1px solid #bae6fd',
+                                  cursor: 'pointer',
+                                  fontSize: '0.74rem',
+                                }}
+                              >
+                                <div style={{ fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{item.products?.name}</div>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '0.1rem', color: 'var(--text-muted)', fontSize: '0.68rem' }}>
+                                  <span>৳{item.products?.sale_price?.toFixed(2)}</span>
+                                  <span style={{ fontWeight: 600, color: 'var(--primary, #0284c7)' }}>Stock: {item.quantity}</span>
+                                </div>
+                              </div>
+                            ))}
+                        </div>
+
+                        {/* Selected Replacement Items Cart */}
+                        <div className="table-container" style={{ flex: 1, maxHeight: '95px', overflowY: 'auto', background: '#ffffff' }}>
+                          <table>
+                            <thead>
+                              <tr>
+                                <th>Item</th>
+                                <th style={{ width: '50px', textAlign: 'center' }}>Avail</th>
+                                <th style={{ width: '60px', textAlign: 'center' }}>Qty</th>
+                                <th style={{ width: '75px', textAlign: 'right' }}>Price</th>
+                                <th style={{ width: '80px', textAlign: 'right' }}>Total</th>
+                                <th style={{ width: '25px' }}></th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {exchangeCart.length === 0 ? (
+                                <tr>
+                                  <td colSpan={6} style={{ textAlign: 'center', padding: '0.6rem', color: 'var(--text-muted)', fontSize: '0.75rem' }}>
+                                    Click products above to add replacement items.
+                                  </td>
+                                </tr>
+                              ) : (
+                                exchangeCart.map((it, idx) => (
                                   <tr key={it.product_id}>
-                                    <td style={{ fontWeight: 600 }}>{it.product?.name}</td>
+                                    <td>
+                                      <div style={{ fontWeight: 600, fontSize: '0.78rem' }}>{it.product?.name}</div>
+                                    </td>
+                                    <td style={{ textAlign: 'center', fontWeight: 600, color: 'var(--primary, #0284c7)', fontSize: '0.78rem' }}>
+                                      {it.maxStock}
+                                    </td>
                                     <td style={{ textAlign: 'center' }}>
                                       <input
                                         type="number"
@@ -1028,157 +1051,301 @@ export default function Returns({ userProfile, branches, addToast }) {
                                           );
                                         }}
                                         className="input-control"
-                                        style={{ width: '60px', textAlign: 'center', padding: '0.2rem' }}
+                                        style={{ width: '42px', textAlign: 'center', padding: '0.1rem 0.2rem', fontSize: '0.78rem' }}
                                       />
                                     </td>
-                                    <td style={{ textAlign: 'right' }}>৳{it.unit_price.toFixed(2)}</td>
-                                    <td style={{ textAlign: 'right', fontWeight: 700 }}>৳{(it.quantity * it.unit_price).toFixed(2)}</td>
+                                    <td style={{ textAlign: 'right' }}>
+                                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '0.15rem' }}>
+                                        <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>৳</span>
+                                        <input
+                                          type="number"
+                                          min="0"
+                                          step="any"
+                                          value={it.unit_price === '' ? '' : it.unit_price}
+                                          onChange={(e) => {
+                                            const val = e.target.value;
+                                            setExchangeCart(
+                                              exchangeCart.map((c, i) => {
+                                                if (i === idx) {
+                                                  if (val === '') return { ...c, unit_price: '' };
+                                                  const parsed = parseFloat(val);
+                                                  return { ...c, unit_price: isNaN(parsed) ? 0 : parsed };
+                                                }
+                                                return c;
+                                              })
+                                            );
+                                          }}
+                                          className="input-control"
+                                          style={{ width: '64px', textAlign: 'right', padding: '0.1rem 0.25rem', fontSize: '0.78rem', background: '#fff' }}
+                                        />
+                                      </div>
+                                    </td>
+                                    <td style={{ textAlign: 'right', fontWeight: 700, fontSize: '0.8rem' }}>
+                                      ৳{((parseFloat(it.quantity) || 0) * (parseFloat(it.unit_price) || 0)).toFixed(2)}
+                                    </td>
                                     <td>
                                       <button
                                         type="button"
                                         onClick={() => setExchangeCart(exchangeCart.filter((_, i) => i !== idx))}
-                                        style={{ background: 'none', border: 'none', color: 'var(--danger-text)', cursor: 'pointer' }}
+                                        style={{ background: 'none', border: 'none', color: 'var(--danger-text)', cursor: 'pointer', padding: '0.1rem' }}
                                       >
-                                        <Trash2 size={14} />
+                                        <Trash2 size={12} />
                                       </button>
                                     </td>
                                   </tr>
-                                ))}
-                              </tbody>
-                            </table>
-                          </div>
+                                ))
+                              )}
+                            </tbody>
+                          </table>
+                        </div>
+
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.35rem 0.6rem', background: '#e0f2fe', borderRadius: '4px', border: '1px solid #bae6fd' }}>
+                          <span style={{ fontWeight: 600, fontSize: '0.8rem', color: '#0369a1' }}>Total Replacement:</span>
+                          <span style={{ fontWeight: 800, fontSize: '0.92rem', color: '#0284c7' }}>
+                            ৳{totalExchangeValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    /* FOCUSED RETURN ITEMS PANEL WHEN IN REFUND MODE */
+                    <div style={{
+                      display: 'flex',
+                      flexDirection: 'column',
+                      border: '1.5px solid #fed7aa',
+                      background: '#fffaf5',
+                      borderRadius: 'var(--border-radius-sm)',
+                      padding: '0.65rem',
+                      gap: '0.5rem',
+                    }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span style={{ fontWeight: 700, color: '#c2410c', fontSize: '0.86rem' }}>
+                          ⬅️ Items Customer is Returning
+                        </span>
+                        <span style={{ fontSize: '0.74rem', color: '#9a3412' }}>Enter quantity to return</span>
+                      </div>
+
+                      {loadingInvoiceItems ? (
+                        <LoadingBlock message="Loading items..." />
+                      ) : (
+                        <div className="table-container" style={{ maxHeight: '200px', overflowY: 'auto', background: '#ffffff' }}>
+                          <table>
+                            <thead>
+                              <tr>
+                                <th>Product</th>
+                                <th style={{ textAlign: 'center', width: '65px' }}>Avail</th>
+                                <th style={{ textAlign: 'center', width: '65px' }}>Sold</th>
+                                <th style={{ textAlign: 'right', width: '85px' }}>Price</th>
+                                <th style={{ textAlign: 'center', width: '120px' }}>Return Qty</th>
+                                <th style={{ textAlign: 'right', width: '90px' }}>Total</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {returnItems.map((item, idx) => {
+                                const retQty = parseInt(item.returnQty || 0, 10);
+                                const price = parseFloat(item.unit_price || 0);
+                                const lineCredit = retQty * price;
+
+                                return (
+                                  <tr key={item.id || idx}>
+                                    <td>
+                                      <div style={{ fontWeight: 600, fontSize: '0.82rem' }}>{item.products?.name}</div>
+                                      <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>SKU: {item.products?.sku || 'N/A'}</div>
+                                    </td>
+                                    <td style={{ textAlign: 'center', fontWeight: 600, color: 'var(--primary, #0284c7)' }}>
+                                      {item.currentStock ?? 0}
+                                    </td>
+                                    <td style={{ textAlign: 'center', fontWeight: 600 }}>{item.quantity}</td>
+                                    <td style={{ textAlign: 'right' }}>৳{price.toFixed(2)}</td>
+                                    <td style={{ textAlign: 'center' }}>
+                                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', justifyContent: 'center' }}>
+                                        <input
+                                          type="number"
+                                          min="0"
+                                          max={item.quantity}
+                                          value={item.returnQty === '' ? '' : item.returnQty}
+                                          onChange={(e) => {
+                                            const val = e.target.value;
+                                            setReturnItems((prev) =>
+                                              prev.map((it, i) => {
+                                                if (i === idx) {
+                                                  if (val === '') return { ...it, returnQty: '' };
+                                                  const parsed = parseInt(val, 10);
+                                                  if (isNaN(parsed) || parsed < 0) return { ...it, returnQty: 0 };
+                                                  if (parsed > it.quantity) return { ...it, returnQty: it.quantity };
+                                                  return { ...it, returnQty: parsed };
+                                                }
+                                                return it;
+                                              })
+                                            );
+                                          }}
+                                          className="input-control"
+                                          style={{ width: '55px', textAlign: 'center', padding: '0.2rem 0.35rem', fontSize: '0.82rem' }}
+                                        />
+                                        <button
+                                          type="button"
+                                          className="btn btn-secondary btn-sm"
+                                          style={{ padding: '0.15rem 0.35rem', fontSize: '0.7rem' }}
+                                          onClick={() => {
+                                            setReturnItems((prev) =>
+                                              prev.map((it, i) => (i === idx ? { ...it, returnQty: it.quantity } : it))
+                                            );
+                                          }}
+                                        >
+                                          All
+                                        </button>
+                                      </div>
+                                    </td>
+                                    <td style={{ textAlign: 'right', fontWeight: 700, color: lineCredit > 0 ? 'var(--warning-text, #d97706)' : 'inherit' }}>
+                                      ৳{lineCredit.toFixed(2)}
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
                         </div>
                       )}
+
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.4rem 0.75rem', background: '#ffedd5', borderRadius: '4px', border: '1px solid #fed7aa' }}>
+                        <span style={{ fontWeight: 700, fontSize: '0.85rem', color: '#9a3412' }}>Total Refund Due to Customer:</span>
+                        <span style={{ fontWeight: 800, fontSize: '1rem', color: '#c2410c' }}>
+                          ৳{totalReturnCredit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </span>
+                      </div>
                     </div>
                   )}
 
-                  {/* 4. SETTLEMENT SUMMARY CALCULATION CARD */}
+                  {/* BOTTOM NET SETTLEMENT CARD */}
                   <div style={{
-                    padding: '1rem',
-                    background: resolutionMode === 'exchange' ? 'rgba(37, 99, 235, 0.05)' : 'rgba(217, 119, 6, 0.06)',
-                    borderRadius: 'var(--radius-md)',
-                    border: `1px solid ${resolutionMode === 'exchange' ? 'var(--primary-color)' : 'var(--warning-text, #d97706)'}`,
+                    padding: '0.55rem 0.85rem',
+                    background: resolutionMode === 'exchange'
+                      ? (exchangeDifference > 0 ? '#fef2f2' : exchangeDifference < 0 ? '#f0fdf4' : '#f8fafc')
+                      : '#fffbeb',
+                    borderRadius: 'var(--border-radius-sm)',
+                    border: `1.5px solid ${
+                      resolutionMode === 'exchange'
+                        ? (exchangeDifference > 0 ? '#fca5a5' : exchangeDifference < 0 ? '#86efac' : '#e2e8f0')
+                        : '#fde68a'
+                    }`,
                     display: 'flex',
                     flexDirection: 'column',
-                    gap: '0.5rem',
+                    gap: '0.4rem',
                   }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
-                      <div style={{ fontWeight: 600, fontSize: '0.9rem' }}>Total Return:</div>
-                      <div style={{ fontWeight: 700, fontSize: '1rem', color: 'var(--warning-text, #d97706)' }}>
-                        ৳{totalReturnCredit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                      </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.4rem' }}>
+                      <span style={{ fontWeight: 700, fontSize: '0.86rem' }}>
+                        {resolutionMode === 'exchange' ? 'Net Exchange Settlement:' : 'Refund Settlement:'}
+                      </span>
+                      <span style={{
+                        fontWeight: 800,
+                        fontSize: '1rem',
+                        color: resolutionMode === 'exchange'
+                          ? (exchangeDifference > 0 ? '#dc2626' : exchangeDifference < 0 ? '#16a34a' : '#0f172a')
+                          : '#d97706'
+                      }}>
+                        {resolutionMode === 'exchange'
+                          ? (exchangeDifference > 0 ? `Customer Pays Extra: +৳${exchangeDifference.toFixed(2)}` : (exchangeDifference < 0 ? `Store Refunds to Customer: -৳${Math.abs(exchangeDifference).toFixed(2)}` : 'Even Exchange (৳0.00)'))
+                          : `Store Refunds to Customer: -৳${totalReturnCredit.toFixed(2)}`}
+                      </span>
                     </div>
 
-                    {resolutionMode === 'exchange' && (
-                      <>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
-                          <div style={{ fontWeight: 600, fontSize: '0.9rem' }}>Total Replacement:</div>
-                          <div style={{ fontWeight: 700, fontSize: '1rem', color: 'var(--primary-color)' }}>
-                            ৳{totalExchangeValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                          </div>
-                        </div>
-
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px dashed var(--border-color)', paddingTop: '0.5rem' }}>
-                          <div style={{ fontWeight: 700, fontSize: '0.95rem' }}>Settlement:</div>
-                          <div style={{ fontWeight: 800, fontSize: '1.1rem', color: exchangeDifference > 0 ? 'var(--danger-text)' : (exchangeDifference < 0 ? 'var(--success-text)' : 'inherit') }}>
-                            {exchangeDifference > 0 ? `Customer Pays: +৳${exchangeDifference.toFixed(2)}` : (exchangeDifference < 0 ? `Store Refunds: -৳${Math.abs(exchangeDifference).toFixed(2)}` : 'Even (৳0.00)')}
-                          </div>
-                        </div>
-                      </>
-                    )}
-                  </div>
-
-                  {/* 5. SETTLEMENT DETAILS & REASONS */}
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem' }}>
-                    {resolutionMode === 'refund' ? (
-                      <div className="form-group" style={{ marginBottom: 0 }}>
-                        <label style={{ display: 'block', fontWeight: 600, marginBottom: '0.35rem', fontSize: '0.85rem' }}>Refund Method</label>
-                        <select
-                          className="input-control"
-                          value={refundMethod}
-                          onChange={(e) => setRefundMethod(e.target.value)}
-                        >
-                          {(selectedInvoice.net_amount - selectedInvoice.paid_amount) > 0.01 && (
-                            <option value="deduct_due">Deduct from Due</option>
-                          )}
-                          <option value="cash">Cash</option>
-                          <option value="mobile_banking">bKash / Nagad</option>
-                          <option value="bank">Bank Transfer</option>
-                        </select>
-                      </div>
-                    ) : (
-                      exchangeDifference > 0 ? (
+                    {/* Form Controls: Method, Reason, Note */}
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '0.5rem', marginTop: '0.1rem' }}>
+                      {resolutionMode === 'refund' ? (
                         <div className="form-group" style={{ marginBottom: 0 }}>
-                          <label style={{ display: 'block', fontWeight: 600, marginBottom: '0.35rem', fontSize: '0.85rem' }}>Payment Method</label>
+                          <label style={{ display: 'block', fontWeight: 600, marginBottom: '0.15rem', fontSize: '0.76rem' }}>Refund Method</label>
                           <select
                             className="input-control"
-                            value={exchangePaymentMethod}
-                            onChange={(e) => setExchangePaymentMethod(e.target.value)}
-                          >
-                            <option value="cash">Cash</option>
-                            <option value="mobile_banking">bKash / Nagad</option>
-                            <option value="bank">Bank Transfer</option>
-                          </select>
-                        </div>
-                      ) : exchangeDifference < 0 ? (
-                        <div className="form-group" style={{ marginBottom: 0 }}>
-                          <label style={{ display: 'block', fontWeight: 600, marginBottom: '0.35rem', fontSize: '0.85rem' }}>Refund Method</label>
-                          <select
-                            className="input-control"
+                            style={{ padding: '0.25rem 0.5rem', fontSize: '0.8rem', background: '#ffffff' }}
                             value={refundMethod}
                             onChange={(e) => setRefundMethod(e.target.value)}
                           >
-                            <option value="cash">Cash</option>
-                            <option value="mobile_banking">bKash / Nagad</option>
-                            <option value="bank">Bank Transfer</option>
-                            {(selectedInvoice.net_amount - selectedInvoice.paid_amount) > 0.01 && (
+                            {((selectedInvoice?.net_amount || 0) - (selectedInvoice?.paid_amount || 0)) > 0.01 && (
                               <option value="deduct_due">Deduct from Due</option>
                             )}
+                            <option value="cash">Cash</option>
+                            <option value="mobile_banking">Mobile Banking</option>
+                            <option value="bank">Bank Transfer</option>
                           </select>
                         </div>
-                      ) : null
-                    )}
+                      ) : (
+                        exchangeDifference > 0 ? (
+                          <div className="form-group" style={{ marginBottom: 0 }}>
+                            <label style={{ display: 'block', fontWeight: 600, marginBottom: '0.15rem', fontSize: '0.76rem' }}>Customer Pays Via</label>
+                            <select
+                              className="input-control"
+                              style={{ padding: '0.25rem 0.5rem', fontSize: '0.8rem', background: '#ffffff' }}
+                              value={exchangePaymentMethod}
+                              onChange={(e) => setExchangePaymentMethod(e.target.value)}
+                            >
+                              <option value="cash">Cash</option>
+                              <option value="mobile_banking">Mobile Banking</option>
+                              <option value="bank">Bank Transfer</option>
+                            </select>
+                          </div>
+                        ) : exchangeDifference < 0 ? (
+                          <div className="form-group" style={{ marginBottom: 0 }}>
+                            <label style={{ display: 'block', fontWeight: 600, marginBottom: '0.15rem', fontSize: '0.76rem' }}>Refund Method</label>
+                            <select
+                              className="input-control"
+                              style={{ padding: '0.25rem 0.5rem', fontSize: '0.8rem', background: '#ffffff' }}
+                              value={refundMethod}
+                              onChange={(e) => setRefundMethod(e.target.value)}
+                            >
+                              {((selectedInvoice?.net_amount || 0) - (selectedInvoice?.paid_amount || 0)) > 0.01 && (
+                                <option value="deduct_due">Deduct from Due</option>
+                              )}
+                              <option value="cash">Cash</option>
+                              <option value="mobile_banking">Mobile Banking</option>
+                              <option value="bank">Bank Transfer</option>
+                            </select>
+                          </div>
+                        ) : null
+                      )}
 
-                    <div className="form-group" style={{ marginBottom: 0 }}>
-                      <label style={{ display: 'block', fontWeight: 600, marginBottom: '0.35rem', fontSize: '0.85rem' }}>Reason</label>
-                      <select
-                        className="input-control"
-                        value={returnReason}
-                        onChange={(e) => setReturnReason(e.target.value)}
-                      >
-                        <option value="Exchange / Return">Exchange / Return</option>
-                        <option value="Damaged / Defect">Damaged / Defect</option>
-                        <option value="Wrong Item / Color">Wrong Item / Color</option>
-                        <option value="Excess Order">Excess Order</option>
-                        <option value="Other">Other</option>
-                      </select>
+                      <div className="form-group" style={{ marginBottom: 0 }}>
+                        <label style={{ display: 'block', fontWeight: 600, marginBottom: '0.15rem', fontSize: '0.76rem' }}>Reason</label>
+                        <select
+                          className="input-control"
+                          style={{ padding: '0.25rem 0.5rem', fontSize: '0.8rem', background: '#ffffff' }}
+                          value={returnReason}
+                          onChange={(e) => setReturnReason(e.target.value)}
+                        >
+                          <option value="Exchange / Return">Exchange / Return</option>
+                          <option value="Damaged / Defect">Damaged / Defect</option>
+                          <option value="Wrong Item / Color">Wrong Item / Color</option>
+                          <option value="Excess Order">Excess Order</option>
+                          <option value="Other">Other</option>
+                        </select>
+                      </div>
+
+                      <div className="form-group" style={{ marginBottom: 0 }}>
+                        <label style={{ display: 'block', fontWeight: 600, marginBottom: '0.15rem', fontSize: '0.76rem' }}>Note (Optional)</label>
+                        <input
+                          type="text"
+                          className="input-control"
+                          style={{ padding: '0.25rem 0.5rem', fontSize: '0.8rem', background: '#ffffff' }}
+                          placeholder="Add note..."
+                          value={returnNotes}
+                          onChange={(e) => setReturnNotes(e.target.value)}
+                        />
+                      </div>
                     </div>
-                  </div>
-
-                  <div className="form-group" style={{ marginBottom: 0 }}>
-                    <label style={{ display: 'block', fontWeight: 600, marginBottom: '0.35rem', fontSize: '0.85rem' }}>Note (Optional)</label>
-                    <input
-                      type="text"
-                      className="input-control"
-                      placeholder="Add note..."
-                      value={returnNotes}
-                      onChange={(e) => setReturnNotes(e.target.value)}
-                    />
                   </div>
 
                 </div>
 
-                <div className="modal-footer" style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <button type="button" className="btn btn-secondary" onClick={() => setModalStep(1)} disabled={isSubmitting}>
+                <div className="modal-footer" style={{ padding: '0.6rem 1rem', display: 'flex', justifyContent: 'space-between' }}>
+                  <button type="button" className="btn btn-secondary btn-sm" onClick={() => setModalStep(1)} disabled={isSubmitting}>
                     Back
                   </button>
-                  <div style={{ display: 'flex', gap: '0.75rem' }}>
-                    <button type="button" className="btn btn-secondary" onClick={() => setShowModal(false)} disabled={isSubmitting}>
+                  <div style={{ display: 'flex', gap: '0.5rem' }}>
+                    <button type="button" className="btn btn-secondary btn-sm" onClick={() => setShowModal(false)} disabled={isSubmitting}>
                       Cancel
                     </button>
                     <button
                       type="submit"
-                      className="btn btn-primary"
+                      className="btn btn-primary btn-sm"
                       disabled={isSubmitting || returnItems.every((it) => !parseInt(it.returnQty || 0, 10))}
                       style={{ fontWeight: 700 }}
                     >
@@ -1225,7 +1392,7 @@ export default function Returns({ userProfile, branches, addToast }) {
                     <div className="invoice-title" style={{ color: activeVoucher.type === 'exchange' ? '#2563eb' : '#b45309' }}>
                       {activeVoucher.type === 'exchange' ? 'EXCHANGE VOUCHER' : 'CREDIT NOTE'}
                     </div>
-                    <div style={{ fontFamily: 'monospace', fontWeight: 700 }}>
+                    <div style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 800, letterSpacing: '0.2px' }}>
                       {activeVoucher.voucherNumber}
                     </div>
                     <div>Date: {new Date(activeVoucher.date).toLocaleDateString()}</div>
@@ -1344,18 +1511,37 @@ export default function Returns({ userProfile, branches, addToast }) {
                 </div>
 
                 {/* Signatures */}
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '3.5rem', paddingTop: '1rem', borderTop: '1px solid var(--border-color)', fontSize: '0.85rem' }}>
-                  <div style={{ textAlign: 'center', width: '180px' }}>
-                    <div style={{ borderTop: '1px dashed var(--text-muted)', paddingTop: '0.4rem', fontWeight: 600 }}>Customer Signature</div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '3.5rem', paddingTop: '0.5rem' }}>
+                  <div style={{ textAlign: 'center', width: '150px', borderTop: '1px dotted #000' }}>
+                    <p style={{ margin: '0.35rem 0', fontSize: '0.78rem', fontWeight: 700 }}>Customer Signature</p>
                   </div>
-                  <div style={{ textAlign: 'center', width: '180px' }}>
-                    <div style={{ borderTop: '1px dashed var(--text-muted)', paddingTop: '0.4rem', fontWeight: 600 }}>Store In-Charge</div>
+                  <div style={{ textAlign: 'center', width: '150px', borderTop: '1px dotted #000' }}>
+                    <p style={{ margin: '0.35rem 0', fontSize: '0.78rem', fontWeight: 700 }}>Store In-Charge</p>
+                  </div>
+                  <div style={{ textAlign: 'center', width: '150px', borderTop: '1px dotted #000' }}>
+                    <p style={{ margin: '0.35rem 0', fontSize: '0.78rem', fontWeight: 700 }}>Authorised Signature</p>
                   </div>
                 </div>
 
-                <div style={{ borderTop: '1px dashed var(--border-color)', marginTop: '2rem', paddingTop: '1rem', textAlign: 'center', color: 'var(--text-secondary)', fontSize: '0.82rem' }}>
-                  Official Return & Exchange Voucher generated by Almas Accessories ERP system.
-                </div>
+                {/* Official Footer */}
+                {(() => {
+                  const currentBranch = branches.find((b) => b.id === activeVoucher?.branch?.id) || activeVoucher?.branch;
+                  const isFactoryBranch = currentBranch ? Boolean(currentBranch.is_factory) : true;
+                  const label = isFactoryBranch ? 'Office & Factory' : 'Showroom';
+                  const branchAddr = currentBranch?.address || '604/750, Najir Ahamed Mistiri Sodok, West Jharnapara, Baro Quarter, Doublemooring, Chattogram, Bangladesh.';
+                  const branchCell = currentBranch?.phone || '01819-898617, 01845-069803';
+
+                  return (
+                    <div style={{ borderTop: '1.5px solid #000', marginTop: '1.5rem', paddingTop: '0.5rem', textAlign: 'center', fontSize: '0.74rem', color: '#1e293b', lineHeight: 1.4 }}>
+                      <div style={{ fontWeight: 700 }}>
+                        {label} : {branchAddr} &nbsp;|&nbsp; Cell : {branchCell}
+                      </div>
+                      <div style={{ color: '#475569' }}>
+                        E-mail : almasaccessoriesind@gmail.com, Web : www.almasaccessories.com
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
             </div>
 

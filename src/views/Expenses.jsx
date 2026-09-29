@@ -53,14 +53,14 @@ export default function Expenses({ userProfile, branches, addToast }) {
 
   const categoriesList = [
     { id: 'raw_materials', name: 'Raw Materials & Yarn' },
-    { id: 'factory_maintenance', name: 'Factory & Machine Maintenance' },
-    { id: 'utilities', name: 'Factory/Office Utilities (Power/Water)' },
-    { id: 'rent', name: 'Factory/Office Rent' },
-    { id: 'salaries', name: 'Staff & Labor Wages' },
+    { id: 'factory_maintenance', name: 'Factory & Maintenance' },
+    { id: 'utilities', name: 'Utilities (Power/Water)' },
+    { id: 'rent', name: 'Rent' },
+    { id: 'salaries', name: 'Salaries & Wages' },
     { id: 'transport', name: 'Transport & Carriage' },
-    { id: 'packaging', name: 'Packaging Materials (Cones/Cartons)' },
-    { id: 'marketing', name: 'Marketing & Sales Commission' },
-    { id: 'others', name: 'Others (Custom)' },
+    { id: 'packaging', name: 'Packaging' },
+    { id: 'marketing', name: 'Marketing' },
+    { id: 'others', name: 'Other (Custom)' },
   ];
 
   const showMessage = (text, type) => {
@@ -166,7 +166,7 @@ export default function Expenses({ userProfile, branches, addToast }) {
 
       if (ledgerError) throw ledgerError;
 
-      showMessage('Expense logged and ledger updated successfully!', 'success');
+      showMessage('Expense logged successfully!', 'success');
       resetForm();
       setShowCreateModal(false);
       
@@ -203,7 +203,7 @@ export default function Expenses({ userProfile, branches, addToast }) {
       ]);
       if (ledgerError) throw ledgerError;
 
-      showMessage('Expense record removed and cash adjusted.', 'success');
+      showMessage('Expense record removed.', 'success');
       fetchExpenses();
     } catch (err) {
       console.error(err);
@@ -226,12 +226,12 @@ export default function Expenses({ userProfile, branches, addToast }) {
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
       <div className="top-bar">
         <div className="page-title-group">
-          <h1>Expense Ledger</h1>
+          <h1>Expenses</h1>
         </div>
         <div className="top-bar-actions">
           {userProfile?.role === 'owner' && branches.length > 0 && (
             <div className="form-group" style={{ marginBottom: 0, flexDirection: 'row', alignItems: 'center', gap: '0.5rem' }}>
-              <label style={{ whiteSpace: 'nowrap' }}>Active Branch:</label>
+              <label style={{ whiteSpace: 'nowrap' }}>Branch:</label>
               <select
                 className="input-control"
                 value={selectedBranchId}
@@ -254,7 +254,7 @@ export default function Expenses({ userProfile, branches, addToast }) {
             }}
           >
             <Plus size={16} />
-            <span>Create Expense</span>
+            <span>New Expense</span>
           </button>
         </div>
       </div>
@@ -355,7 +355,7 @@ export default function Expenses({ userProfile, branches, addToast }) {
         <div className="modal-overlay">
           <div className="modal-content" style={{ maxWidth: '500px', width: '100%' }}>
             <div className="modal-header">
-              <h3 className="modal-title">Create Expense</h3>
+              <h3 className="modal-title">New Expense</h3>
               <button 
                 className="btn btn-secondary btn-sm" 
                 onClick={() => {
@@ -370,7 +370,7 @@ export default function Expenses({ userProfile, branches, addToast }) {
             <form onSubmit={handleCreateExpense}>
               <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
                 <div className="form-group">
-                  <label>Expense Category *</label>
+                  <label>Category *</label>
                   <select
                     className="input-control"
                     value={category}
@@ -387,11 +387,11 @@ export default function Expenses({ userProfile, branches, addToast }) {
 
                 {category === 'others' && (
                   <div className="form-group">
-                    <label>Specify Custom Category *</label>
+                    <label>Custom Category *</label>
                     <input
                       type="text"
                       className="input-control"
-                      placeholder="e.g. Stationery, Repair, Tea"
+                      placeholder="Enter category name"
                       value={customCategory}
                       onChange={(e) => setCustomCategory(e.target.value)}
                       required
@@ -401,7 +401,7 @@ export default function Expenses({ userProfile, branches, addToast }) {
 
                 <div className="form-row">
                   <div className="form-group">
-                    <label>Amount Spent (৳) *</label>
+                    <label>Amount (৳) *</label>
                     <input
                       type="number"
                       step="0.01"
@@ -415,7 +415,7 @@ export default function Expenses({ userProfile, branches, addToast }) {
                   </div>
 
                   <div className="form-group">
-                    <label>Expense Date *</label>
+                    <label>Date *</label>
                     <input
                       type="date"
                       className="input-control"
@@ -427,25 +427,25 @@ export default function Expenses({ userProfile, branches, addToast }) {
                 </div>
 
                 <div className="form-group">
-                  <label>Paid From (Payment Account) *</label>
+                  <label>Payment Method *</label>
                   <select
                     className="input-control"
                     value={paymentMethod}
                     onChange={(e) => setPaymentMethod(e.target.value)}
                     required
                   >
-                    <option value="cash">Cash In Hand</option>
-                    <option value="bank">Bank / Card Account</option>
-                    <option value="mobile_banking">Mobile Money (bKash/Nagad)</option>
+                    <option value="cash">Cash</option>
+                    <option value="bank">Bank</option>
+                    <option value="mobile_banking">Mobile Banking (bKash/Nagad)</option>
                   </select>
                 </div>
 
                 <div className="form-group">
-                  <label>Description / Details</label>
+                  <label>Description</label>
                   <textarea
                     className="input-control"
                     style={{ minHeight: '80px', resize: 'vertical' }}
-                    placeholder="e.g. Electric bill for July 2026"
+                    placeholder="Enter details (optional)..."
                     value={description}
                     onChange={(e) => setDescription(e.target.value)}
                   />
@@ -463,7 +463,7 @@ export default function Expenses({ userProfile, branches, addToast }) {
                   Cancel
                 </button>
                 <button type="submit" className="btn btn-primary" disabled={loading}>
-                  Create Expense
+                  {loading ? 'Saving...' : 'Save Expense'}
                 </button>
               </div>
             </form>

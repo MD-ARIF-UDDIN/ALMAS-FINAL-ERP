@@ -279,12 +279,12 @@ export default function Payments({ userProfile, branches, addToast }) {
     <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
       <div className="top-bar">
         <div className="page-title-group">
-          <h1>Payments & Receipts</h1>
+          <h1>Payments</h1>
         </div>
         {userProfile?.role === 'owner' && (
           <div className="top-bar-actions" style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
             <div className="form-group" style={{ marginBottom: 0, flexDirection: 'row', alignItems: 'center', gap: '0.5rem' }}>
-              <label style={{ whiteSpace: 'nowrap' }}>Active Branch:</label>
+              <label style={{ whiteSpace: 'nowrap' }}>Branch:</label>
               <select
                 className="input-control"
                 value={selectedBranchId}
@@ -302,8 +302,6 @@ export default function Payments({ userProfile, branches, addToast }) {
         )}
       </div>
 
-
-
       {/* Main Tabs */}
       <div style={{ display: 'flex', borderBottom: '1px solid var(--border-color)', gap: '1rem' }}>
         <button
@@ -311,13 +309,13 @@ export default function Payments({ userProfile, branches, addToast }) {
           onClick={() => setActiveSubTab('invoices')}
         >
           <CreditCard size={16} />
-          <span>Invoice Outstanding balances</span>
+          <span>Outstanding Invoices</span>
         </button>
         <button
           className={`btn ${activeSubTab === 'ledger' ? 'btn-primary' : 'btn-secondary'}`}
           onClick={() => setActiveSubTab('ledger')}
         >
-          <span>Payment History Log</span>
+          <span>Payment History</span>
         </button>
       </div>
 
@@ -333,7 +331,7 @@ export default function Payments({ userProfile, branches, addToast }) {
                   setInvoicePage(1);
                 }}
               >
-                Customer Receivables (Sales)
+                Customer Dues (Sales)
               </button>
               <button
                 className={`btn btn-sm ${invoiceType === 'purchases' ? 'btn-primary' : 'btn-secondary'}`}
@@ -342,7 +340,7 @@ export default function Payments({ userProfile, branches, addToast }) {
                   setInvoicePage(1);
                 }}
               >
-                Supplier Payables (Purchases)
+                Supplier Dues (Purchases)
               </button>
             </div>
 
@@ -368,7 +366,7 @@ export default function Payments({ userProfile, branches, addToast }) {
                     type="text"
                     className="input-control"
                     style={{ paddingLeft: '2.2rem', fontSize: '0.85rem' }}
-                    placeholder="Search by invoice #..."
+                    placeholder="Search invoices..."
                     value={searchQuery}
                     onChange={(e) => {
                       setSearchQuery(e.target.value);
@@ -388,10 +386,10 @@ export default function Payments({ userProfile, branches, addToast }) {
                   <th>Invoice ID</th>
                   {userProfile?.role === 'owner' && <th>Branch</th>}
                   <th>Date</th>
-                  <th>Contact Name</th>
-                  <th>Net Bill</th>
-                  <th>Paid Amount</th>
-                  <th>Due Outstanding</th>
+                  <th>Contact</th>
+                  <th>Net Total</th>
+                  <th>Paid</th>
+                  <th>Due</th>
                   <th>Status</th>
                   <th>Action</th>
                 </tr>
@@ -402,7 +400,7 @@ export default function Payments({ userProfile, branches, addToast }) {
                 ) : invoices.length === 0 ? (
                   <tr>
                     <td colSpan={userProfile?.role === 'owner' ? 10 : 9} style={{ textAlign: 'center', padding: '2rem' }}>
-                      No invoices found matching the current filters.
+                      No invoices found.
                     </td>
                   </tr>
                 ) : (
@@ -438,7 +436,7 @@ export default function Payments({ userProfile, branches, addToast }) {
                               className="btn btn-primary btn-sm"
                               onClick={() => handleOpenPaymentModal(inv)}
                             >
-                              {invoiceType === 'sales' ? 'Collect Payment' : 'Pay Supplier'}
+                              {invoiceType === 'sales' ? 'Collect' : 'Pay'}
                             </button>
                           ) : (
                             <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', fontWeight: 500 }}>Cleared</span>
@@ -465,7 +463,7 @@ export default function Payments({ userProfile, branches, addToast }) {
       {activeSubTab === 'ledger' && (
         <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
           <div className="card-header" style={{ padding: '1rem 1.25rem' }}>
-            <h3 className="card-title" style={{ margin: 0 }}>Transaction Ledger</h3>
+            <h3 className="card-title" style={{ margin: 0 }}>Payment History</h3>
           </div>
           <div className="table-container" style={{ borderBottomLeftRadius: 0, borderBottomRightRadius: 0 }}>
             <table>
@@ -475,17 +473,17 @@ export default function Payments({ userProfile, branches, addToast }) {
                   <th>Date</th>
                   {userProfile?.role === 'owner' && <th>Branch</th>}
                   <th>Receipt No</th>
-                  <th>Transaction Type</th>
-                  <th>Invoice Reference</th>
+                  <th>Type</th>
+                  <th>Reference</th>
                   <th>Amount</th>
                   <th>Method</th>
-                  <th>Reference TrxID</th>
+                  <th>Notes</th>
                   <th>Logged By</th>
                 </tr>
               </thead>
               <tbody>
                 {loadingLedger ? (
-                  <TableLoading colSpan={userProfile?.role === 'owner' ? 10 : 9} message="Fetching payment transaction logs..." />
+                  <TableLoading colSpan={userProfile?.role === 'owner' ? 10 : 9} message="Fetching payment records..." />
                 ) : paymentsLog.length === 0 ? (
                   <tr>
                     <td colSpan={userProfile?.role === 'owner' ? 10 : 9} style={{ textAlign: 'center', padding: '2rem' }}>
@@ -510,7 +508,7 @@ export default function Payments({ userProfile, branches, addToast }) {
                           <span className={`badge ${isRec ? 'badge-paid' : 'badge-unpaid'}`}>
                             {isRec ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
                             <span style={{ marginLeft: '0.25rem' }}>
-                              {isRec ? 'Customer Collection' : 'Supplier Payment'}
+                              {isRec ? 'Collection' : 'Payout'}
                             </span>
                           </span>
                         </td>
@@ -546,7 +544,7 @@ export default function Payments({ userProfile, branches, addToast }) {
           <div className="modal-content">
             <div className="modal-header">
               <h3 className="modal-title">
-                {invoiceType === 'sales' ? 'Receive Customer Payment' : 'Issue Supplier Payment'}
+                {invoiceType === 'sales' ? 'Receive Payment' : 'Make Payment'}
               </h3>
               <button
                 className="btn btn-secondary btn-sm"
@@ -560,22 +558,22 @@ export default function Payments({ userProfile, branches, addToast }) {
               <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
                 <div style={{ background: '#f8fafc', padding: '1rem', borderRadius: 'var(--border-radius-sm)', border: '1px solid var(--border-color)' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.35rem' }}>
-                    <span style={{ color: 'var(--text-secondary)' }}>Invoice Net total:</span>
+                    <span style={{ color: 'var(--text-secondary)' }}>Net Total:</span>
                     <span style={{ fontWeight: 600 }}>৳{selectedInvoice.net_amount.toFixed(2)}</span>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.35rem', color: 'var(--success-text)' }}>
-                    <span>Amount Already Paid:</span>
+                    <span>Paid Amount:</span>
                     <span>৳{selectedInvoice.paid_amount.toFixed(2)}</span>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 700, borderTop: '1px dashed var(--border-color)', paddingTop: '0.35rem', color: 'var(--danger-text)' }}>
-                    <span>Remaining Due Balance:</span>
+                    <span>Due Amount:</span>
                     <span>৳{(selectedInvoice.net_amount - selectedInvoice.paid_amount).toFixed(2)}</span>
                   </div>
                 </div>
 
                 <div className="form-row">
                   <div className="form-group">
-                    <label>Payment Amount *</label>
+                    <label>Amount *</label>
                     <input
                       type="number"
                       step="0.01"
@@ -589,7 +587,7 @@ export default function Payments({ userProfile, branches, addToast }) {
                   </div>
 
                   <div className="form-group">
-                    <label>Date of Payment *</label>
+                    <label>Payment Date *</label>
                     <input
                       type="date"
                       className="input-control"
@@ -602,7 +600,7 @@ export default function Payments({ userProfile, branches, addToast }) {
 
                 <div className="form-row">
                   <div className="form-group">
-                    <label>Method *</label>
+                    <label>Payment Method *</label>
                     <select
                       className="input-control"
                       value={paymentMethod}
@@ -610,16 +608,16 @@ export default function Payments({ userProfile, branches, addToast }) {
                       required
                     >
                       <option value="cash">Cash</option>
-                      <option value="bank">Bank Deposit / Card</option>
-                      <option value="mobile_banking">Mobile Money (bKash/Nagad)</option>
+                      <option value="bank">Bank</option>
+                      <option value="mobile_banking">Mobile Banking (bKash/Nagad)</option>
                     </select>
                   </div>
                   <div className="form-group">
-                    <label>Reference # (Trx ID / Cheque #)</label>
+                    <label>Reference No</label>
                     <input
                       type="text"
                       className="input-control"
-                      placeholder="Optional reference"
+                      placeholder="e.g. Trx ID or Cheque #"
                       value={referenceNumber}
                       onChange={(e) => setReferenceNumber(e.target.value)}
                     />
@@ -627,11 +625,11 @@ export default function Payments({ userProfile, branches, addToast }) {
                 </div>
 
                 <div className="form-group">
-                  <label>Notes / Comments</label>
+                  <label>Notes</label>
                   <input
                     type="text"
                     className="input-control"
-                    placeholder="e.g. Part payment received via bKash"
+                    placeholder="Enter notes (optional)..."
                     value={paymentNotes}
                     onChange={(e) => setPaymentNotes(e.target.value)}
                   />
@@ -646,7 +644,7 @@ export default function Payments({ userProfile, branches, addToast }) {
                   Cancel
                 </button>
                 <button type="submit" className="btn btn-primary" disabled={loading}>
-                  Create Payment
+                  {loading ? 'Saving...' : 'Save Payment'}
                 </button>
               </div>
             </form>

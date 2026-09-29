@@ -1,1621 +1,2192 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { supabase } from '../supabaseClient';
+import almasLogo from '../assets/almas_logo.jpg';
 import {
   BarChart3,
   Calendar,
-  DollarSign,
-  ArrowUpRight,
-  ArrowDownRight,
   Printer,
-  Receipt,
-  FileText,
-  ShoppingBag,
   CreditCard,
-  Truck,
-  Package,
   Users,
+  Search,
   Building2,
-  TrendingUp,
-  Wallet
+  Phone,
+  ShoppingBag,
+  DollarSign,
+  X
 } from 'lucide-react';
-import { TableLoading, LoadingBlock } from '../components/TableLoading';
+import { TableLoading } from '../components/TableLoading';
 
 export default function Reports({ userProfile, branches = [] }) {
-  const [loading, setLoading] = useState(true);
-  const [message, setMessage] = useState({ text: '', type: '' });
+  // 3 Major Report Tabs
+  const [activeTab, setActiveTab] = useState('overall'); // 'overall' | 'customer' | 'payments'
+  const [loading, setLoading] = useState(false);
 
-  // Main Report Navigation: 'summary', 'pnl', 'consignments', 'dues', 'inventory', 'journal'
-  const [activeMainTab, setActiveMainTab] = useState('summary');
-
-  // Date filters (Default: Start of current month to today)
+  // Date filters
   const defaultStart = () => {
     const d = new Date();
-    return new Date(d.getFullYear(), d.getMonth(), 1).toISOString().split('T')[0];
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`;
   };
   const defaultEnd = () => {
-    return new Date().toISOString().split('T')[0];
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   };
 
   const [startDate, setStartDate] = useState(defaultStart());
   const [endDate, setEndDate] = useState(defaultEnd());
+  const [selectedMonth, setSelectedMonth] = useState(() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  });
 
-  const role = userProfile?.role || 'staff';
-  const isOwner = role === 'owner';
+  const isOwner = userProfile?.role === 'owner';
   const myBranchId = userProfile?.branch_id;
-
   const [selectedBranchId, setSelectedBranchId] = useState(() => {
     return myBranchId || (branches.length > 0 ? branches[0].id : '');
   });
 
-  const handlePresetChange = (preset) => {
-    const today = new Date();
-    let start, end;
-
-    if (preset === 'today') {
-      start = new Date();
-      end = new Date();
-    } else if (preset === 'yesterday') {
-      const yesterday = new Date();
-      yesterday.setDate(yesterday.getDate() - 1);
-      start = yesterday;
-      end = yesterday;
-    } else if (preset === 'week') {
-      const day = today.getDay();
-      const diff = today.getDate() - day + (day === 0 ? -6 : 1);
-      const tempDate = new Date(today);
-      tempDate.setDate(diff);
-      start = tempDate;
-      end = new Date();
-    } else if (preset === 'last_7_days') {
-      const last7 = new Date();
-      last7.setDate(last7.getDate() - 6);
-      start = last7;
-      end = new Date();
-    } else if (preset === 'month') {
-      start = new Date(today.getFullYear(), today.getMonth(), 1);
-      end = new Date();
-    } else if (preset === 'last_month') {
-      start = new Date(today.getFullYear(), today.getMonth() - 1, 1);
-      end = new Date(today.getFullYear(), today.getMonth(), 0);
-    } else if (preset === 'last_30_days') {
-      const last30 = new Date();
-      last30.setDate(last30.getDate() - 29);
-      start = last30;
-      end = new Date();
-    } else if (preset === 'year') {
-      start = new Date(today.getFullYear(), 0, 1);
-      end = new Date();
-    } else if (preset === 'last_year') {
-      start = new Date(today.getFullYear() - 1, 0, 1);
-      end = new Date(today.getFullYear() - 1, 11, 31);
+  // Ensure branch selection is strictly enforced per role (reports are always branch-wise)
+  useEffect(() => {
+    if (!isOwner) {
+      if (myBranchId && selectedBranchId !== myBranchId) {
+        setSelectedBranchId(myBranchId);
+      } else if (!myBranchId && branches.length > 0 && !selectedBranchId) {
+        setSelectedBranchId(branches[0].id);
+      }
+    } else {
+      if (!selectedBranchId || selectedBranchId === 'all') {
+        const defaultBranch = myBranchId || (branches.length > 0 ? branches[0].id : '');
+        if (defaultBranch) setSelectedBranchId(defaultBranch);
+      }
     }
+  }, [isOwner, myBranchId, branches, selectedBranchId]);
 
-    if (start && end) {
-      setLoading(true);
-      const startLocal = new Date(start.getTime() - start.getTimezoneOffset() * 60000);
-      const endLocal = new Date(end.getTime() - end.getTimezoneOffset() * 60000);
-      setStartDate(startLocal.toISOString().split('T')[0]);
-      setEndDate(endLocal.toISOString().split('T')[0]);
-    }
-  };
+  // Overall Report State
+  const [overallSales, setOverallSales] = useState([]);
+  const [overallPurchasesTotal, setOverallPurchasesTotal] = useState(0);
+  const [overallExpensesTotal, setOverallExpensesTotal] = useState(0);
 
-  const handleMonthFilter = (monthVal) => {
-    if (!monthVal) return;
-    setLoading(true);
-    const [year, monthIndex] = monthVal.split('-');
-    const start = new Date(parseInt(year), parseInt(monthIndex), 1);
-    const end = new Date(parseInt(year), parseInt(monthIndex) + 1, 0);
+  // Customer Report State
+  const [customers, setCustomers] = useState([]);
+  const [selectedCustomerId, setSelectedCustomerId] = useState('');
+  const [phoneSearch, setPhoneSearch] = useState('');
+  const [showPhoneList, setShowPhoneList] = useState(false);
+  const phoneRef = useRef(null);
 
-    const startLocal = new Date(start.getTime() - start.getTimezoneOffset() * 60000);
-    const endLocal = new Date(end.getTime() - end.getTimezoneOffset() * 60000);
-    setStartDate(startLocal.toISOString().split('T')[0]);
-    setEndDate(endLocal.toISOString().split('T')[0]);
-  };
+  const [customerSales, setCustomerSales] = useState([]);
+  const [selectedCustomer, setSelectedCustomer] = useState(null);
 
-  const getMonthOptions = () => {
-    const options = [];
+  // Customer Payments State
+  const [customerPayments, setCustomerPayments] = useState([]);
+  const [paymentSalesMap, setPaymentSalesMap] = useState({});
+  const [paymentMethodFilter, setPaymentMethodFilter] = useState('all'); // 'all' | 'cash' | 'bank' | 'bkash' | 'nagad'
+
+  // Month Options for dropdown
+  const monthOptions = useMemo(() => {
+    const list = [];
     const today = new Date();
     for (let i = 0; i < 12; i++) {
       const d = new Date(today.getFullYear(), today.getMonth() - i, 1);
-      const label = d.toLocaleDateString('default', { month: 'long', year: 'numeric' });
-      const value = `${d.getFullYear()}-${d.getMonth()}`;
-      options.push({ label, value });
+      const label = d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+      const value = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      list.push({ label, value });
     }
-    return options;
+    return list;
+  }, []);
+
+  const handleMonthChange = (monthVal) => {
+    setSelectedMonth(monthVal);
+    if (!monthVal) return;
+    const [y, m] = monthVal.split('-');
+    const year = parseInt(y, 10);
+    const month = parseInt(m, 10) - 1;
+    const start = new Date(year, month, 1);
+    const end = new Date(year, month + 1, 0);
+
+    setStartDate(`${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, '0')}-01`);
+    setEndDate(`${end.getFullYear()}-${String(end.getMonth() + 1).padStart(2, '0')}-${String(end.getDate()).padStart(2, '0')}`);
   };
 
-  // Financial aggregates
-  const [revenue, setRevenue] = useState(0);
-  const [salesCollected, setSalesCollected] = useState(0);
-  const [customerDue, setCustomerDue] = useState(0);
-
-  const [purchasesTotal, setPurchasesTotal] = useState(0);
-  const [purchasesPaid, setPurchasesPaid] = useState(0);
-  const [supplierDue, setSupplierDue] = useState(0);
-
-  const [expensesTotal, setExpensesTotal] = useState(0);
-  const [expensesByCategory, setExpensesByCategory] = useState({});
-  const [netProfit, setNetProfit] = useState(0);
-
-  // Cash balances (Ledger accounts)
-  const [cashBalance, setCashBalance] = useState(0);
-  const [bankBalance, setBankBalance] = useState(0);
-  const [mobileBalance, setMobileBalance] = useState(0);
-
-  // Branch Consignments / Challan metrics
-  const [challansList, setChallansList] = useState([]);
-  const [totalChallansDispatched, setTotalChallansDispatched] = useState(0);
-  const [totalChallansPaid, setTotalChallansPaid] = useState(0);
-  const [totalChallansDue, setTotalChallansDue] = useState(0);
-  const [totalDispatchedQty, setTotalDispatchedQty] = useState(0);
-  const [totalSoldQty, setTotalSoldQty] = useState(0);
-
-  // Inventory Valuation
-  const [inventoryList, setInventoryList] = useState([]);
-  const [totalStockUnits, setTotalStockUnits] = useState(0);
-  const [totalStockCostValue, setTotalStockCostValue] = useState(0);
-  const [totalStockRetailValue, setTotalStockRetailValue] = useState(0);
-
-  // Audit list logs
-  const [salesList, setSalesList] = useState([]);
-  const [purchasesList, setPurchasesList] = useState([]);
-  const [expensesList, setExpensesList] = useState([]);
-  const [activeAuditTab, setActiveAuditTab] = useState('sales');
-
+  // Close phone autocomplete on outside click
   useEffect(() => {
-    if (!selectedBranchId && branches.length > 0) {
-      setSelectedBranchId(myBranchId || branches[0].id);
-    }
-  }, [branches, userProfile, myBranchId, selectedBranchId]);
+    const handleOutside = (e) => {
+      if (phoneRef.current && !phoneRef.current.contains(e.target)) {
+        setShowPhoneList(false);
+      }
+    };
+    document.addEventListener('mousedown', handleOutside);
+    document.addEventListener('touchstart', handleOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleOutside);
+      document.removeEventListener('touchstart', handleOutside);
+    };
+  }, []);
 
+  // Fetch customer list once
   useEffect(() => {
-    if (selectedBranchId) {
-      fetchAllReportsData();
+    const loadCustomers = async () => {
+      const { data } = await supabase
+        .from('contacts')
+        .select('id, name, phone, address')
+        .eq('type', 'customer')
+        .order('name', { ascending: true });
+      setCustomers(data || []);
+    };
+    loadCustomers();
+  }, []);
+
+  // Sync selectedCustomer with selectedCustomerId
+  useEffect(() => {
+    if (selectedCustomerId) {
+      const cust = customers.find((c) => c.id === selectedCustomerId);
+      setSelectedCustomer(cust || null);
+    } else {
+      setSelectedCustomer(null);
     }
-  }, [selectedBranchId, startDate, endDate]);
+  }, [selectedCustomerId, customers]);
 
-  const showMessage = (text, type) => {
-    setMessage({ text, type });
-    setTimeout(() => setMessage({ text: '', type: '' }), 5000);
-  };
+  // Fetch Overall Report
+  useEffect(() => {
+    if (activeTab === 'overall') {
+      loadOverallData();
+    }
+  }, [activeTab, startDate, endDate, selectedBranchId]);
 
-  const fetchAllReportsData = async () => {
-    if (!selectedBranchId) return;
+  const loadOverallData = async () => {
     setLoading(true);
     try {
-      await Promise.all([
-        fetchFinancialMetrics(),
-        fetchLedgerBalances(),
-        fetchConsignmentChallans(),
-        fetchInventoryValuation(),
-      ]);
+      // 1. Sales
+      let salesQuery = supabase
+        .from('sales')
+        .select(`
+          id,
+          invoice_number,
+          sale_date,
+          net_amount,
+          paid_amount,
+          payment_status,
+          branch_id,
+          contacts (
+            id,
+            name,
+            phone
+          ),
+          branches (
+            id,
+            name
+          )
+        `)
+        .gte('sale_date', startDate)
+        .lte('sale_date', endDate)
+        .order('sale_date', { ascending: false });
+
+      if (selectedBranchId) {
+        salesQuery = salesQuery.eq('branch_id', selectedBranchId);
+      }
+      const { data: sData } = await salesQuery;
+      setOverallSales(sData || []);
+
+      // 2. Purchases Total
+      let purQuery = supabase
+        .from('purchases')
+        .select('net_amount')
+        .gte('purchase_date', startDate)
+        .lte('purchase_date', endDate);
+      if (selectedBranchId) {
+        purQuery = purQuery.eq('branch_id', selectedBranchId);
+      }
+      const { data: pData } = await purQuery;
+      const pTotal = (pData || []).reduce((sum, p) => sum + (parseFloat(p.net_amount) || 0), 0);
+      setOverallPurchasesTotal(pTotal);
+
+      // 3. Expenses Total
+      let expQuery = supabase
+        .from('expenses')
+        .select('amount')
+        .gte('expense_date', startDate)
+        .lte('expense_date', endDate);
+      if (selectedBranchId) {
+        expQuery = expQuery.eq('branch_id', selectedBranchId);
+      }
+      const { data: eData } = await expQuery;
+      const eTotal = (eData || []).reduce((sum, e) => sum + (parseFloat(e.amount) || 0), 0);
+      setOverallExpensesTotal(eTotal);
     } catch (err) {
       console.error(err);
-      showMessage('Error loading reports data.', 'error');
     } finally {
       setLoading(false);
     }
   };
 
-  const fetchFinancialMetrics = async () => {
-    // 1. Sales
-    let salesQuery = supabase
-      .from('sales')
-      .select(`
-        id, 
-        invoice_number, 
-        sale_date, 
-        net_amount, 
-        paid_amount, 
-        payment_status,
-        branch_id,
-        contacts (
+  // Fetch Customer Report
+  useEffect(() => {
+    if (activeTab === 'customer' && selectedCustomerId) {
+      loadCustomerData(selectedCustomerId);
+    }
+  }, [activeTab, selectedCustomerId, startDate, endDate, selectedBranchId]);
+
+  const loadCustomerData = async (custId) => {
+    setLoading(true);
+    try {
+      const cust = customers.find((c) => c.id === custId);
+      setSelectedCustomer(cust || null);
+
+      let query = supabase
+        .from('sales')
+        .select(`
           id,
-          name,
-          phone
-        )
-      `)
-      .eq('branch_id', selectedBranchId)
-      .gte('sale_date', startDate)
-      .lte('sale_date', endDate);
+          invoice_number,
+          sale_date,
+          total_amount,
+          discount,
+          net_amount,
+          paid_amount,
+          payment_status,
+          notes,
+          branch_id
+        `)
+        .eq('customer_id', custId)
+        .gte('sale_date', startDate)
+        .lte('sale_date', endDate)
+        .order('sale_date', { ascending: false });
 
-    const { data: sales, error: salesError } = await salesQuery;
-    if (salesError) throw salesError;
-
-    const totalRev = (sales || []).reduce((sum, s) => sum + (parseFloat(s.net_amount) || 0), 0);
-    const totalCollected = (sales || []).reduce((sum, s) => sum + (parseFloat(s.paid_amount) || 0), 0);
-    const totalCustDue = Math.max(0, totalRev - totalCollected);
-
-    setRevenue(totalRev);
-    setSalesCollected(totalCollected);
-    setCustomerDue(totalCustDue);
-    setSalesList(sales || []);
-
-    // 2. Purchases
-    let purQuery = supabase
-      .from('purchases')
-      .select(`
-        id,
-        invoice_number,
-        purchase_date,
-        net_amount,
-        paid_amount,
-        payment_status,
-        branch_id,
-        contacts (
-          id,
-          name,
-          phone
-        )
-      `)
-      .eq('branch_id', selectedBranchId)
-      .gte('purchase_date', startDate)
-      .lte('purchase_date', endDate);
-
-    const { data: purchases, error: purError } = await purQuery;
-    if (purError) throw purError;
-
-    const totalPur = (purchases || []).reduce((sum, p) => sum + (parseFloat(p.net_amount) || 0), 0);
-    const totalPurPaid = (purchases || []).reduce((sum, p) => sum + (parseFloat(p.paid_amount) || 0), 0);
-    const totalSuppDue = Math.max(0, totalPur - totalPurPaid);
-
-    setPurchasesTotal(totalPur);
-    setPurchasesPaid(totalPurPaid);
-    setSupplierDue(totalSuppDue);
-    setPurchasesList(purchases || []);
-
-    // 3. Expenses
-    let expQuery = supabase
-      .from('expenses')
-      .select(`
-        id,
-        category,
-        amount,
-        description,
-        expense_date,
-        payment_method,
-        branch_id
-      `)
-      .eq('branch_id', selectedBranchId)
-      .gte('expense_date', startDate)
-      .lte('expense_date', endDate);
-
-    const { data: expenses, error: expError } = await expQuery;
-    if (expError) throw expError;
-
-    const totalExp = (expenses || []).reduce((sum, e) => sum + (parseFloat(e.amount) || 0), 0);
-    setExpensesTotal(totalExp);
-    setExpensesList(expenses || []);
-
-    const catMap = {};
-    (expenses || []).forEach((e) => {
-      const cat = e.category || 'general';
-      catMap[cat] = (catMap[cat] || 0) + (parseFloat(e.amount) || 0);
-    });
-    setExpensesByCategory(catMap);
-
-    // 4. Net Profit
-    const gross = totalRev - totalPur;
-    setNetProfit(gross - totalExp);
-  };
-
-  const fetchLedgerBalances = async () => {
-    let query = supabase
-      .from('cash_ledger')
-      .select('amount_in, amount_out, description')
-      .eq('branch_id', selectedBranchId);
-
-    const { data: entries, error } = await query;
-    if (error) throw error;
-
-    let cashSum = 0;
-    let bankSum = 0;
-    let mobileSum = 0;
-
-    (entries || []).forEach((entry) => {
-      const net = (parseFloat(entry.amount_in) || 0) - (parseFloat(entry.amount_out) || 0);
-      const desc = (entry.description || '').toLowerCase();
-
-      if (desc.includes('bank')) {
-        bankSum += net;
-      } else if (desc.includes('mobile') || desc.includes('bkash') || desc.includes('nagad')) {
-        mobileSum += net;
-      } else {
-        cashSum += net;
+      if (selectedBranchId) {
+        query = query.eq('branch_id', selectedBranchId);
       }
-    });
 
-    setCashBalance(cashSum);
-    setBankBalance(bankSum);
-    setMobileBalance(mobileSum);
-  };
-
-  const fetchConsignmentChallans = async () => {
-    let query = supabase
-      .from('branch_challans')
-      .select(`
-        id,
-        challan_no,
-        from_branch_id,
-        to_branch_id,
-        total_bill_amount,
-        paid_amount,
-        due_amount,
-        payment_status,
-        challan_date,
-        from_branch:branches!branch_challans_from_branch_id_fkey (id, name, is_factory),
-        to_branch:branches!branch_challans_to_branch_id_fkey (id, name, is_factory),
-        items:branch_challan_items (
-          dispatched_qty,
-          sold_qty,
-          remaining_qty,
-          unit_transfer_price,
-          total_price
-        )
-      `)
-      .or(`from_branch_id.eq.${selectedBranchId},to_branch_id.eq.${selectedBranchId}`)
-      .gte('challan_date', startDate)
-      .lte('challan_date', endDate);
-
-    const { data: chData, error } = await query;
-    if (error) {
-      console.error('Error fetching challans:', error);
-      return;
+      const { data: sData, error } = await query;
+      if (error) throw error;
+      setCustomerSales(sData || []);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoading(false);
     }
-
-    const list = chData || [];
-    setChallansList(list);
-
-    const totalDispatched = list.reduce((sum, c) => sum + (parseFloat(c.total_bill_amount) || 0), 0);
-    const totalPaid = list.reduce((sum, c) => sum + (parseFloat(c.paid_amount) || 0), 0);
-    const totalDue = list.reduce((sum, c) => sum + (parseFloat(c.due_amount) || 0), 0);
-
-    let dispatchedPcs = 0;
-    let soldPcs = 0;
-    list.forEach((c) => {
-      (c.items || []).forEach((it) => {
-        dispatchedPcs += parseInt(it.dispatched_qty) || 0;
-        soldPcs += parseInt(it.sold_qty) || 0;
-      });
-    });
-
-    setTotalChallansDispatched(totalDispatched);
-    setTotalChallansPaid(totalPaid);
-    setTotalChallansDue(totalDue);
-    setTotalDispatchedQty(dispatchedPcs);
-    setTotalSoldQty(soldPcs);
   };
 
-  const fetchInventoryValuation = async () => {
-    let query = supabase
-      .from('inventory')
-      .select(`
-        id,
-        quantity,
-        branch_id,
-        branch:branches (id, name, is_factory),
-        product:products (
+  // Fetch Customer Payments Report
+  useEffect(() => {
+    if (activeTab === 'payments') {
+      loadCustomerPayments();
+    }
+  }, [activeTab, startDate, endDate, selectedBranchId, selectedCustomerId, paymentMethodFilter]);
+
+  const loadCustomerPayments = async () => {
+    setLoading(true);
+    try {
+      let query = supabase
+        .from('payments')
+        .select(`
           id,
-          sku,
-          product_code,
-          name,
-          category,
-          unit,
-          purchase_price,
-          sale_price
-        )
-      `)
-      .eq('branch_id', selectedBranchId);
+          payment_number,
+          transaction_type,
+          payment_date,
+          amount,
+          payment_method,
+          reference_invoice_id,
+          notes,
+          branch_id,
+          contact_id,
+          contacts (
+            id,
+            name,
+            phone,
+            address
+          ),
+          branches (
+            id,
+            name,
+            address,
+            is_factory
+          ),
+          profiles (
+            full_name
+          )
+        `)
+        .gte('payment_date', `${startDate}T00:00:00`)
+        .lte('payment_date', `${endDate}T23:59:59.999Z`)
+        .order('payment_date', { ascending: false });
 
-    const { data: invData, error } = await query;
-    if (error) {
-      console.error('Error fetching inventory:', error);
-      return;
+      // Filter by customer if selected
+      if (selectedCustomerId) {
+        query = query.eq('contact_id', selectedCustomerId);
+      }
+
+      // Filter by branch
+      if (selectedBranchId) {
+        query = query.eq('branch_id', selectedBranchId);
+      }
+
+      // Filter by payment method
+      if (paymentMethodFilter && paymentMethodFilter !== 'all') {
+        query = query.eq('payment_method', paymentMethodFilter);
+      }
+
+      // Customer collections only
+      query = query.eq('transaction_type', 'customer_collection');
+
+      const { data: payData, error } = await query;
+      if (error) throw error;
+
+      const list = payData || [];
+      setCustomerPayments(list);
+
+      // Resolve linked invoice numbers
+      const invoiceIds = Array.from(new Set(list.map((p) => p.reference_invoice_id).filter(Boolean)));
+      if (invoiceIds.length > 0) {
+        const { data: salesList } = await supabase
+          .from('sales')
+          .select('id, invoice_number')
+          .in('id', invoiceIds);
+        if (salesList) {
+          const map = {};
+          salesList.forEach((s) => {
+            map[s.id] = s.invoice_number;
+          });
+          setPaymentSalesMap(map);
+        }
+      }
+    } catch (err) {
+      console.error('Error loading customer payments:', err);
+    } finally {
+      setLoading(false);
     }
-
-    const list = invData || [];
-    setInventoryList(list);
-
-    let units = 0;
-    let costVal = 0;
-    let retailVal = 0;
-
-    list.forEach((row) => {
-      const q = parseInt(row.quantity) || 0;
-      const cost = parseFloat(row.product?.purchase_price) || 0;
-      const sale = parseFloat(row.product?.sale_price) || 0;
-
-      units += q;
-      costVal += q * cost;
-      retailVal += q * sale;
-    });
-
-    setTotalStockUnits(units);
-    setTotalStockCostValue(costVal);
-    setTotalStockRetailValue(retailVal);
   };
+
+  // Overall Financial Calculations
+  const overallTotalRevenue = useMemo(() => {
+    return overallSales.reduce((sum, s) => sum + (parseFloat(s.net_amount) || 0), 0);
+  }, [overallSales]);
+
+  const overallTotalPaid = useMemo(() => {
+    return overallSales.reduce((sum, s) => sum + (parseFloat(s.paid_amount) || 0), 0);
+  }, [overallSales]);
+
+  const overallTotalDue = Math.max(0, overallTotalRevenue - overallTotalPaid);
+  const overallNetProfit = overallTotalRevenue - overallPurchasesTotal - overallExpensesTotal;
+
+  // Customer Financial Calculations
+  const customerTotalBilled = useMemo(() => {
+    return customerSales.reduce((sum, s) => sum + (parseFloat(s.net_amount) || 0), 0);
+  }, [customerSales]);
+
+  const customerTotalPaid = useMemo(() => {
+    return customerSales.reduce((sum, s) => sum + (parseFloat(s.paid_amount) || 0), 0);
+  }, [customerSales]);
+
+  const customerTotalDue = Math.max(0, customerTotalBilled - customerTotalPaid);
+
+  // Customer Payments Financial Calculations
+  const paymentsTotalAmount = useMemo(() => {
+    return customerPayments.reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0);
+  }, [customerPayments]);
+
+  const paymentsCashAmount = useMemo(() => {
+    return customerPayments
+      .filter((p) => (p.payment_method || '').toLowerCase() === 'cash')
+      .reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0);
+  }, [customerPayments]);
+
+  const paymentsDigitalAmount = useMemo(() => {
+    return customerPayments
+      .filter((p) => (p.payment_method || '').toLowerCase() !== 'cash')
+      .reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0);
+  }, [customerPayments]);
+
+  const [showReportPrint, setShowReportPrint] = useState(false);
+
+  // Phone filtered list
+  const filteredCustomers = useMemo(() => {
+    if (!phoneSearch.trim()) return customers.slice(0, 15);
+    const q = phoneSearch.toLowerCase();
+    return customers.filter(
+      (c) =>
+        (c.phone && c.phone.includes(q)) ||
+        (c.name && c.name.toLowerCase().includes(q))
+    );
+  }, [customers, phoneSearch]);
+
+  const selectedBranchObj = useMemo(() => {
+    if (!selectedBranchId) return null;
+    return branches.find((item) => item.id === selectedBranchId) || null;
+  }, [branches, selectedBranchId]);
+
+  const selectedBranchName = useMemo(() => {
+    return selectedBranchObj ? selectedBranchObj.name : (branches[0]?.name || 'Branch');
+  }, [selectedBranchObj, branches]);
 
   const handlePrint = () => {
     window.print();
   };
 
-  const activeBranchName =
-    branches.find((b) => b.id === selectedBranchId)?.name || 'Selected Branch';
-
-  // Branch Financial Calculations
-  const grossProfit = revenue - purchasesTotal;
-  const grossMarginPct = revenue > 0 ? ((grossProfit / revenue) * 100).toFixed(1) : 0;
-  const netMarginPct = revenue > 0 ? ((netProfit / revenue) * 100).toFixed(1) : 0;
-  const totalLiquidAssets = cashBalance + bankBalance + mobileBalance;
-
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-      {/* TOP FILTER BAR */}
+      {/* 1. TOP HEADER & REPORT TAB SELECTOR */}
       <div
-        className="no-print"
+        className="no-print card"
         style={{
+          padding: '0.85rem 1.15rem',
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'center',
-          gap: '1rem',
           flexWrap: 'wrap',
-          padding: '0.75rem 1rem',
-          backgroundColor: '#ffffff',
-          borderRadius: 'var(--border-radius)',
-          border: '1px solid var(--border-color)',
-          boxShadow: 'var(--shadow-sm)',
+          gap: '0.75rem',
         }}
       >
-        <div className="page-title-group" style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
           <div
             style={{
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              width: '34px',
-              height: '34px',
-              borderRadius: '6px',
-              backgroundColor: '#e0e7ff',
-              color: 'var(--primary)',
+              width: '36px',
+              height: '36px',
+              borderRadius: '8px',
+              backgroundColor: '#e0f2fe',
+              color: '#0284c7',
             }}
           >
-            <BarChart3 size={18} />
+            <BarChart3 size={20} />
           </div>
-          <h1 style={{ margin: 0, fontSize: '1.2rem', fontFamily: 'Outfit, sans-serif' }}>
-            Branch Reports
-          </h1>
+          <div>
+            <h2 style={{ margin: 0, fontSize: '1.15rem', fontWeight: 800, fontFamily: 'Outfit, sans-serif' }}>
+              Reports
+            </h2>
+            <div style={{ fontSize: '0.76rem', color: 'var(--text-muted)' }}>
+              {activeTab === 'overall' ? 'Overall business turnover & sales summary' : 'Customer account statement & dues'}
+            </div>
+          </div>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
-          {/* Branch Select */}
-          {isOwner ? (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-              <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)' }}>Branch:</span>
-              <select
-                className="input-control"
-                value={selectedBranchId}
-                onChange={(e) => {
-                  setLoading(true);
-                  setSelectedBranchId(e.target.value);
-                }}
-                style={{ width: '165px', padding: '0.3rem 0.5rem', fontSize: '0.8rem' }}
-              >
-                {branches.map((b) => (
-                  <option key={b.id} value={b.id}>
-                    {b.is_factory ? `🏭 ${b.name}` : `🏪 ${b.name}`}
-                  </option>
-                ))}
-              </select>
-            </div>
-          ) : (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.82rem', fontWeight: 600 }}>
-              <span>{branches.find((b) => b.id === selectedBranchId)?.is_factory ? '🏭' : '🏪'}</span>
-              <span>{activeBranchName}</span>
-            </div>
-          )}
-
-          {/* Date Picker Group */}
-          <div
-            style={{
-              display: 'flex',
-              gap: '0.35rem',
-              alignItems: 'center',
-              backgroundColor: 'var(--bg-app)',
-              padding: '0.3rem 0.55rem',
-              borderRadius: 'var(--border-radius-sm)',
-              border: '1px solid var(--border-color)',
-            }}
-          >
-            <Calendar size={13} style={{ color: 'var(--text-muted)' }} />
-            <input
-              type="date"
-              style={{
-                border: 'none',
-                background: 'transparent',
-                fontSize: '0.8rem',
-                padding: 0,
-                width: '100px',
-                color: 'var(--text-primary)',
-                outline: 'none',
-              }}
-              value={startDate}
-              onChange={(e) => {
-                setLoading(true);
-                setStartDate(e.target.value);
-              }}
-            />
-            <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', padding: '0 0.1rem' }}>to</span>
-            <input
-              type="date"
-              style={{
-                border: 'none',
-                background: 'transparent',
-                fontSize: '0.8rem',
-                padding: 0,
-                width: '100px',
-                color: 'var(--text-primary)',
-                outline: 'none',
-              }}
-              value={endDate}
-              onChange={(e) => {
-                setLoading(true);
-                setEndDate(e.target.value);
-              }}
-            />
-          </div>
-
+        {/* 3 Simple Tabs */}
+        <div style={{ display: 'flex', gap: '0.4rem', backgroundColor: '#f1f5f9', padding: '0.25rem', borderRadius: '8px' }}>
           <button
-            className="btn btn-primary btn-sm"
-            onClick={handlePrint}
-            style={{ padding: '0.4rem 0.75rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}
+            type="button"
+            className={`btn btn-sm ${activeTab === 'overall' ? 'btn-primary' : 'btn-secondary'}`}
+            onClick={() => setActiveTab('overall')}
+            style={{ fontWeight: 700, padding: '0.4rem 0.85rem' }}
           >
-            <Printer size={13} />
-            <span style={{ fontSize: '0.8rem' }}>Print</span>
+            1. Overall Report
+          </button>
+          <button
+            type="button"
+            className={`btn btn-sm ${activeTab === 'customer' ? 'btn-primary' : 'btn-secondary'}`}
+            onClick={() => setActiveTab('customer')}
+            style={{ fontWeight: 700, padding: '0.4rem 0.85rem' }}
+          >
+            2. Customer Statement
+          </button>
+          <button
+            type="button"
+            className={`btn btn-sm ${activeTab === 'payments' ? 'btn-primary' : 'btn-secondary'}`}
+            onClick={() => setActiveTab('payments')}
+            style={{ fontWeight: 700, padding: '0.4rem 0.85rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}
+          >
+            <CreditCard size={14} />
+            <span>3. Customer Payments</span>
           </button>
         </div>
       </div>
 
-      {/* QUICK PRESET FILTERS BAR */}
+      {/* 2. DATE & FILTER CONTROLS */}
       <div
-        className="no-print"
+        className="no-print card"
         style={{
+          padding: '0.5rem 0.75rem',
           display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: '1rem',
-          flexWrap: 'wrap',
-          padding: '0.45rem 0.85rem',
-          backgroundColor: '#f8fafc',
-          borderRadius: 'var(--border-radius-sm)',
-          border: '1px solid var(--border-color)',
-          marginTop: '-0.75rem',
-          fontSize: '0.78rem',
+          flexDirection: 'column',
+          gap: '0.45rem',
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', flexWrap: 'wrap' }}>
-          <span style={{ color: 'var(--text-muted)', fontWeight: 600, marginRight: '0.2rem' }}>Quick:</span>
-          {[
-            { id: 'today', label: 'Today' },
-            { id: 'yesterday', label: 'Yesterday' },
-            { id: 'week', label: 'This Week' },
-            { id: 'last_7_days', label: 'Last 7 Days' },
-            { id: 'month', label: 'This Month' },
-            { id: 'last_month', label: 'Last Month' },
-            { id: 'last_30_days', label: 'Last 30 Days' },
-            { id: 'year', label: 'This Year' },
-            { id: 'last_year', label: 'Last Year' },
-          ].map((preset) => (
-            <button
-              key={preset.id}
-              type="button"
-              className="btn btn-secondary btn-sm"
-              style={{ padding: '0.15rem 0.45rem', fontSize: '0.74rem' }}
-              onClick={() => handlePresetChange(preset.id)}
+        <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '0.45rem' }}>
+          {/* Month Selector */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', flex: '1 1 140px' }}>
+            <Calendar size={13} style={{ color: '#0284c7', flexShrink: 0 }} />
+            <select
+              className="input-control"
+              value={selectedMonth}
+              onChange={(e) => handleMonthChange(e.target.value)}
+              style={{ width: '100%', padding: '0.25rem 0.4rem', fontSize: '0.78rem' }}
             >
-              {preset.label}
-            </button>
-          ))}
-        </div>
+              <option value="">Custom Range</option>
+              {monthOptions.map((m) => (
+                <option key={m.value} value={m.value}>{m.label}</option>
+              ))}
+            </select>
+          </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-          <span style={{ color: 'var(--text-muted)', fontWeight: 600 }}>Month:</span>
-          <select
-            className="input-control"
-            style={{ width: '145px', padding: '0.15rem 0.35rem', fontSize: '0.74rem', height: 'auto' }}
-            onChange={(e) => handleMonthFilter(e.target.value)}
-            defaultValue=""
-          >
-            <option value="" disabled>
-              Select Month...
-            </option>
-            {getMonthOptions().map((opt) => (
-              <option key={opt.value} value={opt.value}>
-                {opt.label}
-              </option>
-            ))}
-          </select>
-        </div>
-      </div>
-
-      {/* NAVIGATION TABS */}
-      <div
-        className="no-print"
-        style={{
-          display: 'flex',
-          gap: '0.35rem',
-          borderBottom: '2px solid var(--border-color)',
-          paddingBottom: '0.1rem',
-          overflowX: 'auto',
-        }}
-      >
-        {[
-          { id: 'summary', name: 'Branch Summary', icon: BarChart3 },
-          { id: 'pnl', name: 'Profit & Loss', icon: TrendingUp },
-          { id: 'consignments', name: 'Consignments', icon: Truck },
-          { id: 'dues', name: 'Receivables & Payables', icon: CreditCard },
-          { id: 'inventory', name: 'Inventory Valuation', icon: Package },
-          { id: 'journal', name: 'Transactions Journal', icon: FileText },
-        ].map((tab) => {
-          const Icon = tab.icon;
-          const isActive = activeMainTab === tab.id;
-          return (
-            <button
-              key={tab.id}
-              type="button"
-              onClick={() => setActiveMainTab(tab.id)}
-              style={{
-                border: 'none',
-                background: 'none',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '0.4rem',
-                padding: '0.45rem 0.85rem',
-                fontSize: '0.82rem',
-                fontWeight: isActive ? 700 : 500,
-                color: isActive ? 'var(--primary)' : 'var(--text-secondary)',
-                borderBottom: isActive ? '3px solid var(--primary)' : '3px solid transparent',
-                cursor: 'pointer',
-                whiteSpace: 'nowrap',
-                transition: 'all 0.15s ease',
+          {/* Date Range: From & To side by side */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', flex: '2 1 230px' }}>
+            <span style={{ fontSize: '0.72rem', fontWeight: 600, color: 'var(--text-muted)' }}>From:</span>
+            <input
+              type="date"
+              className="input-control"
+              value={startDate}
+              onChange={(e) => {
+                setStartDate(e.target.value);
+                setSelectedMonth('');
               }}
-            >
-              <Icon size={15} />
-              <span>{tab.name}</span>
-            </button>
-          );
-        })}
+              style={{ flex: 1, padding: '0.25rem 0.35rem', fontSize: '0.76rem', minWidth: '105px' }}
+            />
+            <span style={{ fontSize: '0.72rem', fontWeight: 600, color: 'var(--text-muted)' }}>To:</span>
+            <input
+              type="date"
+              className="input-control"
+              value={endDate}
+              onChange={(e) => {
+                setEndDate(e.target.value);
+                setSelectedMonth('');
+              }}
+              style={{ flex: 1, padding: '0.25rem 0.35rem', fontSize: '0.76rem', minWidth: '105px' }}
+            />
+          </div>
+
+          {/* Branch Filter */}
+          {isOwner ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', flex: '1 1 140px' }}>
+              <Building2 size={13} style={{ color: '#0284c7', flexShrink: 0 }} />
+              <select
+                className="input-control"
+                value={selectedBranchId}
+                onChange={(e) => setSelectedBranchId(e.target.value)}
+                style={{ width: '100%', padding: '0.25rem 0.4rem', fontSize: '0.78rem', fontWeight: 600 }}
+              >
+                {branches.map((b) => (
+                  <option key={b.id} value={b.id}>{b.name}</option>
+                ))}
+              </select>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', flex: '1 1 120px' }}>
+              <div style={{ width: '100%', padding: '0.25rem 0.5rem', backgroundColor: '#f1f5f9', border: '1px solid #cbd5e1', borderRadius: '4px', fontSize: '0.74rem', fontWeight: 700, color: '#0f172a', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                🏢 {selectedBranchName}
+              </div>
+            </div>
+          )}
+
+          {/* Payment Method Filter (for Customer Payments tab) */}
+          {activeTab === 'payments' && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', flex: '1 1 130px' }}>
+              <span style={{ fontSize: '0.72rem', fontWeight: 600 }}>Method:</span>
+              <select
+                className="input-control"
+                value={paymentMethodFilter}
+                onChange={(e) => setPaymentMethodFilter(e.target.value)}
+                style={{ width: '100%', padding: '0.25rem 0.4rem', fontSize: '0.78rem' }}
+              >
+                <option value="all">All Methods</option>
+                <option value="cash">Cash</option>
+                <option value="bank">Bank Transfer</option>
+                <option value="bkash">bKash</option>
+                <option value="nagad">Nagad</option>
+                <option value="card">Card</option>
+                <option value="cheque">Cheque</option>
+              </select>
+            </div>
+          )}
+
+          {/* Print Preview Button */}
+          <button
+            type="button"
+            className="btn btn-primary btn-sm"
+            onClick={() => setShowReportPrint(true)}
+            style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', fontWeight: 700, padding: '0.25rem 0.75rem', fontSize: '0.78rem', marginLeft: 'auto' }}
+          >
+            <Printer size={13} /> Print Report
+          </button>
+        </div>
       </div>
 
-      {message.text && (
-        <div
-          className="no-print"
-          style={{
-            padding: '0.65rem 0.85rem',
-            borderRadius: 'var(--border-radius-sm)',
-            backgroundColor: message.type === 'success' ? 'var(--success-light)' : 'var(--danger-light)',
-            color: message.type === 'success' ? 'var(--success-text)' : 'var(--danger-text)',
-            border: `1px solid ${message.type === 'success' ? 'rgba(16,185,129,0.2)' : 'rgba(239,68,68,0.2)'}`,
-            fontWeight: 500,
-            fontSize: '0.82rem',
-          }}
-        >
-          {message.text}
+      {/* ========================================================= */}
+      {/* 1. OVERALL REPORT VIEW                                    */}
+      {/* ========================================================= */}
+      {activeTab === 'overall' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+          {/* Summary Metric Cards */}
+          <div
+            className="stats-grid"
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(110px, 1fr))',
+              gap: '0.35rem',
+            }}
+          >
+            {/* Total Sales */}
+            <div className="card" style={{ padding: '0.45rem 0.65rem', borderLeft: '3.5px solid #0284c7' }}>
+              <div style={{ fontSize: '0.68rem', fontWeight: 600, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>Total Sales</div>
+              <div style={{ fontSize: '1.05rem', fontWeight: 800, fontFamily: 'Outfit, sans-serif', color: 'var(--text-primary)', marginTop: '0.05rem' }}>
+                ৳{overallTotalRevenue.toLocaleString(undefined, { minimumFractionDigits: 0 })}
+              </div>
+            </div>
+
+            {/* Collected / Paid */}
+            <div className="card" style={{ padding: '0.45rem 0.65rem', borderLeft: '3.5px solid #10b981' }}>
+              <div style={{ fontSize: '0.68rem', fontWeight: 600, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>Total Collected</div>
+              <div style={{ fontSize: '1.05rem', fontWeight: 800, fontFamily: 'Outfit, sans-serif', color: '#059669', marginTop: '0.05rem' }}>
+                ৳{overallTotalPaid.toLocaleString(undefined, { minimumFractionDigits: 0 })}
+              </div>
+            </div>
+
+            {/* Total Due */}
+            <div className="card" style={{ padding: '0.45rem 0.65rem', borderLeft: '3.5px solid #f59e0b' }}>
+              <div style={{ fontSize: '0.68rem', fontWeight: 600, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>Customer Due</div>
+              <div style={{ fontSize: '1.05rem', fontWeight: 800, fontFamily: 'Outfit, sans-serif', color: '#d97706', marginTop: '0.05rem' }}>
+                ৳{overallTotalDue.toLocaleString(undefined, { minimumFractionDigits: 0 })}
+              </div>
+            </div>
+
+            {/* Purchases */}
+            <div className="card" style={{ padding: '0.45rem 0.65rem', borderLeft: '3.5px solid #6366f1' }}>
+              <div style={{ fontSize: '0.68rem', fontWeight: 600, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>Total Purchases</div>
+              <div style={{ fontSize: '1.05rem', fontWeight: 800, fontFamily: 'Outfit, sans-serif', color: 'var(--text-primary)', marginTop: '0.05rem' }}>
+                ৳{overallPurchasesTotal.toLocaleString(undefined, { minimumFractionDigits: 0 })}
+              </div>
+            </div>
+
+            {/* Expenses */}
+            <div className="card" style={{ padding: '0.45rem 0.65rem', borderLeft: '3.5px solid #ef4444' }}>
+              <div style={{ fontSize: '0.68rem', fontWeight: 600, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>Total Expenses</div>
+              <div style={{ fontSize: '1.05rem', fontWeight: 800, fontFamily: 'Outfit, sans-serif', color: '#dc2626', marginTop: '0.05rem' }}>
+                ৳{overallExpensesTotal.toLocaleString(undefined, { minimumFractionDigits: 0 })}
+              </div>
+            </div>
+
+            {/* Net Profit */}
+            <div className="card" style={{ padding: '0.45rem 0.65rem', borderLeft: `3.5px solid ${overallNetProfit >= 0 ? '#10b981' : '#ef4444'}` }}>
+              <div style={{ fontSize: '0.68rem', fontWeight: 600, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>Net Profit</div>
+              <div style={{ fontSize: '1.05rem', fontWeight: 800, fontFamily: 'Outfit, sans-serif', color: overallNetProfit >= 0 ? '#059669' : '#dc2626', marginTop: '0.05rem' }}>
+                ৳{overallNetProfit.toLocaleString(undefined, { minimumFractionDigits: 0 })}
+              </div>
+            </div>
+          </div>
+
+          {/* Sales Table */}
+          <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+            <div style={{ padding: '0.65rem 0.95rem', backgroundColor: '#f8fafc', borderBottom: '1px solid var(--border-color)', fontWeight: 700, fontSize: '0.85rem' }}>
+              Sales Invoices ({overallSales.length})
+            </div>
+            <div className="table-container" style={{ border: 'none' }}>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Invoice / Challan #</th>
+                    <th>Date</th>
+                    <th>Customer Name</th>
+                    <th>Phone</th>
+                    <th style={{ textAlign: 'right' }}>Total (৳)</th>
+                    <th style={{ textAlign: 'right' }}>Paid (৳)</th>
+                    <th style={{ textAlign: 'right' }}>Due (৳)</th>
+                    <th style={{ textAlign: 'center' }}>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {loading ? (
+                    <TableLoading colSpan={8} message="Loading sales..." />
+                  ) : overallSales.length === 0 ? (
+                    <tr>
+                      <td colSpan={8} style={{ textAlign: 'center', padding: '2rem' }}>
+                        No sales found for this period.
+                      </td>
+                    </tr>
+                  ) : (
+                    overallSales.map((s) => {
+                      const net = parseFloat(s.net_amount) || 0;
+                      const paid = parseFloat(s.paid_amount) || 0;
+                      const due = Math.max(0, net - paid);
+                      return (
+                        <tr key={s.id}>
+                          <td style={{ fontFamily: 'monospace', fontWeight: 700, color: '#0284c7' }}>
+                            {s.invoice_number || `INV#${s.id.substring(0, 8).toUpperCase()}`}
+                          </td>
+                          <td>{new Date(s.sale_date).toLocaleDateString('en-GB')}</td>
+                          <td style={{ fontWeight: 600 }}>{s.contacts?.name || 'Walk-in'}</td>
+                          <td>{s.contacts?.phone || '-'}</td>
+                          <td style={{ textAlign: 'right', fontWeight: 700 }}>৳{net.toFixed(2)}</td>
+                          <td style={{ textAlign: 'right', color: '#059669' }}>৳{paid.toFixed(2)}</td>
+                          <td style={{ textAlign: 'right', color: due > 0 ? '#dc2626' : 'inherit', fontWeight: due > 0 ? 700 : 400 }}>
+                            ৳{due.toFixed(2)}
+                          </td>
+                          <td style={{ textAlign: 'center' }}>
+                            <span className={`badge badge-${s.payment_status}`}>{s.payment_status}</span>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
         </div>
       )}
 
-      {/* PRINT HEADER - SHOWS ONLY ON PRINT */}
-      <div
-        className="print-only"
-        style={{ marginBottom: '1.25rem', borderBottom: '2px solid #000', paddingBottom: '0.6rem' }}
-      >
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-          <div>
-            <h1 style={{ fontSize: '1.4rem', fontWeight: 800, margin: 0, textTransform: 'uppercase' }}>
-              ALMAS ACCESSORIES LTD
-            </h1>
-            <p style={{ margin: '0.15rem 0', fontSize: '0.82rem', color: '#475569' }}>
-              Central Factory & Branch Network
-            </p>
-            <p style={{ margin: '0.15rem 0', fontSize: '0.78rem', color: '#64748b' }}>
-              Chittagong / Dhaka, Bangladesh
-            </p>
-          </div>
-          <div style={{ textAlign: 'right' }}>
-            <h2 style={{ fontSize: '1.2rem', fontWeight: 800, margin: 0, color: '#2563eb' }}>
-              BRANCH REPORT
-            </h2>
-            <p style={{ margin: '0.15rem 0', fontSize: '0.82rem', fontWeight: 600 }}>Branch: {activeBranchName}</p>
-            <p style={{ margin: '0.15rem 0', fontSize: '0.78rem' }}>
-              Period: {new Date(startDate).toLocaleDateString()} to {new Date(endDate).toLocaleDateString()}
-            </p>
-          </div>
-        </div>
-      </div>
-
-      {/* ========================================================================= */}
-      {/* LOADING STATE OR REPORT CONTENT                                           */}
-      {/* ========================================================================= */}
-      {loading ? (
-        <div
-          className="card"
-          style={{
-            padding: '3.5rem 1.5rem',
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            justifyContent: 'center',
-            minHeight: '340px',
-            backgroundColor: '#ffffff',
-            borderRadius: 'var(--border-radius)',
-            border: '1px solid var(--border-color)',
-            boxShadow: 'var(--shadow-sm)',
-          }}
-        >
-          <LoadingBlock message={`Loading report data for ${activeBranchName}...`} minHeight="140px" />
-        </div>
-      ) : (
-        <>
-          {/* ========================================================================= */}
-          {/* TAB 1: BRANCH SUMMARY                                                     */}
-          {/* ========================================================================= */}
-          {activeMainTab === 'summary' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-          {/* KPI TILES */}
+      {/* ========================================================= */}
+      {/* 2. CUSTOMER REPORT VIEW                                   */}
+      {/* ========================================================= */}
+      {activeTab === 'customer' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+          {/* Customer Search / Selection Card (Ultra-Compact) */}
           <div
+            className="no-print card"
             style={{
+              padding: '0.45rem 0.65rem',
               display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))',
-              gap: '0.75rem',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
+              gap: '0.4rem',
+              overflow: 'visible',
+              position: 'relative',
+              zIndex: 150,
             }}
           >
-            {/* 1. Total Sales */}
-            <div
-              className="card"
-              style={{
-                padding: '0.85rem 1rem',
-                borderLeft: '4px solid #10b981',
-                backgroundColor: '#ffffff',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '0.3rem',
-              }}
-            >
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ fontSize: '0.74rem', color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase' }}>
-                  Total Sales
-                </span>
-                <span
+            {/* Search by Phone input */}
+            <div ref={phoneRef} style={{ position: 'relative', zIndex: 151 }}>
+              <label style={{ display: 'block', marginBottom: '0.15rem', fontWeight: 600, fontSize: '0.7rem' }}>
+                Search by Phone or Name:
+              </label>
+              <div style={{ position: 'relative' }}>
+                <Phone size={12} style={{ position: 'absolute', left: '0.55rem', top: '50%', transform: 'translateY(-50%)', color: '#0284c7' }} />
+                <input
+                  type="text"
+                  className="input-control"
+                  placeholder="Type customer name or phone..."
+                  value={phoneSearch}
+                  onChange={(e) => {
+                    setPhoneSearch(e.target.value);
+                    setShowPhoneList(true);
+                  }}
+                  onFocus={() => setShowPhoneList(true)}
+                  onClick={() => setShowPhoneList(true)}
+                  style={{ paddingLeft: '1.65rem', paddingRight: '1.65rem', fontSize: '0.78rem', padding: '0.22rem 1.65rem' }}
+                />
+                {phoneSearch && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPhoneSearch('');
+                      setShowPhoneList(false);
+                    }}
+                    style={{ position: 'absolute', right: '0.4rem', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}
+                  >
+                    <X size={12} />
+                  </button>
+                )}
+              </div>
+
+              {/* Suggestions dropdown */}
+              {showPhoneList && (
+                <div
                   style={{
-                    backgroundColor: '#ecfdf5',
-                    color: '#059669',
-                    padding: '0.1rem 0.35rem',
-                    borderRadius: '4px',
-                    fontSize: '0.68rem',
-                    fontWeight: 700,
+                    position: 'absolute',
+                    top: '100%',
+                    left: 0,
+                    right: 0,
+                    backgroundColor: '#ffffff',
+                    border: '1.5px solid #0284c7',
+                    borderRadius: 'var(--border-radius-sm)',
+                    boxShadow: '0 12px 30px rgba(0, 0, 0, 0.25)',
+                    maxHeight: '220px',
+                    overflowY: 'auto',
+                    zIndex: 9999,
+                    marginTop: '0.25rem',
                   }}
                 >
-                  {salesList.length} Invoices
-                </span>
-              </div>
-              <div style={{ fontSize: '1.3rem', fontWeight: 800, fontFamily: 'Outfit, sans-serif', color: 'var(--text-primary)' }}>
-                ৳{revenue.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.74rem', color: 'var(--text-secondary)' }}>
-                <span>Collected: ৳{salesCollected.toLocaleString()}</span>
-                <span style={{ color: customerDue > 0 ? '#dc2626' : 'inherit' }}>Due: ৳{customerDue.toLocaleString()}</span>
-              </div>
+                  {filteredCustomers.length === 0 ? (
+                    <div style={{ padding: '0.5rem', fontSize: '0.75rem', color: 'var(--text-muted)', textAlign: 'center' }}>
+                      No customers found
+                    </div>
+                  ) : (
+                    filteredCustomers.map((c) => (
+                      <div
+                        key={c.id}
+                        onClick={() => {
+                          setSelectedCustomerId(c.id);
+                          setPhoneSearch(`${c.name} (${c.phone || 'No phone'})`);
+                          setShowPhoneList(false);
+                        }}
+                        style={{
+                          padding: '0.4rem 0.6rem',
+                          borderBottom: '1px solid var(--border-color)',
+                          cursor: 'pointer',
+                          backgroundColor: selectedCustomerId === c.id ? '#e0f2fe' : '#ffffff',
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                        }}
+                        onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = '#f0f9ff')}
+                        onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = selectedCustomerId === c.id ? '#e0f2fe' : '#ffffff')}
+                      >
+                        <div>
+                          <div style={{ fontWeight: 600, fontSize: '0.78rem' }}>{c.name}</div>
+                          <div style={{ fontSize: '0.68rem', color: '#0284c7' }}>📞 {c.phone || 'No Phone'}</div>
+                        </div>
+                        <span className="badge badge-secondary" style={{ fontSize: '0.62rem' }}>Select</span>
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
             </div>
 
-            {/* 2. Total Purchases */}
-            <div
-              className="card"
-              style={{
-                padding: '0.85rem 1rem',
-                borderLeft: '4px solid #f59e0b',
-                backgroundColor: '#ffffff',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '0.3rem',
-              }}
-            >
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ fontSize: '0.74rem', color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase' }}>
-                  Total Purchases
-                </span>
-                <span
-                  style={{
-                    backgroundColor: '#fffbeb',
-                    color: '#b45309',
-                    padding: '0.1rem 0.35rem',
-                    borderRadius: '4px',
-                    fontSize: '0.68rem',
-                    fontWeight: 700,
-                  }}
-                >
-                  {purchasesList.length} Bills
-                </span>
-              </div>
-              <div style={{ fontSize: '1.3rem', fontWeight: 800, fontFamily: 'Outfit, sans-serif', color: 'var(--text-primary)' }}>
-                ৳{purchasesTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.74rem', color: 'var(--text-secondary)' }}>
-                <span>Paid: ৳{purchasesPaid.toLocaleString()}</span>
-                <span style={{ color: supplierDue > 0 ? '#dc2626' : 'inherit' }}>Due: ৳{supplierDue.toLocaleString()}</span>
-              </div>
+            {/* Select Customer Dropdown */}
+            <div>
+              <label style={{ display: 'block', marginBottom: '0.15rem', fontWeight: 600, fontSize: '0.7rem' }}>
+                Or Choose from List:
+              </label>
+              <select
+                className="input-control"
+                value={selectedCustomerId}
+                onChange={(e) => {
+                  setSelectedCustomerId(e.target.value);
+                  const found = customers.find((c) => c.id === e.target.value);
+                  if (found) setPhoneSearch(`${found.name} (${found.phone || ''})`);
+                }}
+                style={{ fontSize: '0.78rem', padding: '0.22rem 0.4rem' }}
+              >
+                <option value="">-- Select Customer --</option>
+                {customers.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name} {c.phone ? `(${c.phone})` : ''}
+                  </option>
+                ))}
+              </select>
             </div>
+          </div>
 
-            {/* 3. Total Expenses */}
-            <div
-              className="card"
-              style={{
-                padding: '0.85rem 1rem',
-                borderLeft: '4px solid #ef4444',
-                backgroundColor: '#ffffff',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '0.3rem',
-              }}
-            >
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ fontSize: '0.74rem', color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase' }}>
-                  Total Expenses
-                </span>
-                <span
-                  style={{
-                    backgroundColor: '#fef2f2',
-                    color: '#dc2626',
-                    padding: '0.1rem 0.35rem',
-                    borderRadius: '4px',
-                    fontSize: '0.68rem',
-                    fontWeight: 700,
-                  }}
-                >
-                  {expensesList.length} Entries
-                </span>
-              </div>
-              <div style={{ fontSize: '1.3rem', fontWeight: 800, fontFamily: 'Outfit, sans-serif', color: 'var(--text-primary)' }}>
-                ৳{expensesTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-              </div>
-              <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>
-                Operational & overhead expenses
-              </div>
+          {/* Customer Report Content */}
+          {!selectedCustomerId ? (
+            <div className="card" style={{ padding: '2rem 1rem', textAlign: 'center', color: 'var(--text-muted)' }}>
+              <Users size={32} style={{ margin: '0 auto 0.5rem', color: '#bae6fd' }} />
+              <h3 style={{ margin: 0, fontSize: '0.95rem', color: 'var(--text-primary)' }}>Select a Customer</h3>
+              <p style={{ margin: '0.2rem 0 0', fontSize: '0.78rem' }}>
+                Search by phone number or select a customer to view their statement.
+              </p>
             </div>
-
-            {/* 4. Net Profit */}
-            <div
-              className="card"
-              style={{
-                padding: '0.85rem 1rem',
-                borderLeft: `4px solid ${netProfit >= 0 ? '#4f46e5' : '#dc2626'}`,
-                backgroundColor: '#ffffff',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '0.3rem',
-              }}
-            >
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ fontSize: '0.74rem', color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase' }}>
-                  Net Profit
-                </span>
-                <span
-                  style={{
-                    backgroundColor: netProfit >= 0 ? '#e0e7ff' : '#fef2f2',
-                    color: netProfit >= 0 ? '#4338ca' : '#dc2626',
-                    padding: '0.1rem 0.35rem',
-                    borderRadius: '4px',
-                    fontSize: '0.68rem',
-                    fontWeight: 700,
-                  }}
-                >
-                  {netMarginPct}% Margin
-                </span>
-              </div>
-              <div
-                style={{
-                  fontSize: '1.3rem',
-                  fontWeight: 800,
-                  fontFamily: 'Outfit, sans-serif',
-                  color: netProfit >= 0 ? '#4338ca' : '#dc2626',
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+              {/* Selected Customer Header & Ultra-Compact Stats */}
+              <div 
+                className="card" 
+                style={{ 
+                  padding: '0.45rem 0.65rem', 
+                  display: 'flex', 
+                  flexDirection: 'column',
+                  gap: '0.4rem',
+                  backgroundColor: '#f8fafc',
+                  border: '1px solid #e2e8f0',
+                  borderLeft: '4px solid #0284c7'
                 }}
               >
-                ৳{netProfit.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                {/* Top: Customer Info */}
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.35rem' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+                    <div style={{ 
+                      width: '24px', 
+                      height: '24px', 
+                      borderRadius: '50%', 
+                      backgroundColor: '#e0f2fe', 
+                      color: '#0284c7', 
+                      display: 'flex', 
+                      alignItems: 'center', 
+                      justifyContent: 'center',
+                      fontWeight: 800,
+                      fontSize: '0.75rem',
+                      flexShrink: 0
+                    }}>
+                      {selectedCustomer?.name ? selectedCustomer.name.charAt(0).toUpperCase() : 'C'}
+                    </div>
+                    <div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+                        <span style={{ fontWeight: 800, fontSize: '0.85rem', color: '#0f172a' }}>{selectedCustomer?.name}</span>
+                        <span className="badge badge-info" style={{ fontSize: '0.58rem', padding: '0.05rem 0.25rem' }}>Customer</span>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', fontSize: '0.68rem', color: 'var(--text-muted)' }}>
+                        {selectedCustomer?.phone && <span>📞 {selectedCustomer.phone}</span>}
+                        <span>🏢 {selectedBranchName}</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Bottom: 3 Metric Cards strictly side-by-side on 1 row */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.35rem', width: '100%' }}>
+                  <div style={{ backgroundColor: '#fff', border: '1px solid #cbd5e1', borderRadius: '4px', padding: '0.25rem 0.35rem', textAlign: 'center' }}>
+                    <div style={{ fontSize: '0.6rem', color: 'var(--text-muted)', fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      Invoiced ({customerSales.length})
+                    </div>
+                    <div style={{ fontSize: '0.85rem', fontWeight: 800, color: '#0284c7', fontFamily: 'Outfit, sans-serif' }}>
+                      ৳{customerTotalBilled.toLocaleString(undefined, { minimumFractionDigits: 0 })}
+                    </div>
+                  </div>
+
+                  <div style={{ backgroundColor: '#fff', border: '1px solid #cbd5e1', borderRadius: '4px', padding: '0.25rem 0.35rem', textAlign: 'center' }}>
+                    <div style={{ fontSize: '0.6rem', color: 'var(--text-muted)', fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      Total Paid
+                    </div>
+                    <div style={{ fontSize: '0.85rem', fontWeight: 800, color: '#059669', fontFamily: 'Outfit, sans-serif' }}>
+                      ৳{customerTotalPaid.toLocaleString(undefined, { minimumFractionDigits: 0 })}
+                    </div>
+                  </div>
+
+                  <div style={{ 
+                    backgroundColor: customerTotalDue > 0 ? '#fef2f2' : '#f0fdf4', 
+                    border: `1px solid ${customerTotalDue > 0 ? '#fca5a5' : '#86efac'}`, 
+                    borderRadius: '4px', 
+                    padding: '0.25rem 0.35rem', 
+                    textAlign: 'center'
+                  }}>
+                    <div style={{ fontSize: '0.6rem', color: customerTotalDue > 0 ? '#dc2626' : '#16a34a', fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      Due Balance
+                    </div>
+                    <div style={{ fontSize: '0.85rem', fontWeight: 800, color: customerTotalDue > 0 ? '#dc2626' : '#16a34a', fontFamily: 'Outfit, sans-serif' }}>
+                      ৳{customerTotalDue.toLocaleString(undefined, { minimumFractionDigits: 0 })}
+                    </div>
+                  </div>
+                </div>
               </div>
-              <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>
-                Gross Profit: ৳{grossProfit.toLocaleString()} ({grossMarginPct}%)
+
+              {/* Customer Sales Table */}
+              <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+                <div style={{ padding: '0.65rem 0.95rem', backgroundColor: '#f8fafc', borderBottom: '1px solid var(--border-color)', fontWeight: 700, fontSize: '0.85rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span>Customer Invoices ({customerSales.length})</span>
+                </div>
+                <div className="table-container" style={{ border: 'none' }}>
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Invoice / Challan #</th>
+                        <th>Date</th>
+                        <th style={{ textAlign: 'right' }}>Subtotal</th>
+                        <th style={{ textAlign: 'right' }}>Discount</th>
+                        <th style={{ textAlign: 'right' }}>Net Bill (৳)</th>
+                        <th style={{ textAlign: 'right' }}>Paid (৳)</th>
+                        <th style={{ textAlign: 'right' }}>Due (৳)</th>
+                        <th style={{ textAlign: 'center' }}>Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {loading ? (
+                        <TableLoading colSpan={8} message="Loading customer invoices..." />
+                      ) : customerSales.length === 0 ? (
+                        <tr>
+                          <td colSpan={8} style={{ textAlign: 'center', padding: '2rem' }}>
+                            No invoices recorded for this customer in the selected date range.
+                          </td>
+                        </tr>
+                      ) : (
+                        customerSales.map((s) => {
+                          const net = parseFloat(s.net_amount) || 0;
+                          const paid = parseFloat(s.paid_amount) || 0;
+                          const due = Math.max(0, net - paid);
+                          return (
+                            <tr key={s.id}>
+                              <td style={{ fontFamily: 'monospace', fontWeight: 700, color: '#0284c7' }}>
+                                {s.invoice_number || `INV#${s.id.substring(0, 8).toUpperCase()}`}
+                              </td>
+                              <td>{new Date(s.sale_date).toLocaleDateString('en-GB')}</td>
+                              <td style={{ textAlign: 'right' }}>৳{(parseFloat(s.total_amount) || 0).toFixed(2)}</td>
+                              <td style={{ textAlign: 'right', color: 'var(--text-muted)' }}>৳{(parseFloat(s.discount) || 0).toFixed(2)}</td>
+                              <td style={{ textAlign: 'right', fontWeight: 700 }}>৳{net.toFixed(2)}</td>
+                              <td style={{ textAlign: 'right', color: '#059669' }}>৳{paid.toFixed(2)}</td>
+                              <td style={{ textAlign: 'right', color: due > 0 ? '#dc2626' : 'inherit', fontWeight: due > 0 ? 700 : 400 }}>
+                                ৳{due.toFixed(2)}
+                              </td>
+                              <td style={{ textAlign: 'center' }}>
+                                <span className={`badge badge-${s.payment_status}`}>{s.payment_status}</span>
+                              </td>
+                            </tr>
+                          );
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             </div>
-          </div>
+          )}
+        </div>
+      )}
 
-          {/* SECONDARY ROW: CASH BALANCES, STOCK, CONSIGNMENTS */}
+      {/* ========================================================= */}
+      {/* 3. CUSTOMER PAYMENTS REPORT VIEW                          */}
+      {/* ========================================================= */}
+      {activeTab === 'payments' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+          {/* Customer Search / Filter Card (Ultra-Compact) */}
           <div
+            className="no-print card"
             style={{
+              padding: '0.45rem 0.65rem',
               display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))',
-              gap: '1rem',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
+              gap: '0.4rem',
+              overflow: 'visible',
+              position: 'relative',
+              zIndex: 150,
             }}
           >
-            {/* Cash & Bank Balances */}
-            <div className="card" style={{ padding: '1rem', display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
-              <div className="card-header" style={{ padding: 0, border: 'none' }}>
-                <h3 className="card-title" style={{ fontSize: '0.9rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                  <Wallet size={15} style={{ color: 'var(--primary)' }} />
-                  <span>Cash & Bank Balances</span>
-                </h3>
+            {/* Search by Phone or Name */}
+            <div ref={phoneRef} style={{ position: 'relative', zIndex: 151 }}>
+              <label style={{ display: 'block', marginBottom: '0.15rem', fontWeight: 600, fontSize: '0.7rem' }}>
+                Filter by Customer Phone or Name:
+              </label>
+              <div style={{ position: 'relative' }}>
+                <Phone size={12} style={{ position: 'absolute', left: '0.55rem', top: '50%', transform: 'translateY(-50%)', color: '#0284c7' }} />
+                <input
+                  type="text"
+                  className="input-control"
+                  placeholder="All Customers (or type to filter)..."
+                  value={phoneSearch}
+                  onChange={(e) => {
+                    setPhoneSearch(e.target.value);
+                    setShowPhoneList(true);
+                  }}
+                  onFocus={() => setShowPhoneList(true)}
+                  onClick={() => setShowPhoneList(true)}
+                  style={{ paddingLeft: '1.65rem', paddingRight: '1.65rem', fontSize: '0.78rem', padding: '0.22rem 1.65rem' }}
+                />
+                {phoneSearch && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPhoneSearch('');
+                      setSelectedCustomerId('');
+                      setShowPhoneList(false);
+                    }}
+                    style={{ position: 'absolute', right: '0.4rem', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}
+                  >
+                    <X size={12} />
+                  </button>
+                )}
               </div>
 
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.82rem' }}>
-                  <span style={{ color: 'var(--text-secondary)' }}>Cash in Hand</span>
-                  <span style={{ fontWeight: 600 }}>৳{cashBalance.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.82rem' }}>
-                  <span style={{ color: 'var(--text-secondary)' }}>Bank Account</span>
-                  <span style={{ fontWeight: 600 }}>৳{bankBalance.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.82rem' }}>
-                  <span style={{ color: 'var(--text-secondary)' }}>Mobile Banking (bKash/Nagad)</span>
-                  <span style={{ fontWeight: 600 }}>৳{mobileBalance.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
-                </div>
+              {/* Dropdown Suggestions */}
+              {showPhoneList && (
                 <div
                   style={{
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    padding: '0.45rem 0.65rem',
-                    borderRadius: '6px',
-                    backgroundColor: '#eef2ff',
-                    color: '#3730a3',
-                    fontWeight: 700,
-                    fontSize: '0.88rem',
-                    marginTop: '0.2rem',
+                    position: 'absolute',
+                    top: '100%',
+                    left: 0,
+                    right: 0,
+                    backgroundColor: '#ffffff',
+                    border: '1.5px solid #0284c7',
+                    borderRadius: 'var(--border-radius-sm)',
+                    boxShadow: '0 12px 30px rgba(0, 0, 0, 0.25)',
+                    maxHeight: '220px',
+                    overflowY: 'auto',
+                    zIndex: 9999,
+                    marginTop: '0.25rem',
                   }}
                 >
-                  <span>Total Available Funds</span>
-                  <span>৳{totalLiquidAssets.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                  <div
+                    onClick={() => {
+                      setSelectedCustomerId('');
+                      setPhoneSearch('');
+                      setShowPhoneList(false);
+                    }}
+                    style={{
+                      padding: '0.4rem 0.6rem',
+                      borderBottom: '1px solid var(--border-color)',
+                      cursor: 'pointer',
+                      backgroundColor: !selectedCustomerId ? '#e0f2fe' : '#ffffff',
+                      fontWeight: 700,
+                      color: '#0284c7',
+                      fontSize: '0.78rem'
+                    }}
+                  >
+                    👥 View All Customers
+                  </div>
+                  {filteredCustomers.map((c) => (
+                    <div
+                      key={c.id}
+                      onClick={() => {
+                        setSelectedCustomerId(c.id);
+                        setPhoneSearch(`${c.name} (${c.phone || 'No phone'})`);
+                        setShowPhoneList(false);
+                      }}
+                      style={{
+                        padding: '0.4rem 0.6rem',
+                        borderBottom: '1px solid var(--border-color)',
+                        cursor: 'pointer',
+                        backgroundColor: selectedCustomerId === c.id ? '#e0f2fe' : '#ffffff',
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                      }}
+                      onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = '#f0f9ff')}
+                      onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = selectedCustomerId === c.id ? '#e0f2fe' : '#ffffff')}
+                    >
+                      <div>
+                        <div style={{ fontWeight: 600, fontSize: '0.78rem' }}>{c.name}</div>
+                        <div style={{ fontSize: '0.68rem', color: '#0284c7' }}>📞 {c.phone || 'No Phone'}</div>
+                      </div>
+                      <span className="badge badge-secondary" style={{ fontSize: '0.62rem' }}>Select</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Select Customer Dropdown */}
+            <div>
+              <label style={{ display: 'block', marginBottom: '0.15rem', fontWeight: 600, fontSize: '0.7rem' }}>
+                Customer Selection:
+              </label>
+              <select
+                className="input-control"
+                value={selectedCustomerId}
+                onChange={(e) => {
+                  setSelectedCustomerId(e.target.value);
+                  const found = customers.find((c) => c.id === e.target.value);
+                  if (found) {
+                    setPhoneSearch(`${found.name} (${found.phone || ''})`);
+                  } else {
+                    setPhoneSearch('');
+                  }
+                }}
+                style={{ fontSize: '0.78rem', padding: '0.22rem 0.4rem' }}
+              >
+                <option value="">All Customers (Company-wide)</option>
+                {customers.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name} {c.phone ? `(${c.phone})` : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {/* Selected Customer Scope & Ultra-Compact Summary Stats */}
+          <div 
+            className="card" 
+            style={{ 
+              padding: '0.45rem 0.65rem', 
+              display: 'flex', 
+              flexDirection: 'column',
+              gap: '0.4rem',
+              backgroundColor: '#f8fafc',
+              border: '1px solid #e2e8f0',
+              borderLeft: `4px solid ${selectedCustomer ? '#0284c7' : '#10b981'}`
+            }}
+          >
+            {/* Top: Customer / Scope Details */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.35rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+                <div style={{ 
+                  width: '24px', 
+                  height: '24px', 
+                  borderRadius: '50%', 
+                  backgroundColor: selectedCustomer ? '#e0f2fe' : '#dcfce7', 
+                  color: selectedCustomer ? '#0284c7' : '#16a34a', 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  justifyContent: 'center',
+                  fontWeight: 800,
+                  fontSize: '0.75rem',
+                  flexShrink: 0
+                }}>
+                  {selectedCustomer ? selectedCustomer.name.charAt(0).toUpperCase() : '★'}
+                </div>
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+                    <span style={{ fontWeight: 800, fontSize: '0.85rem', color: '#0f172a' }}>
+                      {selectedCustomer ? selectedCustomer.name : 'All Customers (Company-wide)'}
+                    </span>
+                    <span className={`badge badge-${selectedCustomer ? 'info' : 'success'}`} style={{ fontSize: '0.58rem', padding: '0.05rem 0.25rem' }}>
+                      {selectedCustomer ? 'Customer' : 'Company'}
+                    </span>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', fontSize: '0.68rem', color: 'var(--text-muted)' }}>
+                    {selectedCustomer?.phone && <span>📞 {selectedCustomer.phone}</span>}
+                    <span>🏢 {selectedBranchName}</span>
+                    {paymentMethodFilter !== 'all' && <span>💳 {paymentMethodFilter.toUpperCase()}</span>}
+                  </div>
                 </div>
               </div>
             </div>
 
-            {/* Inventory Valuation Summary */}
-            <div className="card" style={{ padding: '1rem', display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
-              <div className="card-header" style={{ padding: 0, border: 'none' }}>
-                <h3 className="card-title" style={{ fontSize: '0.9rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                  <Package size={15} style={{ color: '#059669' }} />
-                  <span>Inventory Summary</span>
-                </h3>
-              </div>
-
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.82rem' }}>
-                  <span style={{ color: 'var(--text-secondary)' }}>Total Stock</span>
-                  <span style={{ fontWeight: 600 }}>{totalStockUnits.toLocaleString()} units</span>
+            {/* Bottom: 3 Metric Cards strictly side-by-side on 1 row */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.35rem', width: '100%' }}>
+              <div style={{ backgroundColor: '#fff', border: '1px solid #cbd5e1', borderRadius: '4px', padding: '0.25rem 0.35rem', textAlign: 'center' }}>
+                <div style={{ fontSize: '0.6rem', color: 'var(--text-muted)', fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  Total Collected ({customerPayments.length})
                 </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.82rem' }}>
-                  <span style={{ color: 'var(--text-secondary)' }}>Stock Value (Cost)</span>
-                  <span style={{ fontWeight: 600, color: '#059669' }}>৳{totalStockCostValue.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.82rem' }}>
-                  <span style={{ color: 'var(--text-secondary)' }}>Stock Value (Retail)</span>
-                  <span style={{ fontWeight: 600, color: 'var(--primary)' }}>৳{totalStockRetailValue.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
-                </div>
-                <div
-                  style={{
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    padding: '0.45rem 0.65rem',
-                    borderRadius: '6px',
-                    backgroundColor: '#ecfdf5',
-                    color: '#065f46',
-                    fontWeight: 700,
-                    fontSize: '0.88rem',
-                    marginTop: '0.2rem',
-                  }}
-                >
-                  <span>Expected Profit</span>
-                  <span>৳{Math.max(0, totalStockRetailValue - totalStockCostValue).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                <div style={{ fontSize: '0.85rem', fontWeight: 800, color: '#059669', fontFamily: 'Outfit, sans-serif' }}>
+                  ৳{paymentsTotalAmount.toLocaleString(undefined, { minimumFractionDigits: 0 })}
                 </div>
               </div>
-            </div>
 
-            {/* Consignments Summary */}
-            <div className="card" style={{ padding: '1rem', display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
-              <div className="card-header" style={{ padding: 0, border: 'none' }}>
-                <h3 className="card-title" style={{ fontSize: '0.9rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                  <Truck size={15} style={{ color: '#d97706' }} />
-                  <span>Consignments Summary</span>
-                </h3>
+              <div style={{ backgroundColor: '#fff', border: '1px solid #cbd5e1', borderRadius: '4px', padding: '0.25rem 0.35rem', textAlign: 'center' }}>
+                <div style={{ fontSize: '0.6rem', color: 'var(--text-muted)', fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  Cash Collections
+                </div>
+                <div style={{ fontSize: '0.85rem', fontWeight: 800, color: '#0284c7', fontFamily: 'Outfit, sans-serif' }}>
+                  ৳{paymentsCashAmount.toLocaleString(undefined, { minimumFractionDigits: 0 })}
+                </div>
               </div>
 
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.82rem' }}>
-                  <span style={{ color: 'var(--text-secondary)' }}>Total Sent</span>
-                  <span style={{ fontWeight: 600 }}>৳{totalChallansDispatched.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+              <div style={{ backgroundColor: '#fff', border: '1px solid #cbd5e1', borderRadius: '4px', padding: '0.25rem 0.35rem', textAlign: 'center' }}>
+                <div style={{ fontSize: '0.6rem', color: 'var(--text-muted)', fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  Bank & Digital
                 </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.82rem' }}>
-                  <span style={{ color: 'var(--text-secondary)' }}>Total Received</span>
-                  <span style={{ fontWeight: 600, color: '#059669' }}>৳{totalChallansPaid.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.82rem' }}>
-                  <span style={{ color: 'var(--text-secondary)' }}>Total Due</span>
-                  <span style={{ fontWeight: 600, color: totalChallansDue > 0 ? '#dc2626' : 'inherit' }}>
-                    ৳{totalChallansDue.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                  </span>
-                </div>
-                <div
-                  style={{
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    padding: '0.45rem 0.65rem',
-                    borderRadius: '6px',
-                    backgroundColor: '#fffbeb',
-                    color: '#92400e',
-                    fontWeight: 700,
-                    fontSize: '0.88rem',
-                    marginTop: '0.2rem',
-                  }}
-                >
-                  <span>Dispatched / Sold</span>
-                  <span>{totalSoldQty} / {totalDispatchedQty} pcs</span>
+                <div style={{ fontSize: '0.85rem', fontWeight: 800, color: '#7c3aed', fontFamily: 'Outfit, sans-serif' }}>
+                  ৳{paymentsDigitalAmount.toLocaleString(undefined, { minimumFractionDigits: 0 })}
                 </div>
               </div>
             </div>
           </div>
 
-          {/* EXPENSES BY CATEGORY */}
-          <div className="card" style={{ padding: '1rem' }}>
-            <div className="card-header" style={{ paddingBottom: '0.6rem', borderBottom: '1px solid var(--border-color)', marginBottom: '0.6rem' }}>
-              <h3 className="card-title" style={{ fontSize: '0.92rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                <Receipt size={16} style={{ color: '#ef4444' }} />
-                <span>Expenses by Category</span>
-              </h3>
+          {/* Customer Payments Table */}
+          <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+            <div style={{ padding: '0.65rem 0.95rem', backgroundColor: '#f8fafc', borderBottom: '1px solid var(--border-color)', fontWeight: 700, fontSize: '0.85rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span>Customer Payment Collections ({customerPayments.length})</span>
             </div>
+            <div className="table-container" style={{ border: 'none' }}>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Receipt / Trx #</th>
+                    <th>Date</th>
+                    {!selectedCustomerId && <th>Customer Name</th>}
+                    <th>Invoice Ref</th>
+                    <th>Method</th>
+                    <th>Notes / Ref</th>
+                    <th style={{ textAlign: 'right' }}>Amount (৳)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {loading ? (
+                    <TableLoading colSpan={selectedCustomerId ? 6 : 7} message="Loading customer payments..." />
+                  ) : customerPayments.length === 0 ? (
+                    <tr>
+                      <td colSpan={selectedCustomerId ? 6 : 7} style={{ textAlign: 'center', padding: '2rem' }}>
+                        No payment records found for the selected filter & date range.
+                      </td>
+                    </tr>
+                  ) : (
+                    customerPayments.map((p) => {
+                      const invNo = p.reference_invoice_id ? paymentSalesMap[p.reference_invoice_id] || `INV#${p.reference_invoice_id.substring(0, 8).toUpperCase()}` : 'Direct Receipt';
+                      return (
+                        <tr key={p.id}>
+                          <td style={{ fontFamily: 'monospace', fontWeight: 700, color: '#0284c7' }}>
+                            {p.payment_number || `RCP#${p.id.substring(0, 8).toUpperCase()}`}
+                          </td>
+                          <td>{new Date(p.payment_date).toLocaleDateString('en-GB')}</td>
+                          {!selectedCustomerId && (
+                            <td>
+                              <div style={{ fontWeight: 600 }}>{p.contacts?.name || 'Walk-in'}</div>
+                              {p.contacts?.phone && <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>📞 {p.contacts.phone}</div>}
+                            </td>
+                          )}
+                          <td style={{ fontFamily: 'monospace', fontWeight: 600 }}>
+                            {invNo}
+                          </td>
+                          <td>
+                            <span className="badge badge-success" style={{ textTransform: 'uppercase', fontSize: '0.72rem' }}>
+                              {p.payment_method || 'cash'}
+                            </span>
+                          </td>
+                          <td style={{ fontSize: '0.8rem', color: '#475569' }}>
+                            {p.notes || '-'}
+                          </td>
+                          <td style={{ textAlign: 'right', fontWeight: 800, color: '#059669', fontSize: '0.92rem' }}>
+                            ৳{(parseFloat(p.amount) || 0).toFixed(2)}
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
 
-            {Object.keys(expensesByCategory).length === 0 ? (
-              <div style={{ textAlign: 'center', padding: '1rem', color: 'var(--text-muted)', fontSize: '0.82rem' }}>
-                No expenses recorded in this period.
-              </div>
-            ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                {Object.entries(expensesByCategory).map(([cat, amt]) => {
-                  const pct = expensesTotal > 0 ? ((amt / expensesTotal) * 100).toFixed(1) : 0;
-                  return (
-                    <div key={cat} style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem' }}>
-                        <span style={{ fontWeight: 600, textTransform: 'capitalize' }}>{cat.replace('_', ' ')}</span>
-                        <span>
-                          <strong>৳{amt.toLocaleString(undefined, { minimumFractionDigits: 2 })}</strong>{' '}
-                          <span style={{ color: 'var(--text-muted)', fontSize: '0.72rem' }}>({pct}%)</span>
-                        </span>
+      {/* ========================================================= */}
+      {/* REPORT PRINT MODAL PREVIEW (MATCHING SALES PRINT EXACTLY) */}
+      {/* ========================================================= */}
+      {showReportPrint && (
+        <div className="modal-overlay">
+          <div className="modal-content" style={{ maxWidth: '850px', width: '95%', maxHeight: '95vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+            <div className="modal-header no-print">
+              <h3 className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                <Printer size={18} />
+                <span>
+                  {activeTab === 'overall' 
+                    ? 'Overall Business Report Print Preview' 
+                    : activeTab === 'customer' 
+                    ? `Customer Statement — ${selectedCustomer?.name || 'Customer'}`
+                    : `Customer Payment Report — ${selectedCustomer?.name || 'All Customers'}`}
+                </span>
+              </h3>
+              <button 
+                className="btn btn-secondary btn-sm" 
+                onClick={() => setShowReportPrint(false)}
+                style={{ borderRadius: '50%', padding: '0.4rem', border: 'none' }}
+              >
+                ✕
+              </button>
+            </div>
+            
+            <div className="modal-body" style={{ overflowY: 'auto', padding: '0.85rem', backgroundColor: '#f8fafc' }}>
+              <div 
+                className="invoice-print-view" 
+                style={{ 
+                  margin: '0 auto', 
+                  border: '1px solid #000', 
+                  backgroundColor: '#ffffff',
+                  padding: '0.8rem 1rem',
+                  position: 'relative',
+                  color: '#000',
+                  boxShadow: '0 2px 8px rgba(0,0,0,0.06)'
+                }}
+              >
+                {/* WATERMARK */}
+                <div style={{
+                  position: 'absolute',
+                  top: '50%',
+                  left: '50%',
+                  transform: 'translate(-50%, -50%) rotate(-25deg)',
+                  fontSize: '2.8rem',
+                  fontWeight: 900,
+                  color: 'rgba(0, 0, 0, 0.035)',
+                  letterSpacing: '8px',
+                  textTransform: 'uppercase',
+                  pointerEvents: 'none',
+                  whiteSpace: 'nowrap',
+                  border: '3px solid rgba(0,0,0,0.035)',
+                  padding: '0.4rem 2rem',
+                  borderRadius: '10px',
+                  fontFamily: 'Outfit, sans-serif'
+                }}>
+                  {activeTab === 'overall' ? 'OVERALL REPORT' : activeTab === 'customer' ? 'CUSTOMER STATEMENT' : 'CUSTOMER PAYMENTS'}
+                </div>
+
+                {/* 1. COMPACT TOP HEADER WITH OFFICIAL LOGO & TITLE */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1.5px solid #000', paddingBottom: '0.3rem' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.55rem' }}>
+                    <img 
+                      src={almasLogo} 
+                      alt="Almas Logo" 
+                      style={{ width: '38px', height: '38px', objectFit: 'contain', border: '1px solid #000', padding: '1px', background: '#fff', borderRadius: '3px' }} 
+                    />
+                    <div>
+                      <h1 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 900, letterSpacing: '0.2px', color: '#000', textTransform: 'uppercase', fontFamily: 'Outfit, sans-serif', lineHeight: 1.1 }}>
+                        ALMAS ACCESSORIES INDUSTRIES
+                      </h1>
+                      <div style={{ fontSize: '0.68rem', fontWeight: 600, color: '#334155', fontStyle: 'italic', marginTop: '0.05rem' }}>
+                        100% Export Oriented Garments Accessories Industries
                       </div>
-                      <div style={{ width: '100%', height: '6px', backgroundColor: '#f1f5f9', borderRadius: '3px', overflow: 'hidden' }}>
-                        <div
-                          style={{
-                            width: `${pct}%`,
-                            height: '100%',
-                            backgroundColor: '#ef4444',
-                            borderRadius: '3px',
-                          }}
-                        />
+                    </div>
+                  </div>
+
+                  {/* DISTINCTIVE COMPACT PILL BADGE */}
+                  <div style={{
+                    border: '1.5px solid #000',
+                    borderRadius: '9999px',
+                    padding: '0.2rem 0.85rem',
+                    textAlign: 'center',
+                    backgroundColor: '#ffffff',
+                    boxShadow: 'inset 0 0 0 1px #fff, inset 0 0 0 2px #000',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}>
+                    <span style={{
+                      fontFamily: '"Times New Roman", Times, Georgia, serif',
+                      fontSize: '0.85rem',
+                      fontWeight: 900,
+                      fontStyle: 'italic',
+                      letterSpacing: '1px',
+                      color: '#000',
+                      textTransform: 'uppercase',
+                      padding: '0 0.1rem',
+                      lineHeight: 1
+                    }}>
+                      {activeTab === 'overall' ? 'OVERALL REPORT' : activeTab === 'customer' ? 'CUSTOMER STATEMENT' : 'CUSTOMER PAYMENT REPORT'}
+                    </span>
+                  </div>
+                </div>
+
+                {/* 2. COMPACT REPORT METADATA GRID */}
+                <div style={{ marginTop: '0.32rem', display: 'flex', flexDirection: 'column', gap: '0.18rem', fontSize: '0.76rem', lineHeight: 1.2 }}>
+                  {activeTab === 'overall' ? (
+                    <>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <div style={{ display: 'flex', gap: '0.3rem', width: '58%' }}>
+                          <span style={{ fontWeight: 700, whiteSpace: 'nowrap' }}>Report Period :</span>
+                          <span style={{ fontWeight: 800, borderBottom: '1px dotted #000', flex: 1, paddingLeft: '0.2rem' }}>
+                            {new Date(startDate).toLocaleDateString('en-GB')} — {new Date(endDate).toLocaleDateString('en-GB')}
+                          </span>
+                        </div>
+                        <div style={{ display: 'flex', gap: '0.3rem', width: '38%' }}>
+                          <span style={{ fontWeight: 700, whiteSpace: 'nowrap' }}>Date :</span>
+                          <span style={{ borderBottom: '1px dotted #000', flex: 1, paddingLeft: '0.2rem', fontWeight: 700 }}>
+                            {new Date().toLocaleDateString('en-GB')}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <div style={{ display: 'flex', gap: '0.3rem', width: '58%' }}>
+                          <span style={{ fontWeight: 700, whiteSpace: 'nowrap' }}>Branch :</span>
+                          <span style={{ fontWeight: 700, borderBottom: '1px dotted #000', flex: 1, paddingLeft: '0.2rem' }}>
+                            {selectedBranchName} {selectedBranchObj?.address ? `(${selectedBranchObj.address})` : ''}
+                          </span>
+                        </div>
+                        <div style={{ display: 'flex', gap: '0.3rem', width: '38%' }}>
+                          <span style={{ fontWeight: 700, whiteSpace: 'nowrap' }}>Total Invoices :</span>
+                          <span style={{ borderBottom: '1px dotted #000', flex: 1, paddingLeft: '0.2rem', fontWeight: 800 }}>
+                            {overallSales.length}
+                          </span>
+                        </div>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <div style={{ display: 'flex', gap: '0.3rem', width: '58%' }}>
+                          <span style={{ fontWeight: 700, whiteSpace: 'nowrap' }}>Messrs :</span>
+                          <span style={{ fontWeight: 800, borderBottom: '1px dotted #000', flex: 1, paddingLeft: '0.2rem', fontSize: '0.84rem' }}>
+                            {selectedCustomer?.name || 'All Customers (Company-wide)'}
+                          </span>
+                        </div>
+                        <div style={{ display: 'flex', gap: '0.3rem', width: '38%' }}>
+                          <span style={{ fontWeight: 700, whiteSpace: 'nowrap' }}>Date :</span>
+                          <span style={{ borderBottom: '1px dotted #000', flex: 1, paddingLeft: '0.2rem', fontWeight: 700 }}>
+                            {new Date().toLocaleDateString('en-GB')}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <div style={{ display: 'flex', gap: '0.3rem', width: '58%' }}>
+                          <span style={{ fontWeight: 700, whiteSpace: 'nowrap' }}>Phone :</span>
+                          <span style={{ fontWeight: 700, borderBottom: '1px dotted #000', flex: 1, paddingLeft: '0.2rem' }}>
+                            {selectedCustomer?.phone || 'All Registered Customers'}
+                          </span>
+                        </div>
+                        <div style={{ display: 'flex', gap: '0.3rem', width: '38%' }}>
+                          <span style={{ fontWeight: 700, whiteSpace: 'nowrap' }}>Period :</span>
+                          <span style={{ borderBottom: '1px dotted #000', flex: 1, paddingLeft: '0.2rem', fontWeight: 700 }}>
+                            {new Date(startDate).toLocaleDateString('en-GB')} - {new Date(endDate).toLocaleDateString('en-GB')}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <div style={{ display: 'flex', gap: '0.3rem', width: '58%' }}>
+                          <span style={{ fontWeight: 700, whiteSpace: 'nowrap' }}>Address :</span>
+                          <span style={{ borderBottom: '1px dotted #000', flex: 1, paddingLeft: '0.2rem' }}>
+                            {selectedCustomer?.address || ''}
+                          </span>
+                        </div>
+                        <div style={{ display: 'flex', gap: '0.3rem', width: '38%' }}>
+                          <span style={{ fontWeight: 700, whiteSpace: 'nowrap' }}>Branch :</span>
+                          <span style={{ borderBottom: '1px dotted #000', flex: 1, paddingLeft: '0.2rem', fontWeight: 600 }}>
+                            {selectedBranchName} {selectedBranchObj?.address ? `(${selectedBranchObj.address})` : ''}
+                          </span>
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </div>
+
+                {/* 3. REPORT DATA TABLE */}
+                {activeTab === 'overall' ? (
+                  <table 
+                    style={{ 
+                      width: '100%', 
+                      borderCollapse: 'collapse', 
+                      marginTop: '0.85rem', 
+                      border: '1.5px solid #000',
+                      fontSize: '0.82rem'
+                    }}
+                  >
+                    <thead>
+                      <tr style={{ borderBottom: '1.5px solid #000', backgroundColor: '#f1f5f9' }}>
+                        <th style={{ width: '40px', borderRight: '1px solid #000', padding: '0.45rem 0.35rem', textAlign: 'center', fontWeight: 800 }}>Sl.</th>
+                        <th style={{ width: '130px', borderRight: '1px solid #000', padding: '0.45rem 0.5rem', textAlign: 'left', fontWeight: 800 }}>Invoice / Challan #</th>
+                        <th style={{ width: '85px', borderRight: '1px solid #000', padding: '0.45rem 0.5rem', textAlign: 'center', fontWeight: 800 }}>Date</th>
+                        <th style={{ borderRight: '1px solid #000', padding: '0.45rem 0.5rem', textAlign: 'left', fontWeight: 800 }}>Customer Name</th>
+                        <th style={{ width: '95px', borderRight: '1px solid #000', padding: '0.45rem 0.5rem', textAlign: 'right', fontWeight: 800 }}>Total (৳)</th>
+                        <th style={{ width: '95px', borderRight: '1px solid #000', padding: '0.45rem 0.5rem', textAlign: 'right', fontWeight: 800 }}>Paid (৳)</th>
+                        <th style={{ width: '95px', padding: '0.45rem 0.5rem', textAlign: 'right', fontWeight: 800 }}>Due (৳)</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {overallSales.length === 0 ? (
+                        <tr>
+                          <td colSpan={7} style={{ textAlign: 'center', padding: '1.5rem' }}>No sales records found for this period.</td>
+                        </tr>
+                      ) : (
+                        overallSales.map((s, idx) => {
+                          const net = parseFloat(s.net_amount) || 0;
+                          const paid = parseFloat(s.paid_amount) || 0;
+                          const due = Math.max(0, net - paid);
+                          return (
+                            <tr key={s.id || idx} style={{ borderBottom: '1px solid #cbd5e1' }}>
+                              <td style={{ textAlign: 'center', borderRight: '1px solid #000', padding: '0.4rem 0.35rem', fontWeight: 600 }}>{idx + 1}</td>
+                              <td style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 800, letterSpacing: '0.2px', borderRight: '1px solid #000', padding: '0.4rem 0.5rem' }}>
+                                {s.invoice_number || `INV#${s.id.substring(0, 8).toUpperCase()}`}
+                              </td>
+                              <td style={{ textAlign: 'center', borderRight: '1px solid #000', padding: '0.4rem 0.5rem' }}>
+                                {new Date(s.sale_date).toLocaleDateString('en-GB')}
+                              </td>
+                              <td style={{ borderRight: '1px solid #000', padding: '0.4rem 0.5rem', fontWeight: 600 }}>
+                                {s.contacts?.name || 'Walk-in'}
+                              </td>
+                              <td style={{ textAlign: 'right', borderRight: '1px solid #000', padding: '0.4rem 0.5rem', fontWeight: 700 }}>
+                                ৳{net.toFixed(2)}
+                              </td>
+                              <td style={{ textAlign: 'right', borderRight: '1px solid #000', padding: '0.4rem 0.5rem', color: '#059669', fontWeight: 600 }}>
+                                ৳{paid.toFixed(2)}
+                              </td>
+                              <td style={{ textAlign: 'right', padding: '0.4rem 0.5rem', fontWeight: due > 0 ? 800 : 600, color: due > 0 ? '#dc2626' : '#000' }}>
+                                ৳{due.toFixed(2)}
+                              </td>
+                            </tr>
+                          );
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                ) : activeTab === 'customer' ? (
+                  <table 
+                    style={{ 
+                      width: '100%', 
+                      borderCollapse: 'collapse', 
+                      marginTop: '0.85rem', 
+                      border: '1.5px solid #000',
+                      fontSize: '0.82rem'
+                    }}
+                  >
+                    <thead>
+                      <tr style={{ borderBottom: '1.5px solid #000', backgroundColor: '#f1f5f9' }}>
+                        <th style={{ width: '40px', borderRight: '1px solid #000', padding: '0.45rem 0.35rem', textAlign: 'center', fontWeight: 800 }}>Sl.</th>
+                        <th style={{ width: '130px', borderRight: '1px solid #000', padding: '0.45rem 0.5rem', textAlign: 'left', fontWeight: 800 }}>Invoice / Challan #</th>
+                        <th style={{ width: '85px', borderRight: '1px solid #000', padding: '0.45rem 0.5rem', textAlign: 'center', fontWeight: 800 }}>Date</th>
+                        <th style={{ borderRight: '1px solid #000', padding: '0.45rem 0.5rem', textAlign: 'right', fontWeight: 800 }}>Subtotal (৳)</th>
+                        <th style={{ width: '90px', borderRight: '1px solid #000', padding: '0.45rem 0.5rem', textAlign: 'right', fontWeight: 800 }}>Discount</th>
+                        <th style={{ width: '95px', borderRight: '1px solid #000', padding: '0.45rem 0.5rem', textAlign: 'right', fontWeight: 800 }}>Net Bill (৳)</th>
+                        <th style={{ width: '95px', borderRight: '1px solid #000', padding: '0.45rem 0.5rem', textAlign: 'right', fontWeight: 800 }}>Paid (৳)</th>
+                        <th style={{ width: '95px', padding: '0.45rem 0.5rem', textAlign: 'right', fontWeight: 800 }}>Due (৳)</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {customerSales.length === 0 ? (
+                        <tr>
+                          <td colSpan={8} style={{ textAlign: 'center', padding: '1.5rem' }}>No invoice records found for this customer.</td>
+                        </tr>
+                      ) : (
+                        customerSales.map((s, idx) => {
+                          const net = parseFloat(s.net_amount) || 0;
+                          const paid = parseFloat(s.paid_amount) || 0;
+                          const due = Math.max(0, net - paid);
+                          return (
+                            <tr key={s.id || idx} style={{ borderBottom: '1px solid #cbd5e1' }}>
+                              <td style={{ textAlign: 'center', borderRight: '1px solid #000', padding: '0.4rem 0.35rem', fontWeight: 600 }}>{idx + 1}</td>
+                              <td style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 800, letterSpacing: '0.2px', borderRight: '1px solid #000', padding: '0.4rem 0.5rem' }}>
+                                {s.invoice_number || `INV#${s.id.substring(0, 8).toUpperCase()}`}
+                              </td>
+                              <td style={{ textAlign: 'center', borderRight: '1px solid #000', padding: '0.4rem 0.5rem' }}>
+                                {new Date(s.sale_date).toLocaleDateString('en-GB')}
+                              </td>
+                              <td style={{ textAlign: 'right', borderRight: '1px solid #000', padding: '0.4rem 0.5rem' }}>
+                                ৳{(parseFloat(s.total_amount) || 0).toFixed(2)}
+                              </td>
+                              <td style={{ textAlign: 'right', borderRight: '1px solid #000', padding: '0.4rem 0.5rem', color: '#475569' }}>
+                                ৳{(parseFloat(s.discount) || 0).toFixed(2)}
+                              </td>
+                              <td style={{ textAlign: 'right', borderRight: '1px solid #000', padding: '0.4rem 0.5rem', fontWeight: 700 }}>
+                                ৳{net.toFixed(2)}
+                              </td>
+                              <td style={{ textAlign: 'right', borderRight: '1px solid #000', padding: '0.4rem 0.5rem', color: '#059669', fontWeight: 600 }}>
+                                ৳{paid.toFixed(2)}
+                              </td>
+                              <td style={{ textAlign: 'right', padding: '0.4rem 0.5rem', fontWeight: due > 0 ? 800 : 600, color: due > 0 ? '#dc2626' : '#000' }}>
+                                ৳{due.toFixed(2)}
+                              </td>
+                            </tr>
+                          );
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                ) : (
+                  <table 
+                    style={{ 
+                      width: '100%', 
+                      borderCollapse: 'collapse', 
+                      marginTop: '0.85rem', 
+                      border: '1.5px solid #000',
+                      fontSize: '0.82rem'
+                    }}
+                  >
+                    <thead>
+                      <tr style={{ borderBottom: '1.5px solid #000', backgroundColor: '#f1f5f9' }}>
+                        <th style={{ width: '35px', borderRight: '1px solid #000', padding: '0.45rem 0.35rem', textAlign: 'center', fontWeight: 800 }}>Sl.</th>
+                        <th style={{ width: '120px', borderRight: '1px solid #000', padding: '0.45rem 0.5rem', textAlign: 'left', fontWeight: 800 }}>Receipt / Trx #</th>
+                        <th style={{ width: '80px', borderRight: '1px solid #000', padding: '0.45rem 0.5rem', textAlign: 'center', fontWeight: 800 }}>Date</th>
+                        {!selectedCustomerId && (
+                          <th style={{ borderRight: '1px solid #000', padding: '0.45rem 0.5rem', textAlign: 'left', fontWeight: 800 }}>Customer Name</th>
+                        )}
+                        <th style={{ width: selectedCustomerId ? '160px' : '110px', borderRight: '1px solid #000', padding: '0.45rem 0.5rem', textAlign: 'left', fontWeight: 800 }}>Invoice Ref</th>
+                        <th style={{ width: '75px', borderRight: '1px solid #000', padding: '0.45rem 0.5rem', textAlign: 'center', fontWeight: 800 }}>Method</th>
+                        <th style={{ width: '95px', padding: '0.45rem 0.5rem', textAlign: 'right', fontWeight: 800 }}>Amount (৳)</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {customerPayments.length === 0 ? (
+                        <tr>
+                          <td colSpan={selectedCustomerId ? 6 : 7} style={{ textAlign: 'center', padding: '1.5rem' }}>No payment records found for this period.</td>
+                        </tr>
+                      ) : (
+                        customerPayments.map((p, idx) => {
+                          const invNo = p.reference_invoice_id ? paymentSalesMap[p.reference_invoice_id] || `INV#${p.reference_invoice_id.substring(0, 8).toUpperCase()}` : 'Direct Receipt';
+                          return (
+                            <tr key={p.id || idx} style={{ borderBottom: '1px solid #cbd5e1' }}>
+                              <td style={{ textAlign: 'center', borderRight: '1px solid #000', padding: '0.4rem 0.35rem', fontWeight: 600 }}>{idx + 1}</td>
+                              <td style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 800, letterSpacing: '0.2px', borderRight: '1px solid #000', padding: '0.4rem 0.5rem' }}>
+                                {p.payment_number || `RCP#${p.id.substring(0, 8).toUpperCase()}`}
+                              </td>
+                              <td style={{ textAlign: 'center', borderRight: '1px solid #000', padding: '0.4rem 0.5rem' }}>
+                                {new Date(p.payment_date).toLocaleDateString('en-GB')}
+                              </td>
+                              {!selectedCustomerId && (
+                                <td style={{ borderRight: '1px solid #000', padding: '0.4rem 0.5rem', fontWeight: 600 }}>
+                                  {p.contacts?.name || 'Walk-in'}
+                                </td>
+                              )}
+                              <td style={{ borderRight: '1px solid #000', padding: '0.4rem 0.5rem', fontWeight: 700, fontSize: '0.78rem' }}>
+                                {invNo}
+                              </td>
+                              <td style={{ textAlign: 'center', borderRight: '1px solid #000', padding: '0.4rem 0.5rem', textTransform: 'uppercase', fontSize: '0.75rem', fontWeight: 600 }}>
+                                {p.payment_method || 'cash'}
+                              </td>
+                              <td style={{ textAlign: 'right', padding: '0.4rem 0.5rem', fontWeight: 800, color: '#059669' }}>
+                                ৳{(parseFloat(p.amount) || 0).toFixed(2)}
+                              </td>
+                            </tr>
+                          );
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                )}
+
+                {/* 4. TOTALS & FINANCIAL SUMMARY BOX */}
+                <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'flex-start', marginTop: '0.85rem' }}>
+                  <div style={{ width: '280px', display: 'flex', flexDirection: 'column', gap: '0.3rem', fontSize: '0.85rem', border: '1px solid #000', padding: '0.65rem 0.85rem', borderRadius: '4px', backgroundColor: '#fdfdfd' }}>
+                    {activeTab === 'overall' ? (
+                      <>
+                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                          <span style={{ fontWeight: 600 }}>Total Sales:</span>
+                          <span style={{ fontWeight: 700 }}>৳{overallTotalRevenue.toFixed(2)}</span>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                          <span style={{ fontWeight: 600 }}>Total Purchases:</span>
+                          <span>৳{overallPurchasesTotal.toFixed(2)}</span>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                          <span style={{ fontWeight: 600 }}>Total Expenses:</span>
+                          <span>৳{overallExpensesTotal.toFixed(2)}</span>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 800, borderTop: '1px dashed #000', paddingTop: '0.25rem', color: overallNetProfit >= 0 ? '#059669' : '#dc2626' }}>
+                          <span>Net Profit:</span>
+                          <span>৳{overallNetProfit.toFixed(2)}</span>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', color: '#059669', fontWeight: 700, borderTop: '1.5px solid #000', paddingTop: '0.35rem' }}>
+                          <span>Total Collected:</span>
+                          <span>৳{overallTotalPaid.toFixed(2)}</span>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', color: overallTotalDue > 0 ? '#dc2626' : '#000', fontWeight: 800 }}>
+                          <span>Total Customer Due:</span>
+                          <span>৳{overallTotalDue.toFixed(2)}</span>
+                        </div>
+                      </>
+                    ) : activeTab === 'customer' ? (
+                      <>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 700 }}>
+                          <span>Total Invoiced:</span>
+                          <span>৳{customerTotalBilled.toFixed(2)}</span>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', color: '#059669', fontWeight: 700 }}>
+                          <span>Total Paid:</span>
+                          <span>৳{customerTotalPaid.toFixed(2)}</span>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 900, borderTop: '1.5px solid #000', paddingTop: '0.35rem', fontSize: '0.95rem', color: customerTotalDue > 0 ? '#dc2626' : '#059669' }}>
+                          <span>Total Due Balance:</span>
+                          <span>৳{customerTotalDue.toFixed(2)}</span>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 600 }}>
+                          <span>Total Transactions:</span>
+                          <span>{customerPayments.length}</span>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                          <span style={{ fontWeight: 600 }}>Cash Collections:</span>
+                          <span>৳{paymentsCashAmount.toFixed(2)}</span>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                          <span style={{ fontWeight: 600 }}>Bank / Digital:</span>
+                          <span>৳{paymentsDigitalAmount.toFixed(2)}</span>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 900, borderTop: '1.5px solid #000', paddingTop: '0.35rem', fontSize: '0.95rem', color: '#059669' }}>
+                          <span>Total Received:</span>
+                          <span>৳{paymentsTotalAmount.toFixed(2)}</span>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                {/* 5. BOTTOM OFFICIAL FACTORY / BRANCH FOOTER */}
+                {(() => {
+                  const isFactoryBranch = selectedBranchObj ? Boolean(selectedBranchObj.is_factory) : true;
+                  const label = isFactoryBranch ? 'Office & Factory' : 'Showroom';
+                  const branchAddr = selectedBranchObj?.address || '604/750, Najir Ahamed Mistiri Sodok, West Jharnapara, Baro Quarter, Doublemooring, Chattogram, Bangladesh.';
+                  const branchCell = selectedBranchObj?.phone || '01819-898617, 01845-069803';
+
+                  return (
+                    <div style={{ borderTop: '1.5px solid #000', marginTop: '1.5rem', paddingTop: '0.5rem', textAlign: 'center', fontSize: '0.74rem', color: '#1e293b', lineHeight: 1.4 }}>
+                      <div style={{ fontWeight: 700 }}>
+                        {label} : {branchAddr} &nbsp;|&nbsp; Cell : {branchCell}
+                      </div>
+                      <div style={{ color: '#475569' }}>
+                        E-mail : almasaccessoriesind@gmail.com, Web : www.almasaccessories.com
                       </div>
                     </div>
                   );
-                })}
+                })()}
               </div>
+            </div>
+
+            <div className="modal-footer no-print">
+              <button type="button" className="btn btn-secondary" onClick={() => setShowReportPrint(false)}>Close</button>
+              <button type="button" className="btn btn-primary" onClick={handlePrint} style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                <Printer size={16} /> Print Now
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================= */}
+      {/* DIRECT PRINT VIEW (IF WINDOW.PRINT TRIGGERED OUTSIDE MODAL) */}
+      {/* ========================================================= */}
+      <div className="print-only">
+        <div 
+          className="invoice-print-view" 
+          style={{ 
+            margin: '0 auto', 
+            border: 'none', 
+            backgroundColor: '#ffffff',
+            padding: '1rem',
+            position: 'relative',
+            color: '#000'
+          }}
+        >
+          {/* 1. COMPACT TOP HEADER WITH OFFICIAL LOGO & TITLE */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1.5px solid #000', paddingBottom: '0.3rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.55rem' }}>
+              <img 
+                src={almasLogo} 
+                alt="Almas Logo" 
+                style={{ width: '38px', height: '38px', objectFit: 'contain', border: '1px solid #000', padding: '1px', background: '#fff', borderRadius: '3px' }} 
+              />
+              <div>
+                <h1 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 900, letterSpacing: '0.2px', color: '#000', textTransform: 'uppercase', fontFamily: 'Outfit, sans-serif', lineHeight: 1.1 }}>
+                  ALMAS ACCESSORIES INDUSTRIES
+                </h1>
+                <div style={{ fontSize: '0.68rem', fontWeight: 600, color: '#334155', fontStyle: 'italic', marginTop: '0.05rem' }}>
+                  100% Export Oriented Garments Accessories Industries
+                </div>
+              </div>
+            </div>
+
+            {/* DISTINCTIVE COMPACT PILL BADGE */}
+            <div style={{
+              border: '1.5px solid #000',
+              borderRadius: '9999px',
+              padding: '0.2rem 0.85rem',
+              textAlign: 'center',
+              backgroundColor: '#ffffff',
+              boxShadow: 'inset 0 0 0 1px #fff, inset 0 0 0 2px #000',
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}>
+              <span style={{
+                fontFamily: '"Times New Roman", Times, Georgia, serif',
+                fontSize: '0.85rem',
+                fontWeight: 900,
+                fontStyle: 'italic',
+                letterSpacing: '1px',
+                color: '#000',
+                textTransform: 'uppercase',
+                padding: '0 0.1rem',
+                lineHeight: 1
+              }}>
+                {activeTab === 'overall' ? 'OVERALL REPORT' : activeTab === 'customer' ? 'CUSTOMER STATEMENT' : 'CUSTOMER PAYMENT REPORT'}
+              </span>
+            </div>
+          </div>
+
+          {/* 2. COMPACT REPORT METADATA GRID */}
+          <div style={{ marginTop: '0.32rem', display: 'flex', flexDirection: 'column', gap: '0.18rem', fontSize: '0.76rem', lineHeight: 1.2 }}>
+            {activeTab === 'overall' ? (
+              <>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div style={{ display: 'flex', gap: '0.3rem', width: '58%' }}>
+                    <span style={{ fontWeight: 700, whiteSpace: 'nowrap' }}>Report Period :</span>
+                    <span style={{ fontWeight: 800, borderBottom: '1px dotted #000', flex: 1, paddingLeft: '0.2rem' }}>
+                      {new Date(startDate).toLocaleDateString('en-GB')} — {new Date(endDate).toLocaleDateString('en-GB')}
+                    </span>
+                  </div>
+                  <div style={{ display: 'flex', gap: '0.3rem', width: '38%' }}>
+                    <span style={{ fontWeight: 700, whiteSpace: 'nowrap' }}>Date :</span>
+                    <span style={{ borderBottom: '1px dotted #000', flex: 1, paddingLeft: '0.2rem', fontWeight: 700 }}>
+                      {new Date().toLocaleDateString('en-GB')}
+                    </span>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div style={{ display: 'flex', gap: '0.3rem', width: '58%' }}>
+                    <span style={{ fontWeight: 700, whiteSpace: 'nowrap' }}>Branch :</span>
+                    <span style={{ fontWeight: 700, borderBottom: '1px dotted #000', flex: 1, paddingLeft: '0.2rem' }}>
+                      {selectedBranchName} {selectedBranchObj?.address ? `(${selectedBranchObj.address})` : ''}
+                    </span>
+                  </div>
+                  <div style={{ display: 'flex', gap: '0.3rem', width: '38%' }}>
+                    <span style={{ fontWeight: 700, whiteSpace: 'nowrap' }}>Total Invoices :</span>
+                    <span style={{ borderBottom: '1px dotted #000', flex: 1, paddingLeft: '0.2rem', fontWeight: 800 }}>
+                      {overallSales.length}
+                    </span>
+                  </div>
+                </div>
+              </>
+            ) : (
+              <>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div style={{ display: 'flex', gap: '0.3rem', width: '58%' }}>
+                    <span style={{ fontWeight: 700, whiteSpace: 'nowrap' }}>Messrs :</span>
+                    <span style={{ fontWeight: 800, borderBottom: '1px dotted #000', flex: 1, paddingLeft: '0.2rem', fontSize: '0.84rem' }}>
+                      {selectedCustomer?.name || 'All Customers (Company-wide)'}
+                    </span>
+                  </div>
+                  <div style={{ display: 'flex', gap: '0.3rem', width: '38%' }}>
+                    <span style={{ fontWeight: 700, whiteSpace: 'nowrap' }}>Date :</span>
+                    <span style={{ borderBottom: '1px dotted #000', flex: 1, paddingLeft: '0.2rem', fontWeight: 700 }}>
+                      {new Date().toLocaleDateString('en-GB')}
+                    </span>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div style={{ display: 'flex', gap: '0.3rem', width: '58%' }}>
+                    <span style={{ fontWeight: 700, whiteSpace: 'nowrap' }}>Phone :</span>
+                    <span style={{ fontWeight: 700, borderBottom: '1px dotted #000', flex: 1, paddingLeft: '0.2rem' }}>
+                      {selectedCustomer?.phone || 'All Registered Customers'}
+                    </span>
+                  </div>
+                  <div style={{ display: 'flex', gap: '0.3rem', width: '38%' }}>
+                    <span style={{ fontWeight: 700, whiteSpace: 'nowrap' }}>Period :</span>
+                    <span style={{ borderBottom: '1px dotted #000', flex: 1, paddingLeft: '0.2rem', fontWeight: 700 }}>
+                      {new Date(startDate).toLocaleDateString('en-GB')} - {new Date(endDate).toLocaleDateString('en-GB')}
+                    </span>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div style={{ display: 'flex', gap: '0.3rem', width: '58%' }}>
+                    <span style={{ fontWeight: 700, whiteSpace: 'nowrap' }}>Address :</span>
+                    <span style={{ borderBottom: '1px dotted #000', flex: 1, paddingLeft: '0.2rem' }}>
+                      {selectedCustomer?.address || ''}
+                    </span>
+                  </div>
+                  <div style={{ display: 'flex', gap: '0.3rem', width: '38%' }}>
+                    <span style={{ fontWeight: 700, whiteSpace: 'nowrap' }}>Branch :</span>
+                    <span style={{ borderBottom: '1px dotted #000', flex: 1, paddingLeft: '0.2rem', fontWeight: 600 }}>
+                      {selectedBranchName} {selectedBranchObj?.address ? `(${selectedBranchObj.address})` : ''}
+                    </span>
+                  </div>
+                </div>
+              </>
             )}
           </div>
-        </div>
-      )}
 
-      {/* ========================================================================= */}
-      {/* TAB 2: PROFIT & LOSS                                                      */}
-      {/* ========================================================================= */}
-      {activeMainTab === 'pnl' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-          <div className="card" style={{ padding: '1.5rem', maxWidth: '800px', margin: '0 auto', width: '100%' }}>
-            <div className="card-header" style={{ borderBottom: '2px solid var(--border-color)', paddingBottom: '0.75rem', marginBottom: '1.25rem' }}>
-              <h3 className="card-title" style={{ fontSize: '1.05rem' }}>Profit & Loss Statement</h3>
-            </div>
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
-              {/* 1. Sales */}
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 700, fontSize: '0.92rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.35rem' }}>
-                <span>1. Sales</span>
-                <span>৳{revenue.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.82rem', paddingLeft: '1rem', color: 'var(--text-secondary)' }}>
-                <span>Total Sales</span>
-                <span>৳{revenue.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.82rem', paddingLeft: '1rem', color: '#059669' }}>
-                <span>Collected Amount</span>
-                <span>৳{salesCollected.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.82rem', paddingLeft: '1rem', color: customerDue > 0 ? '#dc2626' : 'var(--text-muted)' }}>
-                <span>Customer Due</span>
-                <span>৳{customerDue.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
-              </div>
-
-              {/* 2. Purchases */}
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 700, fontSize: '0.92rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.35rem', marginTop: '0.75rem' }}>
-                <span>2. Purchases</span>
-                <span style={{ color: '#b45309' }}>-৳{purchasesTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.82rem', paddingLeft: '1rem', color: 'var(--text-secondary)' }}>
-                <span>Total Purchases</span>
-                <span>৳{purchasesTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.82rem', paddingLeft: '1rem', color: '#059669' }}>
-                <span>Paid Amount</span>
-                <span>৳{purchasesPaid.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
-              </div>
-
-              {/* Gross Profit */}
-              <div
-                style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  padding: '0.6rem 0.8rem',
-                  backgroundColor: '#f8fafc',
-                  borderRadius: '6px',
-                  border: '1px solid var(--border-color)',
-                  fontWeight: 800,
-                  fontSize: '0.95rem',
-                  marginTop: '0.5rem',
-                }}
-              >
-                <span>Gross Profit ({grossMarginPct}%)</span>
-                <span>৳{grossProfit.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
-              </div>
-
-              {/* 3. Expenses */}
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 700, fontSize: '0.92rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.35rem', marginTop: '0.75rem' }}>
-                <span>3. Expenses</span>
-                <span style={{ color: '#dc2626' }}>-৳{expensesTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
-              </div>
-              {Object.entries(expensesByCategory).map(([cat, amt]) => (
-                <div key={cat} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.82rem', paddingLeft: '1rem', color: 'var(--text-secondary)' }}>
-                  <span style={{ textTransform: 'capitalize' }}>{cat.replace('_', ' ')}</span>
-                  <span>৳{amt.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
-                </div>
-              ))}
-
-              {/* NET PROFIT */}
-              <div
-                style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  padding: '0.8rem 1rem',
-                  borderRadius: '6px',
-                  backgroundColor: netProfit >= 0 ? '#ecfdf5' : '#fef2f2',
-                  color: netProfit >= 0 ? '#065f46' : '#991b1b',
-                  fontWeight: 800,
-                  fontSize: '1.15rem',
-                  marginTop: '1rem',
-                }}
-              >
-                <span>Net Profit</span>
-                <span>৳{netProfit.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ========================================================================= */}
-      {/* TAB 3: CONSIGNMENTS                                                       */}
-      {/* ========================================================================= */}
-      {activeMainTab === 'consignments' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-          <div className="card" style={{ padding: '1rem' }}>
-            <div className="card-header" style={{ paddingBottom: '0.6rem', borderBottom: '1px solid var(--border-color)', marginBottom: '0.6rem' }}>
-              <h3 className="card-title" style={{ fontSize: '0.92rem' }}>Delivery Consignments</h3>
-            </div>
-
-            <div className="table-container">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Challan #</th>
-                    <th>Date</th>
-                    <th>Branch</th>
-                    <th style={{ textAlign: 'right' }}>Total</th>
-                    <th style={{ textAlign: 'right' }}>Paid</th>
-                    <th style={{ textAlign: 'right' }}>Due</th>
-                    <th style={{ textAlign: 'center' }}>Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {challansList.length === 0 ? (
-                    <tr>
-                      <td colSpan={7} style={{ textAlign: 'center', padding: '1.5rem', color: 'var(--text-muted)' }}>
-                        No delivery challans recorded in this period.
-                      </td>
-                    </tr>
-                  ) : (
-                    challansList.map((ch) => (
-                      <tr key={ch.id}>
-                        <td style={{ fontFamily: 'monospace', fontWeight: 700, color: 'var(--primary)' }}>{ch.challan_no}</td>
-                        <td>{new Date(ch.challan_date).toLocaleDateString()}</td>
-                        <td style={{ fontWeight: 600 }}>🏪 {ch.to_branch?.name}</td>
-                        <td style={{ textAlign: 'right', fontWeight: 600, fontFamily: 'Outfit, sans-serif' }}>
-                          ৳{parseFloat(ch.total_bill_amount).toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                        </td>
-                        <td style={{ textAlign: 'right', color: '#059669', fontWeight: 600, fontFamily: 'Outfit, sans-serif' }}>
-                          ৳{parseFloat(ch.paid_amount).toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                        </td>
-                        <td
-                          style={{
-                            textAlign: 'right',
-                            color: parseFloat(ch.due_amount) > 0 ? '#dc2626' : 'inherit',
-                            fontWeight: 700,
-                            fontFamily: 'Outfit, sans-serif',
-                          }}
-                        >
-                          ৳{parseFloat(ch.due_amount).toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                        </td>
-                        <td style={{ textAlign: 'center' }}>
-                          <span className={`badge badge-${ch.payment_status}`}>{ch.payment_status}</span>
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ========================================================================= */}
-      {/* TAB 4: RECEIVABLES & PAYABLES                                             */}
-      {/* ========================================================================= */}
-      {activeMainTab === 'dues' && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '1rem' }}>
-          {/* Customer Receivables */}
-          <div className="card" style={{ padding: '1rem' }}>
-            <div className="card-header" style={{ paddingBottom: '0.5rem', borderBottom: '1px solid var(--border-color)', marginBottom: '0.6rem' }}>
-              <h3 className="card-title" style={{ fontSize: '0.9rem', color: '#dc2626' }}>
-                Customer Receivables (Due: ৳{customerDue.toLocaleString()})
-              </h3>
-            </div>
-
-            <div className="table-container" style={{ maxHeight: '380px', overflowY: 'auto' }}>
-              <table>
-                <thead>
-                  <tr>
-                    <th>Customer</th>
-                    <th>Invoice</th>
-                    <th style={{ textAlign: 'right' }}>Total</th>
-                    <th style={{ textAlign: 'right' }}>Due</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {salesList.filter((s) => s.net_amount - s.paid_amount > 0.01).length === 0 ? (
-                    <tr>
-                      <td colSpan={4} style={{ textAlign: 'center', padding: '1.5rem', color: 'var(--text-muted)' }}>
-                        No customer dues.
-                      </td>
-                    </tr>
-                  ) : (
-                    salesList
-                      .filter((s) => s.net_amount - s.paid_amount > 0.01)
-                      .map((s) => (
-                        <tr key={s.id}>
-                          <td style={{ fontWeight: 600 }}>{s.contacts?.name || 'Customer'}</td>
-                          <td style={{ fontFamily: 'monospace', fontSize: '0.8rem' }}>{s.invoice_number}</td>
-                          <td style={{ textAlign: 'right' }}>৳{s.net_amount.toFixed(2)}</td>
-                          <td style={{ textAlign: 'right', fontWeight: 700, color: '#dc2626' }}>
-                            ৳{(s.net_amount - s.paid_amount).toFixed(2)}
-                          </td>
-                        </tr>
-                      ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          {/* Supplier Payables */}
-          <div className="card" style={{ padding: '1rem' }}>
-            <div className="card-header" style={{ paddingBottom: '0.5rem', borderBottom: '1px solid var(--border-color)', marginBottom: '0.6rem' }}>
-              <h3 className="card-title" style={{ fontSize: '0.9rem', color: '#b45309' }}>
-                Supplier Payables (Due: ৳{supplierDue.toLocaleString()})
-              </h3>
-            </div>
-
-            <div className="table-container" style={{ maxHeight: '380px', overflowY: 'auto' }}>
-              <table>
-                <thead>
-                  <tr>
-                    <th>Supplier</th>
-                    <th>Bill #</th>
-                    <th style={{ textAlign: 'right' }}>Total</th>
-                    <th style={{ textAlign: 'right' }}>Due</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {purchasesList.filter((p) => p.net_amount - p.paid_amount > 0.01).length === 0 ? (
-                    <tr>
-                      <td colSpan={4} style={{ textAlign: 'center', padding: '1.5rem', color: 'var(--text-muted)' }}>
-                        No supplier payables.
-                      </td>
-                    </tr>
-                  ) : (
-                    purchasesList
-                      .filter((p) => p.net_amount - p.paid_amount > 0.01)
-                      .map((p) => (
-                        <tr key={p.id}>
-                          <td style={{ fontWeight: 600 }}>{p.contacts?.name || 'Supplier'}</td>
-                          <td style={{ fontFamily: 'monospace', fontSize: '0.8rem' }}>{p.invoice_number}</td>
-                          <td style={{ textAlign: 'right' }}>৳{p.net_amount.toFixed(2)}</td>
-                          <td style={{ textAlign: 'right', fontWeight: 700, color: '#b45309' }}>
-                            ৳{(p.net_amount - p.paid_amount).toFixed(2)}
-                          </td>
-                        </tr>
-                      ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ========================================================================= */}
-      {/* TAB 5: INVENTORY VALUATION                                                */}
-      {/* ========================================================================= */}
-      {activeMainTab === 'inventory' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-          <div className="card" style={{ padding: '1rem' }}>
-            <div className="card-header" style={{ paddingBottom: '0.6rem', borderBottom: '1px solid var(--border-color)', marginBottom: '0.6rem' }}>
-              <h3 className="card-title" style={{ fontSize: '0.92rem' }}>
-                Inventory Valuation ({totalStockUnits.toLocaleString()} units — Value: ৳{totalStockCostValue.toLocaleString()})
-              </h3>
-            </div>
-
-            <div className="table-container" style={{ maxHeight: '500px', overflowY: 'auto' }}>
-              <table>
-                <thead>
-                  <tr>
-                    <th>Product</th>
-                    <th>Branch</th>
-                    <th style={{ textAlign: 'right' }}>Stock</th>
-                    <th style={{ textAlign: 'right' }}>Cost Price</th>
-                    <th style={{ textAlign: 'right' }}>Sale Price</th>
-                    <th style={{ textAlign: 'right' }}>Total Cost</th>
-                    <th style={{ textAlign: 'right' }}>Total Retail</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {inventoryList.map((inv) => {
-                    const qty = parseInt(inv.quantity) || 0;
-                    const cost = parseFloat(inv.product?.purchase_price) || 0;
-                    const sale = parseFloat(inv.product?.sale_price) || 0;
-                    return (
-                      <tr key={inv.id}>
-                        <td>
-                          <div style={{ fontWeight: 600 }}>{inv.product?.name}</div>
-                          <div style={{ fontSize: '0.75rem', fontFamily: 'monospace', color: 'var(--text-muted)' }}>
-                            {inv.product?.sku}
-                          </div>
-                        </td>
-                        <td>{inv.branch?.name}</td>
-                        <td style={{ textAlign: 'right', fontWeight: 700 }}>
-                          {qty} {inv.product?.unit || 'pcs'}
-                        </td>
-                        <td style={{ textAlign: 'right' }}>৳{cost.toFixed(2)}</td>
-                        <td style={{ textAlign: 'right' }}>৳{sale.toFixed(2)}</td>
-                        <td style={{ textAlign: 'right', fontWeight: 600, color: '#059669' }}>
-                          ৳{(qty * cost).toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                        </td>
-                        <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--primary)' }}>
-                          ৳{(qty * sale).toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ========================================================================= */}
-      {/* TAB 6: TRANSACTIONS JOURNAL                                               */}
-      {/* ========================================================================= */}
-      {activeMainTab === 'journal' && (
-        <div className="card" style={{ padding: '1rem' }}>
-          <div
-            className="no-print card-header"
-            style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              gap: '1rem',
-              borderBottom: '1px solid var(--border-color)',
-              paddingBottom: '0.5rem',
-              marginBottom: '0.5rem',
-              flexWrap: 'wrap',
-            }}
-          >
-            <h3 className="card-title" style={{ fontSize: '0.92rem' }}>Transactions Journal</h3>
-
-            <div
-              style={{
-                display: 'flex',
-                backgroundColor: 'var(--bg-app)',
-                padding: '3px',
-                borderRadius: '6px',
-                border: '1px solid var(--border-color)',
+          {/* 3. REPORT DATA TABLE */}
+          {activeTab === 'overall' ? (
+            <table 
+              style={{ 
+                width: '100%', 
+                borderCollapse: 'collapse', 
+                marginTop: '0.85rem', 
+                border: '1.5px solid #000',
+                fontSize: '0.82rem'
               }}
             >
-              {[
-                { id: 'sales', name: 'Sales', icon: FileText, count: salesList.length },
-                { id: 'purchases', name: 'Purchases', icon: ShoppingBag, count: purchasesList.length },
-                { id: 'expenses', name: 'Expenses', icon: Receipt, count: expensesList.length },
-              ].map((tab) => {
-                const Icon = tab.icon;
-                const isActive = activeAuditTab === tab.id;
-                return (
-                  <button
-                    key={tab.id}
-                    onClick={() => setActiveAuditTab(tab.id)}
-                    style={{
-                      border: 'none',
-                      background: isActive ? '#ffffff' : 'transparent',
-                      color: isActive ? 'var(--primary)' : 'var(--text-secondary)',
-                      boxShadow: isActive ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
-                      borderRadius: '4px',
-                      padding: '0.3rem 0.6rem',
-                      fontSize: '0.74rem',
-                      fontWeight: 600,
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '0.3rem',
-                      transition: 'all 0.15s ease',
-                    }}
-                  >
-                    <Icon size={12} />
-                    <span>
-                      {tab.name} ({tab.count})
-                    </span>
-                  </button>
-                );
-              })}
+              <thead>
+                <tr style={{ borderBottom: '1.5px solid #000', backgroundColor: '#f1f5f9' }}>
+                  <th style={{ width: '40px', borderRight: '1px solid #000', padding: '0.45rem 0.35rem', textAlign: 'center', fontWeight: 800 }}>Sl.</th>
+                  <th style={{ width: '130px', borderRight: '1px solid #000', padding: '0.45rem 0.5rem', textAlign: 'left', fontWeight: 800 }}>Invoice / Challan #</th>
+                  <th style={{ width: '85px', borderRight: '1px solid #000', padding: '0.45rem 0.5rem', textAlign: 'center', fontWeight: 800 }}>Date</th>
+                  <th style={{ borderRight: '1px solid #000', padding: '0.45rem 0.5rem', textAlign: 'left', fontWeight: 800 }}>Customer Name</th>
+                  <th style={{ width: '95px', borderRight: '1px solid #000', padding: '0.45rem 0.5rem', textAlign: 'right', fontWeight: 800 }}>Total (৳)</th>
+                  <th style={{ width: '95px', borderRight: '1px solid #000', padding: '0.45rem 0.5rem', textAlign: 'right', fontWeight: 800 }}>Paid (৳)</th>
+                  <th style={{ width: '95px', padding: '0.45rem 0.5rem', textAlign: 'right', fontWeight: 800 }}>Due (৳)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {overallSales.length === 0 ? (
+                  <tr>
+                    <td colSpan={7} style={{ textAlign: 'center', padding: '1.5rem' }}>No sales records found for this period.</td>
+                  </tr>
+                ) : (
+                  overallSales.map((s, idx) => {
+                    const net = parseFloat(s.net_amount) || 0;
+                    const paid = parseFloat(s.paid_amount) || 0;
+                    const due = Math.max(0, net - paid);
+                    return (
+                      <tr key={s.id || idx} style={{ borderBottom: '1px solid #cbd5e1' }}>
+                        <td style={{ textAlign: 'center', borderRight: '1px solid #000', padding: '0.4rem 0.35rem', fontWeight: 600 }}>{idx + 1}</td>
+                        <td style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 800, letterSpacing: '0.2px', borderRight: '1px solid #000', padding: '0.4rem 0.5rem' }}>
+                          {s.invoice_number || `INV#${s.id.substring(0, 8).toUpperCase()}`}
+                        </td>
+                        <td style={{ textAlign: 'center', borderRight: '1px solid #000', padding: '0.4rem 0.5rem' }}>
+                          {new Date(s.sale_date).toLocaleDateString('en-GB')}
+                        </td>
+                        <td style={{ borderRight: '1px solid #000', padding: '0.4rem 0.5rem', fontWeight: 600 }}>
+                          {s.contacts?.name || 'Walk-in'}
+                        </td>
+                        <td style={{ textAlign: 'right', borderRight: '1px solid #000', padding: '0.4rem 0.5rem', fontWeight: 700 }}>
+                          ৳{net.toFixed(2)}
+                        </td>
+                        <td style={{ textAlign: 'right', borderRight: '1px solid #000', padding: '0.4rem 0.5rem', color: '#059669', fontWeight: 600 }}>
+                          ৳{paid.toFixed(2)}
+                        </td>
+                        <td style={{ textAlign: 'right', padding: '0.4rem 0.5rem', fontWeight: due > 0 ? 800 : 600, color: due > 0 ? '#dc2626' : '#000' }}>
+                          ৳{due.toFixed(2)}
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          ) : activeTab === 'customer' ? (
+            <table 
+              style={{ 
+                width: '100%', 
+                borderCollapse: 'collapse', 
+                marginTop: '0.85rem', 
+                border: '1.5px solid #000',
+                fontSize: '0.82rem'
+              }}
+            >
+              <thead>
+                <tr style={{ borderBottom: '1.5px solid #000', backgroundColor: '#f1f5f9' }}>
+                  <th style={{ width: '40px', borderRight: '1px solid #000', padding: '0.45rem 0.35rem', textAlign: 'center', fontWeight: 800 }}>Sl.</th>
+                  <th style={{ width: '130px', borderRight: '1px solid #000', padding: '0.45rem 0.5rem', textAlign: 'left', fontWeight: 800 }}>Invoice / Challan #</th>
+                  <th style={{ width: '85px', borderRight: '1px solid #000', padding: '0.45rem 0.5rem', textAlign: 'center', fontWeight: 800 }}>Date</th>
+                  <th style={{ borderRight: '1px solid #000', padding: '0.45rem 0.5rem', textAlign: 'right', fontWeight: 800 }}>Subtotal (৳)</th>
+                  <th style={{ width: '90px', borderRight: '1px solid #000', padding: '0.45rem 0.5rem', textAlign: 'right', fontWeight: 800 }}>Discount</th>
+                  <th style={{ width: '95px', borderRight: '1px solid #000', padding: '0.45rem 0.5rem', textAlign: 'right', fontWeight: 800 }}>Net Bill (৳)</th>
+                  <th style={{ width: '95px', borderRight: '1px solid #000', padding: '0.45rem 0.5rem', textAlign: 'right', fontWeight: 800 }}>Paid (৳)</th>
+                  <th style={{ width: '95px', padding: '0.45rem 0.5rem', textAlign: 'right', fontWeight: 800 }}>Due (৳)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {customerSales.length === 0 ? (
+                  <tr>
+                    <td colSpan={8} style={{ textAlign: 'center', padding: '1.5rem' }}>No invoice records found for this customer.</td>
+                  </tr>
+                ) : (
+                  customerSales.map((s, idx) => {
+                    const net = parseFloat(s.net_amount) || 0;
+                    const paid = parseFloat(s.paid_amount) || 0;
+                    const due = Math.max(0, net - paid);
+                    return (
+                      <tr key={s.id || idx} style={{ borderBottom: '1px solid #cbd5e1' }}>
+                        <td style={{ textAlign: 'center', borderRight: '1px solid #000', padding: '0.4rem 0.35rem', fontWeight: 600 }}>{idx + 1}</td>
+                        <td style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 800, letterSpacing: '0.2px', borderRight: '1px solid #000', padding: '0.4rem 0.5rem' }}>
+                          {s.invoice_number || `INV#${s.id.substring(0, 8).toUpperCase()}`}
+                        </td>
+                        <td style={{ textAlign: 'center', borderRight: '1px solid #000', padding: '0.4rem 0.5rem' }}>
+                          {new Date(s.sale_date).toLocaleDateString('en-GB')}
+                        </td>
+                        <td style={{ textAlign: 'right', borderRight: '1px solid #000', padding: '0.4rem 0.5rem' }}>
+                          ৳{(parseFloat(s.total_amount) || 0).toFixed(2)}
+                        </td>
+                        <td style={{ textAlign: 'right', borderRight: '1px solid #000', padding: '0.4rem 0.5rem', color: '#475569' }}>
+                          ৳{(parseFloat(s.discount) || 0).toFixed(2)}
+                        </td>
+                        <td style={{ textAlign: 'right', borderRight: '1px solid #000', padding: '0.4rem 0.5rem', fontWeight: 700 }}>
+                          ৳{net.toFixed(2)}
+                        </td>
+                        <td style={{ textAlign: 'right', borderRight: '1px solid #000', padding: '0.4rem 0.5rem', color: '#059669', fontWeight: 600 }}>
+                          ৳{paid.toFixed(2)}
+                        </td>
+                        <td style={{ textAlign: 'right', padding: '0.4rem 0.5rem', fontWeight: due > 0 ? 800 : 600, color: due > 0 ? '#dc2626' : '#000' }}>
+                          ৳{due.toFixed(2)}
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          ) : (
+            <table 
+              style={{ 
+                width: '100%', 
+                borderCollapse: 'collapse', 
+                marginTop: '0.85rem', 
+                border: '1.5px solid #000',
+                fontSize: '0.82rem'
+              }}
+            >
+              <thead>
+                <tr style={{ borderBottom: '1.5px solid #000', backgroundColor: '#f1f5f9' }}>
+                  <th style={{ width: '35px', borderRight: '1px solid #000', padding: '0.45rem 0.35rem', textAlign: 'center', fontWeight: 800 }}>Sl.</th>
+                  <th style={{ width: '120px', borderRight: '1px solid #000', padding: '0.45rem 0.5rem', textAlign: 'left', fontWeight: 800 }}>Receipt / Trx #</th>
+                  <th style={{ width: '80px', borderRight: '1px solid #000', padding: '0.45rem 0.5rem', textAlign: 'center', fontWeight: 800 }}>Date</th>
+                  {!selectedCustomerId && (
+                    <th style={{ borderRight: '1px solid #000', padding: '0.45rem 0.5rem', textAlign: 'left', fontWeight: 800 }}>Customer Name</th>
+                  )}
+                  <th style={{ width: selectedCustomerId ? '160px' : '110px', borderRight: '1px solid #000', padding: '0.45rem 0.5rem', textAlign: 'left', fontWeight: 800 }}>Invoice Ref</th>
+                  <th style={{ width: '75px', borderRight: '1px solid #000', padding: '0.45rem 0.5rem', textAlign: 'center', fontWeight: 800 }}>Method</th>
+                  <th style={{ width: '95px', padding: '0.45rem 0.5rem', textAlign: 'right', fontWeight: 800 }}>Amount (৳)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {customerPayments.length === 0 ? (
+                  <tr>
+                    <td colSpan={selectedCustomerId ? 6 : 7} style={{ textAlign: 'center', padding: '1.5rem' }}>No payment records found for this period.</td>
+                  </tr>
+                ) : (
+                  customerPayments.map((p, idx) => {
+                    const invNo = p.reference_invoice_id ? paymentSalesMap[p.reference_invoice_id] || `INV#${p.reference_invoice_id.substring(0, 8).toUpperCase()}` : 'Direct Receipt';
+                    return (
+                      <tr key={p.id || idx} style={{ borderBottom: '1px solid #cbd5e1' }}>
+                        <td style={{ textAlign: 'center', borderRight: '1px solid #000', padding: '0.4rem 0.35rem', fontWeight: 600 }}>{idx + 1}</td>
+                        <td style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 800, letterSpacing: '0.2px', borderRight: '1px solid #000', padding: '0.4rem 0.5rem' }}>
+                          {p.payment_number || `RCP#${p.id.substring(0, 8).toUpperCase()}`}
+                        </td>
+                        <td style={{ textAlign: 'center', borderRight: '1px solid #000', padding: '0.4rem 0.5rem' }}>
+                          {new Date(p.payment_date).toLocaleDateString('en-GB')}
+                        </td>
+                        {!selectedCustomerId && (
+                          <td style={{ borderRight: '1px solid #000', padding: '0.4rem 0.5rem', fontWeight: 600 }}>
+                            {p.contacts?.name || 'Walk-in'}
+                          </td>
+                        )}
+                        <td style={{ borderRight: '1px solid #000', padding: '0.4rem 0.5rem', fontWeight: 700, fontSize: '0.78rem' }}>
+                          {invNo}
+                        </td>
+                        <td style={{ textAlign: 'center', borderRight: '1px solid #000', padding: '0.4rem 0.5rem', textTransform: 'uppercase', fontSize: '0.75rem', fontWeight: 600 }}>
+                          {p.payment_method || 'cash'}
+                        </td>
+                        <td style={{ textAlign: 'right', padding: '0.4rem 0.5rem', fontWeight: 800, color: '#059669' }}>
+                          ৳{(parseFloat(p.amount) || 0).toFixed(2)}
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          )}
+
+          {/* 4. TOTALS & FINANCIAL SUMMARY BOX */}
+          <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'flex-start', marginTop: '0.85rem' }}>
+            <div style={{ width: '280px', display: 'flex', flexDirection: 'column', gap: '0.3rem', fontSize: '0.85rem', border: '1px solid #000', padding: '0.65rem 0.85rem', borderRadius: '4px', backgroundColor: '#fdfdfd' }}>
+              {activeTab === 'overall' ? (
+                <>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span style={{ fontWeight: 600 }}>Total Sales:</span>
+                    <span style={{ fontWeight: 700 }}>৳{overallTotalRevenue.toFixed(2)}</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span style={{ fontWeight: 600 }}>Total Purchases:</span>
+                    <span>৳{overallPurchasesTotal.toFixed(2)}</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span style={{ fontWeight: 600 }}>Total Expenses:</span>
+                    <span>৳{overallExpensesTotal.toFixed(2)}</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 800, borderTop: '1px dashed #000', paddingTop: '0.25rem', color: overallNetProfit >= 0 ? '#059669' : '#dc2626' }}>
+                    <span>Net Profit:</span>
+                    <span>৳{overallNetProfit.toFixed(2)}</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', color: '#059669', fontWeight: 700, borderTop: '1.5px solid #000', paddingTop: '0.35rem' }}>
+                    <span>Total Collected:</span>
+                    <span>৳{overallTotalPaid.toFixed(2)}</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', color: overallTotalDue > 0 ? '#dc2626' : '#000', fontWeight: 800 }}>
+                    <span>Total Customer Due:</span>
+                    <span>৳{overallTotalDue.toFixed(2)}</span>
+                  </div>
+                </>
+              ) : activeTab === 'customer' ? (
+                <>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 700 }}>
+                    <span>Total Invoiced:</span>
+                    <span>৳{customerTotalBilled.toFixed(2)}</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', color: '#059669', fontWeight: 700 }}>
+                    <span>Total Paid:</span>
+                    <span>৳{customerTotalPaid.toFixed(2)}</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 900, borderTop: '1.5px solid #000', paddingTop: '0.35rem', fontSize: '0.95rem', color: customerTotalDue > 0 ? '#dc2626' : '#059669' }}>
+                    <span>Total Due Balance:</span>
+                    <span>৳{customerTotalDue.toFixed(2)}</span>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 600 }}>
+                    <span>Total Transactions:</span>
+                    <span>{customerPayments.length}</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span style={{ fontWeight: 600 }}>Cash Collections:</span>
+                    <span>৳{paymentsCashAmount.toFixed(2)}</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span style={{ fontWeight: 600 }}>Bank / Digital:</span>
+                    <span>৳{paymentsDigitalAmount.toFixed(2)}</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 900, borderTop: '1.5px solid #000', paddingTop: '0.35rem', fontSize: '0.95rem', color: '#059669' }}>
+                    <span>Total Received:</span>
+                    <span>৳{paymentsTotalAmount.toFixed(2)}</span>
+                  </div>
+                </>
+              )}
             </div>
           </div>
 
-          <div className="table-container">
-            {activeAuditTab === 'sales' && (
-              <table className="compact-table">
-                <thead>
-                  <tr>
-                    <th>SL</th>
-                    <th>Invoice No</th>
-                    <th>Date</th>
-                    <th>Customer</th>
-                    <th style={{ textAlign: 'right' }}>Total</th>
-                    <th style={{ textAlign: 'right' }}>Paid</th>
-                    <th style={{ textAlign: 'right' }}>Due</th>
-                    <th style={{ textAlign: 'center' }}>Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {salesList.map((sale, index) => {
-                    const due = sale.net_amount - sale.paid_amount;
-                    return (
-                      <tr key={sale.id}>
-                        <td>{index + 1}</td>
-                        <td style={{ fontFamily: 'monospace', fontWeight: 700 }}>{sale.invoice_number}</td>
-                        <td>{new Date(sale.sale_date).toLocaleDateString()}</td>
-                        <td style={{ fontWeight: 600 }}>{sale.contacts?.name || 'Walk-in'}</td>
-                        <td style={{ textAlign: 'right' }}>৳{sale.net_amount.toFixed(2)}</td>
-                        <td style={{ textAlign: 'right', color: 'var(--success-text)' }}>৳{sale.paid_amount.toFixed(2)}</td>
-                        <td style={{ textAlign: 'right', fontWeight: 700, color: due > 0 ? 'var(--danger-text)' : 'inherit' }}>
-                          ৳{due.toFixed(2)}
-                        </td>
-                        <td style={{ textAlign: 'center' }}>
-                          <span className={`badge badge-${sale.payment_status}`}>{sale.payment_status}</span>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            )}
+          {/* 5. BOTTOM OFFICIAL FACTORY / BRANCH FOOTER */}
+          {(() => {
+            const isFactoryBranch = selectedBranchObj ? Boolean(selectedBranchObj.is_factory) : true;
+            const label = isFactoryBranch ? 'Office & Factory' : 'Showroom';
+            const branchAddr = selectedBranchObj?.address || '604/750, Najir Ahamed Mistiri Sodok, West Jharnapara, Baro Quarter, Doublemooring, Chattogram, Bangladesh.';
+            const branchCell = selectedBranchObj?.phone || '01819-898617, 01845-069803';
 
-            {activeAuditTab === 'purchases' && (
-              <table className="compact-table">
-                <thead>
-                  <tr>
-                    <th>SL</th>
-                    <th>Bill #</th>
-                    <th>Date</th>
-                    <th>Supplier</th>
-                    <th style={{ textAlign: 'right' }}>Total</th>
-                    <th style={{ textAlign: 'right' }}>Paid</th>
-                    <th style={{ textAlign: 'right' }}>Due</th>
-                    <th style={{ textAlign: 'center' }}>Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {purchasesList.map((pur, index) => {
-                    const due = pur.net_amount - pur.paid_amount;
-                    return (
-                      <tr key={pur.id}>
-                        <td>{index + 1}</td>
-                        <td style={{ fontFamily: 'monospace', fontWeight: 700 }}>{pur.invoice_number}</td>
-                        <td>{new Date(pur.purchase_date).toLocaleDateString()}</td>
-                        <td style={{ fontWeight: 600 }}>{pur.contacts?.name || 'Supplier'}</td>
-                        <td style={{ textAlign: 'right' }}>৳{pur.net_amount.toFixed(2)}</td>
-                        <td style={{ textAlign: 'right', color: 'var(--success-text)' }}>৳{pur.paid_amount.toFixed(2)}</td>
-                        <td style={{ textAlign: 'right', fontWeight: 700, color: due > 0 ? 'var(--danger-text)' : 'inherit' }}>
-                          ৳{due.toFixed(2)}
-                        </td>
-                        <td style={{ textAlign: 'center' }}>
-                          <span className={`badge badge-${pur.payment_status}`}>{pur.payment_status}</span>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            )}
-
-            {activeAuditTab === 'expenses' && (
-              <table className="compact-table">
-                <thead>
-                  <tr>
-                    <th>SL</th>
-                    <th>Date</th>
-                    <th>Category</th>
-                    <th>Description</th>
-                    <th>Payment Method</th>
-                    <th style={{ textAlign: 'right' }}>Amount</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {expensesList.map((exp, index) => (
-                    <tr key={exp.id}>
-                      <td>{index + 1}</td>
-                      <td>{new Date(exp.expense_date).toLocaleDateString()}</td>
-                      <td style={{ fontWeight: 600, textTransform: 'capitalize' }}>{exp.category.replace('_', ' ')}</td>
-                      <td>{exp.description || 'N/A'}</td>
-                      <td style={{ textTransform: 'capitalize' }}>{exp.payment_method?.replace('_', ' ')}</td>
-                      <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--danger-text)' }}>
-                        -৳{parseFloat(exp.amount).toFixed(2)}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </div>
-        </div>
-      )}
-        </>
-      )}
-
-      {/* SIGNATURE BLOCK FOR PRINT */}
-      <div
-        className="print-only"
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          marginTop: '4rem',
-          paddingTop: '1rem',
-          pageBreakInside: 'avoid',
-        }}
-      >
-        <div style={{ textAlign: 'center', width: '160px', borderTop: '1px solid #000' }}>
-          <p style={{ margin: '0.4rem 0', fontSize: '0.82rem', fontWeight: 600 }}>Prepared By</p>
-        </div>
-        <div style={{ textAlign: 'center', width: '160px', borderTop: '1px solid #000' }}>
-          <p style={{ margin: '0.4rem 0', fontSize: '0.82rem', fontWeight: 600 }}>Accounts & Audit</p>
-        </div>
-        <div style={{ textAlign: 'center', width: '160px', borderTop: '1px solid #000' }}>
-          <p style={{ margin: '0.4rem 0', fontSize: '0.82rem', fontWeight: 600 }}>Managing Director</p>
+            return (
+              <div style={{ borderTop: '1.5px solid #000', marginTop: '1.5rem', paddingTop: '0.5rem', textAlign: 'center', fontSize: '0.74rem', color: '#1e293b', lineHeight: 1.4 }}>
+                <div style={{ fontWeight: 700 }}>
+                  {label} : {branchAddr} &nbsp;|&nbsp; Cell : {branchCell}
+                </div>
+                <div style={{ color: '#475569' }}>
+                  E-mail : almasaccessoriesind@gmail.com, Web : www.almasaccessories.com
+                </div>
+              </div>
+            );
+          })()}
         </div>
       </div>
     </div>

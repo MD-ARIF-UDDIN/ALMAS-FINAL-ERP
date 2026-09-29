@@ -239,13 +239,13 @@ export default function Product({ userProfile, branches, addToast }) {
       {/* Top Header */}
       <div className="top-bar">
         <div className="page-title-group">
-          <h1>Product Master</h1>
+          <h1>Products</h1>
         </div>
         <div className="top-bar-actions">
           {canCreate && (
             <button className="btn btn-primary" onClick={handleOpenCreate}>
               <Plus size={16} />
-              <span>Add Product</span>
+              <span>New Product</span>
             </button>
           )}
         </div>
@@ -265,7 +265,7 @@ export default function Product({ userProfile, branches, addToast }) {
                 type="text"
                 className="input-control"
                 style={{ paddingLeft: '2.2rem', fontSize: '0.85rem' }}
-                placeholder="Search by Code, Name, Category..."
+                placeholder="Search products..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
               />
@@ -316,7 +316,7 @@ export default function Product({ userProfile, branches, addToast }) {
                       <div style={{ fontSize: '0.8rem' }}>
                         {searchQuery || categoryFilter !== 'all'
                           ? 'Try adjusting your search or category filter.' 
-                          : 'Click "Add Product" above to create your first product.'}
+                          : 'Click "New Product" above to create your first product.'}
                       </div>
                     </div>
                   </td>
@@ -368,7 +368,7 @@ export default function Product({ userProfile, branches, addToast }) {
                         <button
                           className="btn btn-secondary btn-sm"
                           onClick={() => handleOpenEdit(p)}
-                          title="Edit product"
+                          title="Edit"
                           style={{ padding: '0.25rem 0.45rem' }}
                         >
                           <Edit size={13} />
@@ -377,7 +377,7 @@ export default function Product({ userProfile, branches, addToast }) {
                           <button
                             className="btn btn-danger btn-sm"
                             onClick={() => handleDeleteProduct(p.id, p.name)}
-                            title="Delete product"
+                            title="Delete"
                             style={{ padding: '0.25rem 0.45rem' }}
                           >
                             <Trash2 size={13} />
@@ -410,7 +410,7 @@ export default function Product({ userProfile, branches, addToast }) {
           <div className="modal-content" style={{ maxWidth: '540px', width: '95vw' }}>
             <div className="modal-header">
               <h3 className="modal-title">
-                {isEditing ? 'Edit Product' : 'Add New Product'}
+                {isEditing ? 'Edit Product' : 'New Product'}
               </h3>
               <button 
                 className="btn btn-secondary btn-sm" 
@@ -428,7 +428,7 @@ export default function Product({ userProfile, branches, addToast }) {
                     <input
                       type="text"
                       className="input-control"
-                      placeholder="e.g. PRD-101, THREAD-40-2"
+                      placeholder="Enter product code"
                       value={productCode}
                       onChange={(e) => setProductCode(e.target.value)}
                       required
@@ -440,7 +440,7 @@ export default function Product({ userProfile, branches, addToast }) {
                     <input
                       type="text"
                       className="input-control"
-                      placeholder="e.g. Thread, Zipper"
+                      placeholder="Enter category"
                       value={category}
                       onChange={(e) => setCategory(e.target.value)}
                     />
@@ -452,7 +452,7 @@ export default function Product({ userProfile, branches, addToast }) {
                   <input
                     type="text"
                     className="input-control"
-                    placeholder="e.g. Sewing Thread 40/2 (5000m) (optional)"
+                    placeholder="Enter product name (optional)"
                     value={name}
                     onChange={(e) => setName(e.target.value)}
                   />
@@ -492,7 +492,7 @@ export default function Product({ userProfile, branches, addToast }) {
                   <textarea
                     className="input-control"
                     style={{ minHeight: '75px', resize: 'vertical' }}
-                    placeholder="Product notes or description..."
+                    placeholder="Enter description (optional)..."
                     value={description}
                     onChange={(e) => setDescription(e.target.value)}
                   />
@@ -504,7 +504,7 @@ export default function Product({ userProfile, branches, addToast }) {
                   Cancel
                 </button>
                 <button type="submit" className="btn btn-primary" disabled={saving}>
-                  {saving ? 'Saving...' : isEditing ? 'Save Changes' : 'Create Product'}
+                  {saving ? 'Saving...' : isEditing ? 'Update' : 'Save Product'}
                 </button>
               </div>
             </form>

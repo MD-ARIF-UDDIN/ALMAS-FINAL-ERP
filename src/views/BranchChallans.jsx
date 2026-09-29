@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../supabaseClient';
+import almasLogo from '../assets/almas_logo.jpg';
 import {
   Truck,
   Plus,
@@ -716,137 +717,72 @@ export default function BranchChallans({ userProfile, branches = [], addToast })
         </div>
       )}
 
-      {/* KPI METRIC CARDS */}
+      {/* KPI METRIC CARDS (Clear & Compact) */}
       <div
         className="no-print"
         style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-          gap: '1rem',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
+          gap: '0.45rem',
         }}
       >
-        {/* Total Sent / Received Consignment */}
-        <div className="card" style={{ padding: '1rem 1.25rem', display: 'flex', alignItems: 'center', gap: '1rem' }}>
-          <div
-            style={{
-              width: '44px',
-              height: '44px',
-              borderRadius: '10px',
-              backgroundColor: '#eff6ff',
-              color: '#2563eb',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}
-          >
-            <Truck size={22} />
+        {/* Total Consignment */}
+        <div className="card" style={{ padding: '0.55rem 0.75rem', borderLeft: '3.5px solid #2563eb' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ fontSize: '0.68rem', fontWeight: 600, color: 'var(--text-muted)' }}>
+              {isFactoryPerspective ? 'Total Sent' : 'Consignment'}
+            </span>
+            <span className="badge badge-info" style={{ fontSize: '0.6rem', padding: '0.05rem 0.3rem' }}>
+              {challans.length} Ch.
+            </span>
           </div>
-          <div>
-            <div style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
-              {isFactoryPerspective ? 'Total Sent' : 'Total Consignment'}
-            </div>
-            <div style={{ fontSize: '1.3rem', fontWeight: 800, color: 'var(--text-primary)', fontFamily: 'Outfit, sans-serif' }}>
-              ৳{totalDispatchedValue.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-            </div>
-            <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '0.1rem' }}>
-              {challans.length} Challans {isFactoryPerspective ? 'Dispatched' : 'Received'}
-            </div>
+          <div style={{ fontSize: '1.05rem', fontWeight: 800, color: '#1e293b', fontFamily: 'Outfit, sans-serif', marginTop: '0.15rem' }}>
+            ৳{totalDispatchedValue.toLocaleString(undefined, { minimumFractionDigits: 0 })}
           </div>
         </div>
 
-        {/* Total Sold Qty */}
-        <div className="card" style={{ padding: '1rem 1.25rem', display: 'flex', alignItems: 'center', gap: '1rem' }}>
-          <div
-            style={{
-              width: '44px',
-              height: '44px',
-              borderRadius: '10px',
-              backgroundColor: '#f0fdf4',
-              color: '#16a34a',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}
-          >
-            <TrendingUp size={22} />
-          </div>
-          <div>
-            <div style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
+        {/* Total Sold */}
+        <div className="card" style={{ padding: '0.55rem 0.75rem', borderLeft: '3.5px solid #16a34a' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ fontSize: '0.68rem', fontWeight: 600, color: 'var(--text-muted)' }}>
               Total Sold
-            </div>
-            <div style={{ fontSize: '1.3rem', fontWeight: 800, color: '#16a34a', fontFamily: 'Outfit, sans-serif' }}>
-              {totalSoldQty.toLocaleString()} <span style={{ fontSize: '0.8rem', fontWeight: 500, color: 'var(--text-muted)' }}>/ {totalDispatchedQty.toLocaleString()} pcs</span>
-            </div>
-            <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '0.1rem' }}>
-              {totalDispatchedQty > 0 ? `${((totalSoldQty / totalDispatchedQty) * 100).toFixed(1)}% Sold` : 'No items'}
-            </div>
+            </span>
+            <span className="badge badge-success" style={{ fontSize: '0.6rem', padding: '0.05rem 0.3rem' }}>
+              {totalDispatchedQty > 0 ? `${((totalSoldQty / totalDispatchedQty) * 100).toFixed(0)}%` : '0%'}
+            </span>
+          </div>
+          <div style={{ fontSize: '1.05rem', fontWeight: 800, color: '#16a34a', fontFamily: 'Outfit, sans-serif', marginTop: '0.15rem' }}>
+            {totalSoldQty.toLocaleString()} <span style={{ fontSize: '0.72rem', fontWeight: 600, color: 'var(--text-muted)' }}>/ {totalDispatchedQty.toLocaleString()}</span>
           </div>
         </div>
 
         {/* Total Paid / Received */}
-        <div className="card" style={{ padding: '1rem 1.25rem', display: 'flex', alignItems: 'center', gap: '1rem' }}>
-          <div
-            style={{
-              width: '44px',
-              height: '44px',
-              borderRadius: '10px',
-              backgroundColor: '#ecfdf5',
-              color: '#059669',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}
-          >
-            <CheckCircle2 size={22} />
+        <div className="card" style={{ padding: '0.55rem 0.75rem', borderLeft: '3.5px solid #059669' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ fontSize: '0.68rem', fontWeight: 600, color: 'var(--text-muted)' }}>
+              {isFactoryPerspective ? 'Received' : 'Total Paid'}
+            </span>
+            <span className="badge badge-success" style={{ fontSize: '0.6rem', padding: '0.05rem 0.3rem' }}>
+              Settled
+            </span>
           </div>
-          <div>
-            <div style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
-              {isFactoryPerspective ? 'Total Received' : 'Total Paid'}
-            </div>
-            <div style={{ fontSize: '1.3rem', fontWeight: 800, color: '#059669', fontFamily: 'Outfit, sans-serif' }}>
-              ৳{totalPaidValue.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-            </div>
-            <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '0.1rem' }}>
-              {isFactoryPerspective ? 'Collected from Branches' : 'Approved Payments'}
-            </div>
+          <div style={{ fontSize: '1.05rem', fontWeight: 800, color: '#059669', fontFamily: 'Outfit, sans-serif', marginTop: '0.15rem' }}>
+            ৳{totalPaidValue.toLocaleString(undefined, { minimumFractionDigits: 0 })}
           </div>
         </div>
 
         {/* Total Due */}
-        <div className="card" style={{ padding: '1rem 1.25rem', display: 'flex', alignItems: 'center', gap: '1rem' }}>
-          <div
-            style={{
-              width: '44px',
-              height: '44px',
-              borderRadius: '10px',
-              backgroundColor: totalDueValue > 0 ? '#fef2f2' : '#f8fafc',
-              color: totalDueValue > 0 ? '#dc2626' : '#64748b',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}
-          >
-            <AlertCircle size={22} />
+        <div className="card" style={{ padding: '0.55rem 0.75rem', borderLeft: `3.5px solid ${totalDueValue > 0 ? '#ef4444' : '#10b981'}` }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ fontSize: '0.68rem', fontWeight: 600, color: 'var(--text-muted)' }}>
+              {isFactoryPerspective ? 'Receivable' : 'Payable'}
+            </span>
+            <span className={`badge badge-${totalDueValue > 0 ? 'danger' : 'success'}`} style={{ fontSize: '0.6rem', padding: '0.05rem 0.3rem' }}>
+              {totalDueValue > 0 ? 'Due' : 'Clear'}
+            </span>
           </div>
-          <div>
-            <div style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
-              {isFactoryPerspective ? 'Total Receivable' : 'Total Payable Due'}
-            </div>
-            <div
-              style={{
-                fontSize: '1.3rem',
-                fontWeight: 800,
-                color: totalDueValue > 0 ? '#dc2626' : 'var(--text-primary)',
-                fontFamily: 'Outfit, sans-serif',
-              }}
-            >
-              ৳{totalDueValue.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-            </div>
-            <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '0.1rem' }}>
-              {totalDueValue > 0 
-                ? (isFactoryPerspective ? 'Outstanding from Branches' : 'Remaining Due to Factory') 
-                : 'All Settled 🎉'}
-            </div>
+          <div style={{ fontSize: '1.05rem', fontWeight: 800, color: totalDueValue > 0 ? '#dc2626' : '#059669', fontFamily: 'Outfit, sans-serif', marginTop: '0.15rem' }}>
+            ৳{totalDueValue.toLocaleString(undefined, { minimumFractionDigits: 0 })}
           </div>
         </div>
       </div>
@@ -905,14 +841,14 @@ export default function BranchChallans({ userProfile, branches = [], addToast })
           <table>
             <thead>
               <tr>
-                <th style={{ width: '45px', textAlign: 'center' }}>#</th>
-                <th>Challan & Date</th>
+                <th style={{ width: '45px', textAlign: 'center' }}>SL</th>
+                <th>Challan # & Date</th>
                 <th>Branch</th>
                 <th>Items</th>
-                <th>Sold / Stock</th>
-                <th style={{ textAlign: 'right' }}>Total (৳)</th>
-                <th style={{ textAlign: 'right' }}>{isFactoryPerspective ? 'Received (৳)' : 'Paid (৳)'}</th>
-                <th style={{ textAlign: 'right' }}>{isFactoryPerspective ? 'Receivable (৳)' : 'Due (৳)'}</th>
+                <th>Sold / Total Qty</th>
+                <th style={{ textAlign: 'right' }}>Total Bill</th>
+                <th style={{ textAlign: 'right' }}>{isFactoryPerspective ? 'Received' : 'Paid'}</th>
+                <th style={{ textAlign: 'right' }}>{isFactoryPerspective ? 'Receivable' : 'Due'}</th>
                 <th style={{ textAlign: 'center' }}>Status</th>
                 <th style={{ width: '210px', textAlign: 'center' }}>Action</th>
               </tr>
@@ -1383,17 +1319,17 @@ export default function BranchChallans({ userProfile, branches = [], addToast })
                     <input
                       type="text"
                       className="input-control"
-                      placeholder="e.g. DHA-11-8976"
+                      placeholder="Vehicle number"
                       value={vehicleNo}
                       onChange={(e) => setVehicleNo(e.target.value)}
                     />
                   </div>
                   <div className="form-group" style={{ margin: 0 }}>
-                    <label>Driver Name & Phone</label>
+                    <label>Driver Info</label>
                     <input
                       type="text"
                       className="input-control"
-                      placeholder="e.g. Sohel (017xxxxxxxx)"
+                      placeholder="Driver name and phone"
                       value={driverName}
                       onChange={(e) => setDriverName(e.target.value)}
                     />
@@ -1434,7 +1370,7 @@ export default function BranchChallans({ userProfile, branches = [], addToast })
                                 required
                                 style={{ fontSize: '0.82rem', padding: '0.3rem 0.5rem' }}
                               >
-                                <option value="">-- Choose Product --</option>
+                                <option value="">-- Select Product --</option>
                                 {catalogProducts.map((p) => (
                                   <option key={p.id} value={p.id}>
                                     {p.sku} - {p.name} {p.category ? `[${p.category}]` : ''}
@@ -1512,7 +1448,7 @@ export default function BranchChallans({ userProfile, branches = [], addToast })
                   <input
                     type="text"
                     className="input-control"
-                    placeholder="e.g. Any notes or instructions..."
+                    placeholder="Enter notes (optional)..."
                     value={notes}
                     onChange={(e) => setNotes(e.target.value)}
                   />
@@ -1524,7 +1460,7 @@ export default function BranchChallans({ userProfile, branches = [], addToast })
                   Cancel
                 </button>
                 <button type="submit" className="btn btn-primary" disabled={isSubmittingChallan}>
-                  {isSubmittingChallan ? 'Creating...' : 'Create Challan'}
+                  {isSubmittingChallan ? 'Saving...' : 'Save Challan'}
                 </button>
               </div>
             </form>
@@ -1539,7 +1475,7 @@ export default function BranchChallans({ userProfile, branches = [], addToast })
             <div className="modal-header">
               <h3 className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                 <CreditCard size={18} />
-                <span>{isFactoryPerspective ? 'Receive Payment from Branch' : 'Submit Payment to Factory'}</span>
+                <span>{isFactoryPerspective ? 'Receive Payment' : 'Submit Payment'}</span>
               </h3>
               <button className="btn btn-secondary btn-sm" onClick={() => setShowPaymentModal(false)} style={{ borderRadius: '50%', padding: '0.4rem', border: 'none' }}>
                 ✕
@@ -1556,7 +1492,7 @@ export default function BranchChallans({ userProfile, branches = [], addToast })
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.35rem' }}>
                     <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                      {isFactoryPerspective ? 'Branch (Payer):' : 'Factory (Receiver):'}
+                      {isFactoryPerspective ? 'Branch:' : 'Factory:'}
                     </span>
                     <span style={{ fontWeight: 600 }}>
                       {isFactoryPerspective ? `🏪 ${activeChallan.to_branch?.name}` : `🏭 ${activeChallan.from_branch?.name || 'Factory'}`}
@@ -1564,7 +1500,7 @@ export default function BranchChallans({ userProfile, branches = [], addToast })
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px dashed var(--border-color)', paddingTop: '0.35rem', marginTop: '0.35rem' }}>
                     <span style={{ fontSize: '0.85rem', fontWeight: 700 }}>
-                      {isFactoryPerspective ? 'Current Receivable Due:' : 'Current Payable Due:'}
+                      Due Amount:
                     </span>
                     <span style={{ fontSize: '1.05rem', fontWeight: 800, color: '#dc2626', fontFamily: 'Outfit, sans-serif' }}>
                       ৳{parseFloat(activeChallan.due_amount).toLocaleString(undefined, { minimumFractionDigits: 2 })}
@@ -1591,9 +1527,9 @@ export default function BranchChallans({ userProfile, branches = [], addToast })
                   <div className="form-group" style={{ margin: 0 }}>
                     <label>Payment Method *</label>
                     <select className="input-control" value={payMethod} onChange={(e) => setPayMethod(e.target.value)}>
-                      <option value="cash">💵 Cash (Driver/Handover)</option>
-                      <option value="bank">🏦 Bank Deposit / Transfer</option>
-                      <option value="mobile_banking">📱 bKash / Nagad</option>
+                      <option value="cash">💵 Cash</option>
+                      <option value="bank">🏦 Bank</option>
+                      <option value="mobile_banking">📱 Mobile Banking (bKash/Nagad)</option>
                     </select>
                   </div>
                   <div className="form-group" style={{ margin: 0 }}>
@@ -1603,11 +1539,11 @@ export default function BranchChallans({ userProfile, branches = [], addToast })
                 </div>
 
                 <div className="form-group" style={{ margin: 0 }}>
-                  <label>{isFactoryPerspective ? 'Trx ID / Ref No (Optional)' : 'Trx ID / Ref No *'}</label>
+                  <label>{isFactoryPerspective ? 'Reference No (Optional)' : 'Reference No *'}</label>
                   <input
                     type="text"
                     className="input-control"
-                    placeholder="e.g. Deposit Slip #1042 or bKash TrxID"
+                    placeholder="e.g. Slip # or Trx ID"
                     value={payReference}
                     onChange={(e) => setPayReference(e.target.value)}
                     required={!isOwner && !isFactoryPerspective}
@@ -1619,7 +1555,7 @@ export default function BranchChallans({ userProfile, branches = [], addToast })
                   <input
                     type="text"
                     className="input-control"
-                    placeholder={isFactoryPerspective ? "e.g. Received via cash handover / bank deposit" : "e.g. Paid from daily sales remittance"}
+                    placeholder="Enter notes (optional)..."
                     value={payNotes}
                     onChange={(e) => setPayNotes(e.target.value)}
                   />
@@ -1632,8 +1568,8 @@ export default function BranchChallans({ userProfile, branches = [], addToast })
                 </button>
                 <button type="submit" className="btn btn-primary" disabled={isSubmittingPayment}>
                   {isSubmittingPayment 
-                    ? (isFactoryPerspective ? 'Recording...' : 'Submitting...') 
-                    : (isFactoryPerspective ? 'Record Received Payment' : 'Submit Payment')}
+                    ? (isFactoryPerspective ? 'Saving...' : 'Submitting...') 
+                    : (isFactoryPerspective ? 'Save Payment' : 'Submit Payment')}
                 </button>
               </div>
             </form>
@@ -1770,82 +1706,107 @@ export default function BranchChallans({ userProfile, branches = [], addToast })
               </div>
             </div>
 
-            <div className="modal-body" style={{ overflowY: 'auto', padding: '1.5rem', backgroundColor: '#f1f5f9' }}>
+            <div className="modal-body" style={{ overflowY: 'auto', padding: '1.25rem', backgroundColor: '#f8fafc' }}>
               <div
+                className="invoice-print-view"
                 style={{
                   backgroundColor: '#ffffff',
-                  padding: '2.5rem',
-                  borderRadius: '6px',
-                  boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
-                  fontFamily: 'sans-serif',
+                  padding: '1.25rem 1.5rem',
+                  borderRadius: '4px',
+                  border: '1.5px solid #000',
+                  boxShadow: '0 2px 8px rgba(0,0,0,0.06)',
+                  fontFamily: 'Outfit, sans-serif',
                   color: '#000',
                   margin: '0 auto',
-                  maxWidth: '760px',
+                  maxWidth: '780px',
+                  position: 'relative'
                 }}
               >
-                <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '2px solid #000', paddingBottom: '1rem', marginBottom: '1.5rem' }}>
-                  <div>
-                    <h1 style={{ margin: 0, fontSize: '1.5rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.5px' }}>ALMAS ACCESSORIES LTD</h1>
-                    <p style={{ margin: '0.2rem 0', fontSize: '0.85rem', color: '#475569' }}>Central Factory & Production Hub</p>
-                    <p style={{ margin: '0.2rem 0', fontSize: '0.82rem', color: '#64748b' }}>Chittagong / Dhaka, Bangladesh</p>
+                {/* 1. TOP HEADER WITH OFFICIAL LOGO & TITLE */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1.5px solid #000', paddingBottom: '0.35rem', marginBottom: '0.85rem' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.55rem' }}>
+                    <img 
+                      src={almasLogo} 
+                      alt="Almas Logo" 
+                      style={{ width: '38px', height: '38px', objectFit: 'contain', border: '1px solid #000', padding: '1px', background: '#fff', borderRadius: '3px' }} 
+                    />
+                    <div>
+                      <h1 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.2px', lineHeight: 1.1 }}>ALMAS ACCESSORIES INDUSTRIES</h1>
+                      <p style={{ margin: '0.05rem 0 0 0', fontSize: '0.68rem', color: '#334155', fontStyle: 'italic' }}>100% Export Oriented Garments Accessories Industries</p>
+                    </div>
                   </div>
                   <div style={{ textAlign: 'right' }}>
-                    <h2 style={{ margin: 0, fontSize: '1.3rem', color: '#2563eb', fontWeight: 800 }}>DELIVERY CHALLAN</h2>
-                    <p style={{ margin: '0.2rem 0', fontWeight: 'bold', fontFamily: 'monospace', fontSize: '0.95rem' }}>#{activeChallan.challan_no}</p>
-                    <p style={{ margin: '0.2rem 0', fontSize: '0.85rem', color: '#475569' }}>Date: {new Date(activeChallan.challan_date).toLocaleDateString()}</p>
+                    <div style={{
+                      border: '1.5px solid #000',
+                      borderRadius: '9999px',
+                      padding: '0.2rem 0.85rem',
+                      textAlign: 'center',
+                      backgroundColor: '#ffffff',
+                      boxShadow: 'inset 0 0 0 1px #fff, inset 0 0 0 2px #000',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      marginBottom: '0.2rem'
+                    }}>
+                      <span style={{ fontFamily: '"Times New Roman", Times, Georgia, serif', fontSize: '0.85rem', fontWeight: 900, textTransform: 'uppercase', fontStyle: 'italic', letterSpacing: '1px', lineHeight: 1 }}>DELIVERY CHALLAN</span>
+                    </div>
+                    <p style={{ margin: '0.05rem 0', fontWeight: 800, fontSize: '0.86rem', color: '#000' }}>#{activeChallan.challan_no}</p>
+                    <p style={{ margin: 0, fontSize: '0.76rem', color: '#475569', fontWeight: 600 }}>Date: {new Date(activeChallan.challan_date).toLocaleDateString('en-GB')}</p>
                   </div>
                 </div>
 
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem', marginBottom: '1.5rem', backgroundColor: '#f8fafc', padding: '1rem', border: '1px solid #e2e8f0', borderRadius: '4px' }}>
+                {/* 2. ORIGIN & DESTINATION */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '1rem', backgroundColor: '#f8fafc', padding: '0.75rem 1rem', border: '1px solid #cbd5e1', borderRadius: '4px' }}>
                   <div>
-                    <p style={{ margin: 0, fontWeight: 'bold', textTransform: 'uppercase', fontSize: '0.75rem', color: '#64748b' }}>Delivered From (Origin):</p>
-                    <p style={{ margin: '0.2rem 0', fontWeight: 'bold', fontSize: '0.95rem' }}>🏭 {activeChallan.from_branch?.name || 'Central Factory'}</p>
+                    <p style={{ margin: 0, fontWeight: 700, textTransform: 'uppercase', fontSize: '0.72rem', color: '#64748b' }}>Delivered From (Origin):</p>
+                    <p style={{ margin: '0.2rem 0 0', fontWeight: 800, fontSize: '0.92rem' }}>🏭 {activeChallan.from_branch?.name || 'Central Factory'}</p>
                   </div>
                   <div>
-                    <p style={{ margin: 0, fontWeight: 'bold', textTransform: 'uppercase', fontSize: '0.75rem', color: '#64748b' }}>Delivered To (Destination):</p>
-                    <p style={{ margin: '0.2rem 0', fontWeight: 'bold', fontSize: '0.95rem' }}>🏪 {activeChallan.to_branch?.name || 'Branch Outlet'}</p>
+                    <p style={{ margin: 0, fontWeight: 700, textTransform: 'uppercase', fontSize: '0.72rem', color: '#64748b' }}>Delivered To (Destination):</p>
+                    <p style={{ margin: '0.2rem 0 0', fontWeight: 800, fontSize: '0.92rem' }}>🏪 {activeChallan.to_branch?.name || 'Branch Outlet'}</p>
                   </div>
                 </div>
 
                 {activeChallan.vehicle_no && (
-                  <div style={{ marginBottom: '1.5rem', padding: '0.65rem 0.85rem', border: '1px solid #cbd5e1', borderRadius: '4px', fontSize: '0.85rem', backgroundColor: '#fafafa' }}>
+                  <div style={{ marginBottom: '1rem', padding: '0.5rem 0.75rem', border: '1px solid #cbd5e1', borderRadius: '4px', fontSize: '0.82rem', backgroundColor: '#fafafa' }}>
                     <strong>Transport:</strong> Vehicle #{activeChallan.vehicle_no} {activeChallan.driver_name ? ` | Driver: ${activeChallan.driver_name}` : ''}
                   </div>
                 )}
 
-                <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '1.5rem', fontSize: '0.85rem' }}>
+                {/* 3. ITEMS TABLE */}
+                <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '1rem', fontSize: '0.82rem', border: '1.5px solid #000' }}>
                   <thead>
-                    <tr style={{ backgroundColor: '#f1f5f9', borderBottom: '2px solid #cbd5e1' }}>
-                      <th style={{ border: '1px solid #cbd5e1', padding: '8px', textAlign: 'left', width: '35px' }}>SL</th>
-                      <th style={{ border: '1px solid #cbd5e1', padding: '8px', textAlign: 'left' }}>Product SKU & Description</th>
-                      <th style={{ border: '1px solid #cbd5e1', padding: '8px', textAlign: 'right', width: '100px' }}>Dispatched</th>
-                      <th style={{ border: '1px solid #cbd5e1', padding: '8px', textAlign: 'right', width: '110px' }}>Transfer Rate (৳)</th>
-                      <th style={{ border: '1px solid #cbd5e1', padding: '8px', textAlign: 'right', width: '120px' }}>Total Bill (৳)</th>
+                    <tr style={{ backgroundColor: '#f1f5f9', borderBottom: '1.5px solid #000' }}>
+                      <th style={{ borderRight: '1px solid #000', padding: '0.45rem 0.35rem', textAlign: 'center', width: '40px', fontWeight: 800 }}>SL</th>
+                      <th style={{ borderRight: '1px solid #000', padding: '0.45rem 0.5rem', textAlign: 'left', fontWeight: 800 }}>Product SKU & Description</th>
+                      <th style={{ borderRight: '1px solid #000', padding: '0.45rem 0.5rem', textAlign: 'right', width: '100px', fontWeight: 800 }}>Dispatched</th>
+                      <th style={{ borderRight: '1px solid #000', padding: '0.45rem 0.5rem', textAlign: 'right', width: '110px', fontWeight: 800 }}>Transfer Rate (৳)</th>
+                      <th style={{ padding: '0.45rem 0.5rem', textAlign: 'right', width: '120px', fontWeight: 800 }}>Total Bill (৳)</th>
                     </tr>
                   </thead>
                   <tbody>
                     {(activeChallan.items || []).map((it, idx) => (
-                      <tr key={idx}>
-                        <td style={{ border: '1px solid #cbd5e1', padding: '8px', textAlign: 'center' }}>{idx + 1}</td>
-                        <td style={{ border: '1px solid #cbd5e1', padding: '8px' }}>
-                          <strong style={{ fontFamily: 'monospace' }}>{it.product?.sku}</strong> - {it.product?.name}
+                      <tr key={idx} style={{ borderBottom: '1px solid #cbd5e1' }}>
+                        <td style={{ borderRight: '1px solid #000', padding: '0.45rem 0.35rem', textAlign: 'center', fontWeight: 600 }}>{idx + 1}</td>
+                        <td style={{ borderRight: '1px solid #000', padding: '0.45rem 0.5rem' }}>
+                          <span style={{ fontWeight: 800, color: '#000', letterSpacing: '0.2px' }}>{it.product?.sku}</span> - <span>{it.product?.name}</span>
                         </td>
-                        <td style={{ border: '1px solid #cbd5e1', padding: '8px', textAlign: 'right', fontWeight: 'bold' }}>
+                        <td style={{ borderRight: '1px solid #000', padding: '0.45rem 0.5rem', textAlign: 'right', fontWeight: 700 }}>
                           {it.dispatched_qty} {it.product?.unit || 'pcs'}
                         </td>
-                        <td style={{ border: '1px solid #cbd5e1', padding: '8px', textAlign: 'right' }}>
+                        <td style={{ borderRight: '1px solid #000', padding: '0.45rem 0.5rem', textAlign: 'right' }}>
                           ৳{parseFloat(it.unit_transfer_price).toFixed(2)}
                         </td>
-                        <td style={{ border: '1px solid #cbd5e1', padding: '8px', textAlign: 'right', fontWeight: 'bold' }}>
+                        <td style={{ padding: '0.45rem 0.5rem', textAlign: 'right', fontWeight: 800 }}>
                           ৳{parseFloat(it.total_price).toFixed(2)}
                         </td>
                       </tr>
                     ))}
                   </tbody>
                   <tfoot>
-                    <tr style={{ backgroundColor: '#f8fafc' }}>
-                      <td colSpan={4} style={{ border: '1px solid #cbd5e1', padding: '10px 8px', textAlign: 'right', fontWeight: 'bold' }}>Grand Consignment Bill Total:</td>
-                      <td style={{ border: '1px solid #cbd5e1', padding: '10px 8px', textAlign: 'right', fontWeight: 800, fontSize: '1.05rem', color: '#1e293b' }}>
+                    <tr style={{ backgroundColor: '#f8fafc', borderTop: '1.5px solid #000' }}>
+                      <td colSpan={4} style={{ borderRight: '1px solid #000', padding: '0.65rem 0.5rem', textAlign: 'right', fontWeight: 800 }}>Grand Consignment Bill Total:</td>
+                      <td style={{ padding: '0.65rem 0.5rem', textAlign: 'right', fontWeight: 900, fontSize: '0.98rem', color: '#000' }}>
                         ৳{parseFloat(activeChallan.total_bill_amount).toLocaleString(undefined, { minimumFractionDigits: 2 })}
                       </td>
                     </tr>
@@ -1853,21 +1814,31 @@ export default function BranchChallans({ userProfile, branches = [], addToast })
                 </table>
 
                 {activeChallan.notes && (
-                  <p style={{ fontSize: '0.85rem', marginBottom: '2rem', color: '#475569' }}>
+                  <p style={{ fontSize: '0.8rem', marginBottom: '1.5rem', color: '#475569' }}>
                     <strong>Remarks:</strong> {activeChallan.notes}
                   </p>
                 )}
 
-                {/* Signature Rows */}
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '4rem', paddingTop: '1rem' }}>
-                  <div style={{ textAlign: 'center', width: '160px', borderTop: '1px solid #000' }}>
-                    <p style={{ margin: '0.4rem 0', fontSize: '0.82rem', fontWeight: 600 }}>Factory Dispatcher</p>
+                {/* 4. SIGNATURE ROWS */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '3.5rem', paddingTop: '0.5rem' }}>
+                  <div style={{ textAlign: 'center', width: '150px', borderTop: '1px dotted #000' }}>
+                    <p style={{ margin: '0.35rem 0', fontSize: '0.78rem', fontWeight: 700 }}>Factory Dispatcher</p>
                   </div>
-                  <div style={{ textAlign: 'center', width: '160px', borderTop: '1px solid #000' }}>
-                    <p style={{ margin: '0.4rem 0', fontSize: '0.82rem', fontWeight: 600 }}>Driver / Carrier</p>
+                  <div style={{ textAlign: 'center', width: '150px', borderTop: '1px dotted #000' }}>
+                    <p style={{ margin: '0.35rem 0', fontSize: '0.78rem', fontWeight: 700 }}>Driver / Carrier</p>
                   </div>
-                  <div style={{ textAlign: 'center', width: '160px', borderTop: '1px solid #000' }}>
-                    <p style={{ margin: '0.4rem 0', fontSize: '0.82rem', fontWeight: 600 }}>Branch Receiver</p>
+                  <div style={{ textAlign: 'center', width: '150px', borderTop: '1px dotted #000' }}>
+                    <p style={{ margin: '0.35rem 0', fontSize: '0.78rem', fontWeight: 700 }}>Branch Receiver</p>
+                  </div>
+                </div>
+
+                {/* 5. OFFICIAL FOOTER */}
+                <div style={{ borderTop: '1.5px solid #000', marginTop: '1.5rem', paddingTop: '0.45rem', textAlign: 'center', fontSize: '0.72rem', color: '#1e293b', lineHeight: 1.4 }}>
+                  <div style={{ fontWeight: 700 }}>
+                    Office & Factory : 604/750, Najir Ahamed Mistiri Sodok, West Jharnapara, Baro Quarter, Doublemooring, Chattogram, Bangladesh. &nbsp;|&nbsp; Cell : 01819-898617, 01845-069803
+                  </div>
+                  <div style={{ color: '#475569' }}>
+                    E-mail : almasaccessoriesind@gmail.com, Web : www.almasaccessories.com
                   </div>
                 </div>
               </div>

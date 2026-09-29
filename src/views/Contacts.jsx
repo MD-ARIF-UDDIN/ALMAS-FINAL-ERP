@@ -468,7 +468,7 @@ export default function Contacts({ userProfile, branches = [], addToast }) {
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
       <div className="top-bar">
         <div className="page-title-group">
-          <h1>eContacts Directory</h1>
+          <h1>Contacts</h1>
         </div>
         <div className="top-bar-actions">
           <button 
@@ -479,7 +479,7 @@ export default function Contacts({ userProfile, branches = [], addToast }) {
             }}
           >
             <Plus size={16} />
-            <span>Create {activeTab === 'customer' ? 'Buyer / Client' : 'Supplier'}</span>
+            <span>New {activeTab === 'customer' ? 'Customer' : 'Supplier'}</span>
           </button>
         </div>
       </div>
@@ -495,7 +495,7 @@ export default function Contacts({ userProfile, branches = [], addToast }) {
           }}
         >
           <Users size={16} />
-          <span>Buyers / Customers</span>
+          <span>Customers</span>
         </button>
         <button
           className={`btn ${activeTab === 'supplier' ? 'btn-primary' : 'btn-secondary'}`}
@@ -506,7 +506,7 @@ export default function Contacts({ userProfile, branches = [], addToast }) {
           }}
         >
           <Building size={16} />
-          <span>Suppliers / Spinning Mills</span>
+          <span>Suppliers</span>
         </button>
       </div>
 
@@ -520,7 +520,7 @@ export default function Contacts({ userProfile, branches = [], addToast }) {
               type="text"
               className="input-control"
               style={{ paddingLeft: '2.25rem' }}
-              placeholder={`Search ${activeTab === 'customer' ? 'buyers' : 'suppliers'} by name, phone, or email...`}
+              placeholder={`Search ${activeTab === 'customer' ? 'customers' : 'suppliers'}...`}
               value={searchQuery}
               onChange={(e) => {
                 setSearchQuery(e.target.value);
@@ -575,7 +575,7 @@ export default function Contacts({ userProfile, branches = [], addToast }) {
             <thead>
               <tr>
                 <th>SL</th>
-                <th>Name / Company</th>
+                <th>Name</th>
                 <th>Branch</th>
                 <th>Contact Info</th>
                 <th>Outstanding Balance</th>
@@ -588,7 +588,7 @@ export default function Contacts({ userProfile, branches = [], addToast }) {
               ) : contacts.length === 0 ? (
                 <tr>
                   <td colSpan="6" style={{ textAlign: 'center', padding: '2rem' }}>
-                    No contacts found matching the filters.
+                    No contacts found.
                   </td>
                 </tr>
               ) : (
@@ -603,7 +603,7 @@ export default function Contacts({ userProfile, branches = [], addToast }) {
                       <td>
                         <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{c.name}</div>
                         <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
-                          Added on {new Date(c.created_at).toLocaleDateString()}
+                          Added {new Date(c.created_at).toLocaleDateString()}
                         </div>
                       </td>
                       <td>
@@ -624,7 +624,7 @@ export default function Contacts({ userProfile, branches = [], addToast }) {
                             {br.is_factory ? '🏭' : '🏪'} {br.name}
                           </span>
                         ) : (
-                          <span style={{ color: 'var(--text-muted)', fontSize: '0.78rem' }}>Global / Central</span>
+                          <span style={{ color: 'var(--text-muted)', fontSize: '0.78rem' }}>Global</span>
                         )}
                       </td>
                       <td>
@@ -662,7 +662,7 @@ export default function Contacts({ userProfile, branches = [], addToast }) {
                             type="button"
                             className="btn btn-secondary btn-sm btn-icon"
                             onClick={() => handleOpenHistory(c)}
-                            title="Transaction History Ledger"
+                            title="Transaction History"
                             style={{ backgroundColor: 'var(--primary-light)', color: 'var(--primary)' }}
                           >
                             <History size={14} />
@@ -671,7 +671,7 @@ export default function Contacts({ userProfile, branches = [], addToast }) {
                             type="button"
                             className="btn btn-secondary btn-sm btn-icon"
                             onClick={() => handleEdit(c)}
-                            title="Edit Profile"
+                            title="Edit"
                           >
                             <Edit size={14} />
                           </button>
@@ -681,7 +681,7 @@ export default function Contacts({ userProfile, branches = [], addToast }) {
                               className="btn btn-secondary btn-sm btn-icon"
                               style={{ color: 'var(--danger)' }}
                               onClick={() => handleDelete(c)}
-                              title="Delete Profile"
+                              title="Delete"
                             >
                               <Trash2 size={14} />
                             </button>
@@ -712,7 +712,7 @@ export default function Contacts({ userProfile, branches = [], addToast }) {
           <div className="modal-content" style={{ maxWidth: '500px', width: '100%' }}>
             <div className="modal-header">
               <h3 className="modal-title">
-                {isEditing ? 'Edit Profile Details' : `Create New ${activeTab === 'customer' ? 'Buyer' : 'Supplier'}`}
+                {isEditing ? 'Edit Contact' : `New ${activeTab === 'customer' ? 'Customer' : 'Supplier'}`}
               </h3>
               <button 
                 className="btn btn-secondary btn-sm" 
@@ -728,11 +728,11 @@ export default function Contacts({ userProfile, branches = [], addToast }) {
             <form onSubmit={handleSaveContact}>
               <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
                 <div className="form-group">
-                  <label>Full Name / Company Name *</label>
+                  <label>Name *</label>
                   <input
                     type="text"
                     className="input-control"
-                    placeholder={activeTab === 'customer' ? 'e.g. Apex Garments Ltd' : 'e.g. Almas Spinning Mills Ltd'}
+                    placeholder={activeTab === 'customer' ? 'Enter customer name' : 'Enter supplier name'}
                     value={name}
                     onChange={(e) => setName(e.target.value)}
                     required
@@ -740,14 +740,14 @@ export default function Contacts({ userProfile, branches = [], addToast }) {
                 </div>
 
                 <div className="form-group">
-                  <label>Contact Phone Number *</label>
+                  <label>Phone *</label>
                   <div style={{ position: 'relative' }}>
                     <Phone size={14} style={{ position: 'absolute', left: '0.75rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
                     <input
                       type="text"
                       className="input-control"
                       style={{ paddingLeft: '2.25rem' }}
-                      placeholder="+8801xxxxxxxxx"
+                      placeholder="01xxxxxxxxx"
                       value={phone}
                       onChange={(e) => setPhone(e.target.value)}
                       required
@@ -756,14 +756,14 @@ export default function Contacts({ userProfile, branches = [], addToast }) {
                 </div>
 
                 <div className="form-group">
-                  <label>Email Address</label>
+                  <label>Email</label>
                   <div style={{ position: 'relative' }}>
                     <Mail size={14} style={{ position: 'absolute', left: '0.75rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
                     <input
                       type="email"
                       className="input-control"
                       style={{ paddingLeft: '2.25rem' }}
-                      placeholder="contact@company.com"
+                      placeholder="Enter email (optional)"
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
                     />
@@ -771,13 +771,13 @@ export default function Contacts({ userProfile, branches = [], addToast }) {
                 </div>
 
                 <div className="form-group">
-                  <label>Factory / Office Address</label>
+                  <label>Address</label>
                   <div style={{ position: 'relative' }}>
                     <MapPin size={14} style={{ position: 'absolute', left: '0.75rem', top: '0.75rem', color: 'var(--text-muted)' }} />
                     <textarea
                       className="input-control"
                       style={{ paddingLeft: '2.25rem', minHeight: '80px', resize: 'vertical' }}
-                      placeholder="Street address, City, Country"
+                      placeholder="Enter address (optional)..."
                       value={address}
                       onChange={(e) => setAddress(e.target.value)}
                     />
@@ -787,13 +787,13 @@ export default function Contacts({ userProfile, branches = [], addToast }) {
                 {role === 'owner' ? (
                   branches.length > 0 && (
                     <div className="form-group">
-                      <label>Associated Branch</label>
+                      <label>Branch</label>
                       <select
                         className="input-control"
                         value={branchId}
                         onChange={(e) => setBranchId(e.target.value)}
                       >
-                        <option value="">-- Global / All Branches --</option>
+                        <option value="">-- All Branches --</option>
                         {branches.map((b) => (
                           <option key={b.id} value={b.id}>
                             {b.is_factory ? `🏭 ${b.name}` : `🏪 ${b.name}`}
@@ -827,7 +827,7 @@ export default function Contacts({ userProfile, branches = [], addToast }) {
                   Cancel
                 </button>
                 <button type="submit" className="btn btn-primary" disabled={loading}>
-                  {isEditing ? 'Update Profile' : 'Create Profile'}
+                  {loading ? 'Saving...' : isEditing ? 'Update' : 'Save'}
                 </button>
               </div>
             </form>

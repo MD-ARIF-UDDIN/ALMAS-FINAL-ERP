@@ -11,6 +11,8 @@ import {
   BarChart3,
   UserCheck,
   Building2,
+  RotateCcw,
+  Truck,
 } from 'lucide-react';
 import { hasPermission } from '../utils/permissions';
 
@@ -58,8 +60,30 @@ export default function Dashboard({ userProfile, branches }) {
       perm: 'inventory.view',
     },
     {
+      id: 'challans-stock',
+      title: 'Challans',
+      icon: Truck,
+      gradient: 'linear-gradient(135deg, #06b6d4 0%, #0891b2 100%)',
+      glow: 'rgba(6, 182, 212, 0.28)',
+      hoverBorder: '#06b6d4',
+      themeColor: '#0891b2',
+      path: '/challans',
+      perm: 'inventory.view',
+    },
+    {
+      id: 'returns-manage',
+      title: 'Returns',
+      icon: RotateCcw,
+      gradient: 'linear-gradient(135deg, #f97316 0%, #ea580c 100%)',
+      glow: 'rgba(249, 115, 22, 0.28)',
+      hoverBorder: '#f97316',
+      themeColor: '#ea580c',
+      path: '/returns',
+      perm: 'returns.view',
+    },
+    {
       id: 'product-catalog',
-      title: 'Product',
+      title: 'Products',
       icon: Layers,
       gradient: 'linear-gradient(135deg, #6366f1 0%, #4338ca 100%)',
       glow: 'rgba(79, 70, 229, 0.28)',

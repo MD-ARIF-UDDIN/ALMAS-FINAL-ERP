@@ -459,12 +459,12 @@ export default function Purchases({ userProfile, branches, addToast }) {
     <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
       <div className="top-bar">
         <div className="page-title-group">
-          <h1>Supplier Purchases</h1>
+          <h1>Purchases</h1>
         </div>
         <div className="top-bar-actions" style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
           {userProfile?.role === 'owner' && (
             <div className="form-group" style={{ marginBottom: 0, flexDirection: 'row', alignItems: 'center', gap: '0.5rem' }}>
-              <label style={{ whiteSpace: 'nowrap' }}>Active Branch:</label>
+              <label style={{ whiteSpace: 'nowrap' }}>Branch:</label>
               <select
                 className="input-control"
                 value={selectedBranchId}
@@ -495,13 +495,13 @@ export default function Purchases({ userProfile, branches, addToast }) {
             setShowPurchaseModal(true);
           }}>
             <Plus size={16} />
-            <span>Create Purchase</span>
+            <span>New Purchase</span>
           </button>
         </div>
       </div>
 
       {/* VIEW: PURCHASE LIST */}
-      <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+      <div className="no-print card" style={{ padding: 0, overflow: 'hidden' }}>
           <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem', padding: '1rem 1.25rem' }}>
             <h3 className="card-title" style={{ margin: 0 }}>Purchase History</h3>
             <div style={{ position: 'relative', width: '260px' }}>
@@ -510,7 +510,7 @@ export default function Purchases({ userProfile, branches, addToast }) {
                 type="text"
                 className="input-control"
                 style={{ paddingLeft: '2.25rem', padding: '0.35rem 0.6rem 0.35rem 2.25rem', fontSize: '0.82rem' }}
-                placeholder="Search purchase bill #..."
+                placeholder="Search purchase ID..."
                 value={purchaseSearchQuery}
                 onChange={(e) => {
                   setPurchaseSearchQuery(e.target.value);
@@ -523,14 +523,14 @@ export default function Purchases({ userProfile, branches, addToast }) {
             <table>
               <thead>
                 <tr>
-                  <th>SL</th>
+                  <th style={{ width: '50px' }}>SL</th>
                   <th>Purchase ID</th>
                   {userProfile?.role === 'owner' && <th>Branch</th>}
-                  <th>Order Date</th>
+                  <th>Date</th>
                   <th>Supplier</th>
-                  <th>Cost Total</th>
-                  <th>Paid Balance</th>
-                  <th>Payment Status</th>
+                  <th>Total Bill</th>
+                  <th>Paid</th>
+                  <th>Status</th>
                   <th style={{ width: '100px', textAlign: 'center' }}>Actions</th>
                 </tr>
               </thead>
@@ -540,7 +540,7 @@ export default function Purchases({ userProfile, branches, addToast }) {
                 ) : purchases.length === 0 ? (
                   <tr>
                     <td colSpan={userProfile?.role === 'owner' ? 9 : 8} style={{ textAlign: 'center', padding: '2rem' }}>
-                      No purchases logged. Click "Create Purchase" to add items to stock.
+                      No purchases logged. Click "New Purchase" to add items to stock.
                     </td>
                   </tr>
                 ) : (
@@ -570,7 +570,7 @@ export default function Purchases({ userProfile, branches, addToast }) {
                           <button
                             className="btn btn-secondary btn-sm"
                             onClick={() => handleViewPurchaseDetails(p)}
-                            title="View Details & Payments"
+                            title="View Details"
                           >
                             View
                           </button>
@@ -594,13 +594,13 @@ export default function Purchases({ userProfile, branches, addToast }) {
       {/* RECORD NEW PURCHASE MODAL */}
       {showPurchaseModal && (
         <div className="modal-overlay">
-          <div className="modal-content modal-xl" style={{ display: 'flex', flexDirection: 'column', height: '97vh', maxHeight: '97vh', overflow: 'hidden' }}>
+          <div className="modal-content modal-xl">
             <div className="modal-header">
-              <h3 className="modal-title">Record Wholesale Purchase</h3>
+              <h3 className="modal-title">New Purchase</h3>
               <button className="btn btn-secondary btn-sm" onClick={() => setShowPurchaseModal(false)} style={{ borderRadius: '50%', padding: '0.4rem', border: 'none' }}>✕</button>
             </div>
-            <form onSubmit={handleSavePurchase} style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-              <div className="modal-body" style={{ display: 'grid', gridTemplateColumns: '1.6fr 1fr', gap: '1.5rem', overflowY: 'auto', padding: '1.5rem' }}>
+            <form onSubmit={handleSavePurchase} style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
+              <div className="modal-body purchase-form-grid">
           {/* Purchase Items Editor */}
           <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
 
@@ -632,14 +632,14 @@ export default function Purchases({ userProfile, branches, addToast }) {
             {supplierType === 'existing' ? (
               <div className="form-row" style={{ marginTop: '0.5rem' }}>
                 <div className="form-group">
-                  <label>Select Supplier *</label>
+                  <label>Supplier *</label>
                   <select
                     className="input-control"
                     value={selectedSupplierId}
                     onChange={(e) => setSelectedSupplierId(e.target.value)}
                     required={supplierType === 'existing'}
                   >
-                    <option value="">-- Choose Supplier --</option>
+                    <option value="">-- Select Supplier --</option>
                     {suppliers.map((s) => (
                       <option key={s.id} value={s.id}>
                         {s.name} {s.phone ? `(${s.phone})` : ''}
@@ -653,22 +653,22 @@ export default function Purchases({ userProfile, branches, addToast }) {
                 <div style={{ fontWeight: 700, fontSize: '0.8rem', color: 'var(--primary)' }}>New Supplier Details</div>
                 <div className="form-row">
                   <div className="form-group">
-                    <label>Supplier Company Name *</label>
+                    <label>Supplier Name *</label>
                     <input
                       type="text"
                       className="input-control"
-                      placeholder="e.g. Almas Spinning Mills Ltd"
+                      placeholder="Enter supplier name"
                       value={newSupName}
                       onChange={(e) => setNewSupName(e.target.value)}
                       required={supplierType === 'new'}
                     />
                   </div>
                   <div className="form-group">
-                    <label>Supplier Contact Phone *</label>
+                    <label>Phone *</label>
                     <input
                       type="text"
                       className="input-control"
-                      placeholder="e.g. 01712345678"
+                      placeholder="Enter phone number"
                       value={newSupPhone}
                       onChange={(e) => setNewSupPhone(e.target.value)}
                       required={supplierType === 'new'}
@@ -677,11 +677,11 @@ export default function Purchases({ userProfile, branches, addToast }) {
                 </div>
                 <div className="form-row">
                   <div className="form-group" style={{ gridColumn: '1 / -1' }}>
-                    <label>Supplier Factory Address</label>
+                    <label>Address</label>
                     <input
                       type="text"
                       className="input-control"
-                      placeholder="e.g. Narayanganj, Dhaka"
+                      placeholder="Enter address (optional)"
                       value={newSupAddress}
                       onChange={(e) => setNewSupAddress(e.target.value)}
                     />
@@ -694,12 +694,12 @@ export default function Purchases({ userProfile, branches, addToast }) {
               
               {/* Quick Search & Add Product Bar */}
               <div style={{ position: 'relative' }}>
-                <label style={{ display: 'block', marginBottom: '0.35rem', fontWeight: 600, fontSize: '0.82rem' }}>Quick Search & Add Product</label>
+                <label style={{ display: 'block', marginBottom: '0.35rem', fontWeight: 600, fontSize: '0.82rem' }}>Search & Add Product</label>
                 <div style={{ display: 'flex', gap: '0.5rem' }}>
                   <input
                     type="text"
                     className="input-control"
-                    placeholder="Type product name or SKU to search and add to list..."
+                    placeholder="Search product by name or SKU..."
                     value={productSearchQuery}
                     onChange={(e) => {
                       setProductSearchQuery(e.target.value);
@@ -757,7 +757,6 @@ export default function Purchases({ userProfile, branches, addToast }) {
                             textAlign: 'left'
                           }}
                           onClick={() => {
-                            // If the first row is empty, we populate the first row! Otherwise, we add a new row!
                             if (purchaseItems.length === 1 && !purchaseItems[0].productId) {
                               updateItemField(0, 'productId', prod.id);
                             } else {
@@ -790,7 +789,7 @@ export default function Purchases({ userProfile, branches, addToast }) {
               </div>
 
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '0.25rem' }}>
-                <label style={{ fontWeight: 600 }}>Products List *</label>
+                <label style={{ fontWeight: 600 }}>Products *</label>
                 <button
                   type="button"
                   className="btn btn-secondary btn-sm"
@@ -805,7 +804,7 @@ export default function Purchases({ userProfile, branches, addToast }) {
                   <thead>
                     <tr>
                       <th style={{ width: '50px' }}>SL</th>
-                      <th>Product Details *</th>
+                      <th>Product *</th>
                       <th style={{ width: '100px', textAlign: 'right' }}>Qty *</th>
                       <th style={{ width: '130px', textAlign: 'right' }}>Cost Price *</th>
                       <th style={{ width: '120px', textAlign: 'right' }}>Total</th>
@@ -883,11 +882,11 @@ export default function Purchases({ userProfile, branches, addToast }) {
 
             <div className="cart-totals-summary" style={{ background: 'none', padding: 0, border: 'none' }}>
               <div className="totals-row">
-                <span>Items Subtotal</span>
+                <span>Subtotal</span>
                 <span>৳{getSubtotal().toFixed(2)}</span>
               </div>
               <div className="totals-row">
-                <span>Discount Deduction</span>
+                <span>Discount</span>
                 <input
                   type="number"
                   min="0"
@@ -898,12 +897,12 @@ export default function Purchases({ userProfile, branches, addToast }) {
                 />
               </div>
               <div className="totals-row grand-total" style={{ borderBottom: '1px solid var(--border-color)', paddingBottom: '0.75rem', marginBottom: '0.75rem' }}>
-                <span>Bill Net Total</span>
+                <span>Net Total</span>
                 <span>৳{getGrandTotal().toFixed(2)}</span>
               </div>
 
               <div className="form-group">
-                <label>Amount Paid Now</label>
+                <label>Paid Amount</label>
                 <input
                   type="number"
                   step="0.01"
@@ -918,36 +917,36 @@ export default function Purchases({ userProfile, branches, addToast }) {
 
               {parseFloat(paidAmount) > 0 && (
                 <div className="form-group">
-                  <label>Payout Mode</label>
+                  <label>Payment Method</label>
                   <select
                     className="input-control"
                     value={paymentMethod}
                     onChange={(e) => setPaymentMethod(e.target.value)}
                   >
-                    <option value="cash">Cash Ledger</option>
-                    <option value="bank">Bank Payout / Check</option>
+                    <option value="cash">Cash</option>
+                    <option value="bank">Bank</option>
                     <option value="mobile_banking">Mobile Banking (bKash/Nagad)</option>
                   </select>
                 </div>
               )}
 
               <div className="form-group">
-                <label>Transaction / Check Reference Number</label>
+                <label>Reference No</label>
                 <input
                   type="text"
                   className="input-control"
-                  placeholder="Enter bank check / bkash TRX code"
+                  placeholder="e.g. Check # or Trx ID"
                   value={referenceNumber}
                   onChange={(e) => setReferenceNumber(e.target.value)}
                 />
               </div>
 
               <div className="form-group">
-                <label>Challan & Delivery details</label>
+                <label>Notes / Challan No</label>
                 <input
                   type="text"
                   className="input-control"
-                  placeholder="e.g. Yarn delivery details / Challan No."
+                  placeholder="Enter notes or challan info (optional)..."
                   value={notes}
                   onChange={(e) => setNotes(e.target.value)}
                 />
@@ -963,7 +962,7 @@ export default function Purchases({ userProfile, branches, addToast }) {
             className="btn btn-primary"
             disabled={loading}
           >
-            {loading ? 'Saving Purchase...' : 'Create Purchase'}
+            {loading ? 'Saving...' : 'Save Purchase'}
           </button>
         </div>
       </form>
@@ -999,32 +998,32 @@ export default function Purchases({ userProfile, branches, addToast }) {
               <div className="modal-body" style={{ flex: 1, overflowY: 'auto', padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
                 {loadingDetails ? (
                   <div style={{ textAlign: 'center', padding: '3rem' }}>
-                    <strong>Loading purchase details and payment history...</strong>
+                    <strong>Loading details...</strong>
                   </div>
                 ) : (
                   <>
                     {/* Section 1: Overview & Status */}
                     <div style={{ borderBottom: '1px solid var(--border-color)', paddingBottom: '1.25rem' }}>
                       <h4 style={{ margin: '0 0 0.85rem 0', fontWeight: 700, textTransform: 'uppercase', fontSize: '0.85rem', color: 'var(--primary)', letterSpacing: '0.05em' }}>
-                        Section 1: Invoice Overview
+                        Overview
                       </h4>
                       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1.25rem', background: '#f8fafc', padding: '1rem 1.25rem', borderRadius: 'var(--border-radius-sm)', border: '1px solid var(--border-color)' }}>
                         <div>
-                          <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem', display: 'block', textTransform: 'uppercase', fontWeight: 700, marginBottom: '0.25rem' }}>Supplier Info</span>
+                          <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem', display: 'block', textTransform: 'uppercase', fontWeight: 700, marginBottom: '0.25rem' }}>Supplier</span>
                           <strong style={{ fontSize: '0.95rem' }}>{selectedPurchase.contacts?.name || 'Unknown supplier'}</strong>
                           {selectedPurchase.contacts?.phone && <span style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: '0.15rem' }}>Phone: {selectedPurchase.contacts.phone}</span>}
                         </div>
                         <div>
                           <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem', display: 'block', textTransform: 'uppercase', fontWeight: 700, marginBottom: '0.25rem' }}>Date & Branch</span>
                           <strong style={{ fontSize: '0.95rem', display: 'block' }}>{new Date(selectedPurchase.purchase_date).toLocaleDateString()}</strong>
-                          <span style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: '0.15rem' }}>Location: {purchaseBranch.name}</span>
+                          <span style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: '0.15rem' }}>Branch: {purchaseBranch.name}</span>
                         </div>
                         <div>
                           <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem', display: 'block', textTransform: 'uppercase', fontWeight: 700, marginBottom: '0.25rem' }}>Payment Status</span>
                           <span className={`badge badge-${selectedPurchase.payment_status}`}>{selectedPurchase.payment_status}</span>
                         </div>
                         <div>
-                          <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem', display: 'block', textTransform: 'uppercase', fontWeight: 700, marginBottom: '0.25rem' }}>Outstanding Dues</span>
+                          <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem', display: 'block', textTransform: 'uppercase', fontWeight: 700, marginBottom: '0.25rem' }}>Due Amount</span>
                           <strong style={{ fontSize: '1rem', color: selectedPurchase.net_amount - selectedPurchase.paid_amount > 0 ? 'var(--danger-text)' : 'inherit' }}>
                             ৳{(selectedPurchase.net_amount - selectedPurchase.paid_amount).toFixed(2)}
                           </strong>
@@ -1035,18 +1034,18 @@ export default function Purchases({ userProfile, branches, addToast }) {
                     {/* Section 2: Purchased Items */}
                     <div style={{ borderBottom: '1px solid var(--border-color)', paddingBottom: '1.25rem' }}>
                       <h4 style={{ margin: '0 0 0.85rem 0', fontWeight: 700, textTransform: 'uppercase', fontSize: '0.85rem', color: 'var(--primary)', letterSpacing: '0.05em' }}>
-                        Section 2: Purchased Items
+                        Items
                       </h4>
                       <div className="table-container">
                         <table>
                           <thead>
                             <tr>
                               <th style={{ width: '50px' }}>SL</th>
-                              <th>Product Name</th>
-                              <th>SKU Code</th>
+                              <th>Product</th>
+                              <th>SKU</th>
                               <th style={{ width: '120px', textAlign: 'right' }}>Quantity</th>
                               <th style={{ width: '120px', textAlign: 'right' }}>Unit Cost</th>
-                              <th style={{ width: '140px', textAlign: 'right' }}>Total Price</th>
+                              <th style={{ width: '140px', textAlign: 'right' }}>Total</th>
                             </tr>
                           </thead>
                           <tbody>
@@ -1078,19 +1077,19 @@ export default function Purchases({ userProfile, branches, addToast }) {
                     {/* Section 3: Summary & Notes */}
                     <div style={{ borderBottom: selectedPurchasePayments.length > 0 ? '1px solid var(--border-color)' : 'none', paddingBottom: selectedPurchasePayments.length > 0 ? '1.25rem' : '0' }}>
                       <h4 style={{ margin: '0 0 0.85rem 0', fontWeight: 700, textTransform: 'uppercase', fontSize: '0.85rem', color: 'var(--primary)', letterSpacing: '0.05em' }}>
-                        Section 3: Financial Summary & Notes
+                        Summary & Notes
                       </h4>
                       <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr', gap: '2rem', flexWrap: 'wrap', alignItems: 'start' }}>
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                          <span style={{ color: 'var(--text-muted)', fontSize: '0.85rem', fontWeight: 600 }}>Purchase Notes / Dispatch Details:</span>
+                          <span style={{ color: 'var(--text-muted)', fontSize: '0.85rem', fontWeight: 600 }}>Notes / Dispatch Details:</span>
                           <p style={{ background: '#f8fafc', padding: '0.75rem', borderRadius: 'var(--border-radius-sm)', border: '1px solid var(--border-color)', margin: 0, fontSize: '0.85rem', whiteSpace: 'pre-wrap', minHeight: '60px' }}>
-                            {selectedPurchase.notes || 'No notes or dispatch details provided.'}
+                            {selectedPurchase.notes || 'No notes provided.'}
                           </p>
                         </div>
 
                         <div className="card" style={{ padding: '1rem', background: '#f8fafc', display: 'flex', flexDirection: 'column', gap: '0.5rem', border: '1px solid var(--border-color)' }}>
                           <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.9rem' }}>
-                            <span>Subtotal Amount:</span>
+                            <span>Subtotal:</span>
                             <span>৳{selectedPurchase.total_amount.toFixed(2)}</span>
                           </div>
                           {selectedPurchase.discount > 0 && (
@@ -1100,15 +1099,15 @@ export default function Purchases({ userProfile, branches, addToast }) {
                             </div>
                           )}
                           <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 800, fontSize: '1.05rem', borderTop: '1px solid var(--border-color)', paddingTop: '0.5rem', marginTop: '0.25rem' }}>
-                            <span>Net Bill Total:</span>
+                            <span>Net Total:</span>
                             <span>৳{selectedPurchase.net_amount.toFixed(2)}</span>
                           </div>
                           <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--success-text)', fontSize: '0.9rem' }}>
-                            <span>Paid Balance:</span>
+                            <span>Paid Amount:</span>
                             <span>৳{selectedPurchase.paid_amount.toFixed(2)}</span>
                           </div>
                           <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 700, color: selectedPurchase.net_amount - selectedPurchase.paid_amount > 0 ? 'var(--danger-text)' : 'inherit', fontSize: '0.9rem' }}>
-                            <span>Outstanding Dues:</span>
+                            <span>Due Amount:</span>
                             <span>৳{(selectedPurchase.net_amount - selectedPurchase.paid_amount).toFixed(2)}</span>
                           </div>
                         </div>
@@ -1119,16 +1118,16 @@ export default function Purchases({ userProfile, branches, addToast }) {
                     {selectedPurchasePayments.length > 0 && (
                       <div>
                         <h4 style={{ margin: '0 0 0.85rem 0', fontWeight: 700, textTransform: 'uppercase', fontSize: '0.85rem', color: 'var(--primary)', letterSpacing: '0.05em' }}>
-                          Section 4: Payment History Logs
+                          Payment History
                         </h4>
                         <div className="table-container">
                           <table>
                             <thead>
                               <tr>
                                 <th style={{ width: '50px' }}>SL</th>
-                                <th>Receipt / PM ID</th>
+                                <th>Payment ID</th>
                                 <th>Transaction Date</th>
-                                <th>Payment Mode</th>
+                                <th>Payment Method</th>
                                 <th>Reference #</th>
                                 <th style={{ textAlign: 'right', width: '130px' }}>Amount Paid</th>
                                 <th>Remarks</th>
@@ -1170,7 +1169,7 @@ export default function Purchases({ userProfile, branches, addToast }) {
                     setSelectedPurchasePayments([]);
                   }}
                 >
-                  Close Document
+                  Close
                 </button>
               </div>
             </div>

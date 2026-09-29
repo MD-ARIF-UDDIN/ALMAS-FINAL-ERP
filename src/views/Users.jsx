@@ -1043,7 +1043,7 @@ export default function Users({ branches, fetchBranches, addToast }) {
         <div className="modal-overlay">
           <div className="modal-content" style={{ maxWidth: '480px', width: '100%' }}>
             <div className="modal-header">
-              <h3 className="modal-title">Edit Staff Profile</h3>
+              <h3 className="modal-title">Edit User</h3>
               <button 
                 className="btn btn-secondary btn-sm" 
                 onClick={() => setShowEditUserModal(false)} 
@@ -1066,7 +1066,7 @@ export default function Users({ branches, fetchBranches, addToast }) {
                 </div>
 
                 <div className="form-group">
-                  <label>Email Address</label>
+                  <label>Email</label>
                   <input
                     type="text"
                     className="input-control"
@@ -1077,29 +1077,29 @@ export default function Users({ branches, fetchBranches, addToast }) {
                 </div>
 
                 <div className="form-group">
-                  <label>Role Privilege *</label>
+                  <label>Role *</label>
                   <select
                     className="input-control"
                     value={editRole}
                     onChange={(e) => setEditRole(e.target.value)}
                     required
                   >
-                    <option value="staff">Staff (Standard POS & Catalog)</option>
-                    <option value="branch_manager">Branch Manager (Branch Operations Admin)</option>
-                    <option value="owner">Owner (Full Multi-Branch Master)</option>
+                    <option value="staff">Staff</option>
+                    <option value="branch_manager">Branch Manager</option>
+                    <option value="owner">Owner</option>
                   </select>
                 </div>
 
                 {editRole !== 'owner' && (
                   <div className="form-group">
-                    <label>Assigned Branch Location *</label>
+                    <label>Branch *</label>
                     <select
                       className="input-control"
                       value={editBranch}
                       onChange={(e) => setEditBranch(e.target.value)}
                       required
                     >
-                      <option value="">-- Choose Branch --</option>
+                      <option value="">-- Select Branch --</option>
                       {branches.map((b) => (
                         <option key={b.id} value={b.id}>
                           {b.name}
@@ -1118,7 +1118,7 @@ export default function Users({ branches, fetchBranches, addToast }) {
                   Cancel
                 </button>
                 <button type="submit" className="btn btn-primary" disabled={loading}>
-                  Save Changes
+                  {loading ? 'Saving...' : 'Update'}
                 </button>
               </div>
             </form>
@@ -1131,7 +1131,7 @@ export default function Users({ branches, fetchBranches, addToast }) {
         <div className="modal-overlay">
           <div className="modal-content" style={{ maxWidth: '500px', width: '100%' }}>
             <div className="modal-header">
-              <h3 className="modal-title">Add New Staff / Employee</h3>
+              <h3 className="modal-title">New User</h3>
               <button 
                 className="btn btn-secondary btn-sm" 
                 onClick={() => {
@@ -1146,14 +1146,14 @@ export default function Users({ branches, fetchBranches, addToast }) {
             <form onSubmit={handleCreateUser}>
               <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
                 <div className="form-group">
-                  <label>Full Name *</label>
+                  <label>Name *</label>
                   <div style={{ position: 'relative' }}>
                     <User size={14} style={{ position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
                     <input
                       type="text"
                       className="input-control"
                       style={{ paddingLeft: '2.5rem' }}
-                      placeholder="John Doe"
+                      placeholder="Enter full name"
                       value={fullName}
                       onChange={(e) => setFullName(e.target.value)}
                       required
@@ -1162,14 +1162,14 @@ export default function Users({ branches, fetchBranches, addToast }) {
                 </div>
 
                 <div className="form-group">
-                  <label>Email Address *</label>
+                  <label>Email *</label>
                   <div style={{ position: 'relative' }}>
                     <Mail size={14} style={{ position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
                     <input
                       type="email"
                       className="input-control"
                       style={{ paddingLeft: '2.5rem' }}
-                      placeholder="staff@almasaccessories.com"
+                      placeholder="Enter email"
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
                       required
@@ -1178,7 +1178,7 @@ export default function Users({ branches, fetchBranches, addToast }) {
                 </div>
 
                 <div className="form-group">
-                  <label>Password (Temporary) *</label>
+                  <label>Password *</label>
                   <div style={{ position: 'relative' }}>
                     <Lock size={14} style={{ position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
                     <input
@@ -1194,7 +1194,7 @@ export default function Users({ branches, fetchBranches, addToast }) {
                 </div>
 
                 <div className="form-group">
-                  <label>Role Privilege *</label>
+                  <label>Role *</label>
                   <div style={{ position: 'relative' }}>
                     <Shield size={14} style={{ position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
                     <select
@@ -1204,16 +1204,16 @@ export default function Users({ branches, fetchBranches, addToast }) {
                       onChange={(e) => setRole(e.target.value)}
                       required
                     >
-                      <option value="staff">Staff (Basic POS / Catalog access)</option>
-                      <option value="branch_manager">Branch Manager (Branch specific admin)</option>
-                      <option value="owner">Owner (Full access across all branches)</option>
+                      <option value="staff">Staff</option>
+                      <option value="branch_manager">Branch Manager</option>
+                      <option value="owner">Owner</option>
                     </select>
                   </div>
                 </div>
 
                 {role !== 'owner' && (
                   <div className="form-group">
-                    <label>Assign Branch Location *</label>
+                    <label>Branch *</label>
                     <div style={{ position: 'relative' }}>
                       <Building size={14} style={{ position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
                       <select
@@ -1223,7 +1223,7 @@ export default function Users({ branches, fetchBranches, addToast }) {
                         onChange={(e) => setSelectedBranch(e.target.value)}
                         required
                       >
-                        <option value="">-- Choose Branch --</option>
+                        <option value="">-- Select Branch --</option>
                         {branches.map((b) => (
                           <option key={b.id} value={b.id}>
                             {b.name}
@@ -1246,7 +1246,7 @@ export default function Users({ branches, fetchBranches, addToast }) {
                   Cancel
                 </button>
                 <button type="submit" className="btn btn-primary" disabled={loading}>
-                  Create Account
+                  {loading ? 'Saving...' : 'Save User'}
                 </button>
               </div>
             </form>
@@ -1259,7 +1259,7 @@ export default function Users({ branches, fetchBranches, addToast }) {
         <div className="modal-overlay">
           <div className="modal-content" style={{ maxWidth: '500px', width: '100%' }}>
             <div className="modal-header">
-              <h3 className="modal-title">Add New Branch Location</h3>
+              <h3 className="modal-title">New Branch</h3>
               <button 
                 className="btn btn-secondary btn-sm" 
                 onClick={() => {
@@ -1274,14 +1274,14 @@ export default function Users({ branches, fetchBranches, addToast }) {
             <form onSubmit={handleCreateBranch}>
               <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
                 <div className="form-group">
-                  <label>Branch Name *</label>
+                  <label>Name *</label>
                   <div style={{ position: 'relative' }}>
                     <Building size={14} style={{ position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
                     <input
                       type="text"
                       className="input-control"
                       style={{ paddingLeft: '2.5rem' }}
-                      placeholder="Dhanmondi Outlet"
+                      placeholder="Enter branch name"
                       value={branchName}
                       onChange={(e) => setBranchName(e.target.value)}
                       required
@@ -1296,7 +1296,7 @@ export default function Users({ branches, fetchBranches, addToast }) {
                     <textarea
                       className="input-control"
                       style={{ paddingLeft: '2.5rem', minHeight: '80px', resize: 'vertical' }}
-                      placeholder="House 12, Road 4, Dhanmondi, Dhaka"
+                      placeholder="Enter address (optional)..."
                       value={branchAddress}
                       onChange={(e) => setBranchAddress(e.target.value)}
                     />
@@ -1304,14 +1304,14 @@ export default function Users({ branches, fetchBranches, addToast }) {
                 </div>
 
                 <div className="form-group">
-                  <label>Contact Phone</label>
+                  <label>Phone</label>
                   <div style={{ position: 'relative' }}>
                     <Phone size={14} style={{ position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
                     <input
                       type="text"
                       className="input-control"
                       style={{ paddingLeft: '2.5rem' }}
-                      placeholder="+8801700000000"
+                      placeholder="Enter phone (optional)"
                       value={branchPhone}
                       onChange={(e) => setBranchPhone(e.target.value)}
                     />
@@ -1342,7 +1342,7 @@ export default function Users({ branches, fetchBranches, addToast }) {
                   Cancel
                 </button>
                 <button type="submit" className="btn btn-primary" disabled={loading}>
-                  Create Branch
+                  {loading ? 'Saving...' : 'Save Branch'}
                 </button>
               </div>
             </form>

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useLocation } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
+import almasLogo from '../assets/almas_logo.jpg';
 import { Search, ShoppingCart, Trash2, Printer, Plus, UserPlus, CreditCard, RotateCcw, FileText, CheckCircle2, AlertCircle, X, DollarSign, RefreshCw } from 'lucide-react';
 import { TableLoading, LoadingBlock } from '../components/TableLoading';
 import Pagination from '../components/Pagination';
@@ -59,6 +60,24 @@ export default function Sales({ userProfile, branches, addToast }) {
   const [customerType, setCustomerType] = useState('existing'); // 'existing' or 'new'
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCustomerId, setSelectedCustomerId] = useState('');
+  const [cartSearchQuery, setCartSearchQuery] = useState('');
+  const [showCartSearchSuggestions, setShowCartSearchSuggestions] = useState(false);
+  const cartSearchRef = useRef(null);
+
+  // Close search suggestions on outside click
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (cartSearchRef.current && !cartSearchRef.current.contains(event.target)) {
+        setShowCartSearchSuggestions(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('touchstart', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('touchstart', handleClickOutside);
+    };
+  }, []);
 
   // Checkout overlay/popup states
   const [showCheckoutModal, setShowCheckoutModal] = useState(false);
@@ -232,40 +251,61 @@ export default function Sales({ userProfile, branches, addToast }) {
       const { data: items, error } = await supabase
         .from('sale_items')
         .select(`
-          *,
+          id,
+          sale_id,
+          product_id,
+          quantity,
+          unit_price,
+          total_price,
           products (
             id,
+            sku,
+            product_code,
             name,
-            sale_price,
-            unit
+            sale_price
           )
         `)
         .eq('sale_id', sale.id);
 
       if (error) throw error;
 
-      const mappedItems = items.map((item) => ({
+      let fullSale = sale;
+      if (!sale.contacts && sale.customer_id) {
+        const { data: cust } = await supabase
+          .from('contacts')
+          .select('name, phone, address')
+          .eq('id', sale.customer_id)
+          .maybeSingle();
+        if (cust) {
+          fullSale = { ...sale, contacts: cust };
+        }
+      }
+
+      const mappedItems = (items || []).map((item) => ({
+        id: item.id,
         product: {
           id: item.product_id,
+          sku: item.products?.sku || item.products?.product_code || '',
           name: item.products?.name || 'Unknown',
-          sale_price: item.unit_price,
-          unit: item.products?.unit || 'pcs'
+          sale_price: parseFloat(item.unit_price) || parseFloat(item.products?.sale_price) || 0,
+          unit: 'pcs',
         },
-        quantity: item.quantity
+        products: item.products,
+        quantity: parseFloat(item.quantity) || 1,
+        unit_price: parseFloat(item.unit_price) || 0,
+        total_price: parseFloat(item.total_price) || 0,
       }));
 
-      setActiveInvoice(sale);
+      setActiveInvoice(fullSale);
       setInvoiceItems(mappedItems);
       setShowInvoicePrint(true);
     } catch (err) {
-      console.error(err);
+      console.error('Error loading invoice items:', err);
       showMessage('Failed to load invoice items for printing.', 'error');
     } finally {
       setLoading(false);
     }
   };
-
-
 
   const addToCart = (invItem) => {
     const product = invItem.products;
@@ -1032,9 +1072,22 @@ export default function Sales({ userProfile, branches, addToast }) {
 
   // Filter products by search query
   const filteredProducts = products.filter((item) =>
-    item.products?.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    item.products?.sku.toLowerCase().includes(searchQuery.toLowerCase())
+    item.products?.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    item.products?.sku?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    item.products?.product_code?.toLowerCase().includes(searchQuery.toLowerCase())
   );
+
+  // Filter products for quick search & add in cart (mobile and desktop)
+  const filteredCartSearchProducts = products.filter((item) => {
+    if (!cartSearchQuery.trim()) return true; // Initially show available products on click/focus
+    const q = cartSearchQuery.toLowerCase();
+    const p = item.products;
+    return (
+      p?.name?.toLowerCase().includes(q) ||
+      p?.sku?.toLowerCase().includes(q) ||
+      p?.product_code?.toLowerCase().includes(q)
+    );
+  });
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
@@ -1042,10 +1095,10 @@ export default function Sales({ userProfile, branches, addToast }) {
         <div className="page-title-group">
           <h1>Customer Sales Invoices</h1>
         </div>
-        <div className="top-bar-actions" style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
-          {userProfile?.role === 'owner' && (
+        <div className="top-bar-actions" style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+          {userProfile?.role === 'owner' ? (
             <div className="form-group" style={{ marginBottom: 0, flexDirection: 'row', alignItems: 'center', gap: '0.5rem' }}>
-              <label style={{ whiteSpace: 'nowrap' }}>Active Branch:</label>
+              <label style={{ whiteSpace: 'nowrap', fontWeight: 600 }}>Active Branch:</label>
               <select
                 className="input-control"
                 value={selectedBranchId}
@@ -1059,6 +1112,20 @@ export default function Sales({ userProfile, branches, addToast }) {
                 ))}
               </select>
             </div>
+          ) : (
+            <span
+              className="badge"
+              style={{
+                backgroundColor: isFactory ? '#fef3c7' : '#e0f2fe',
+                color: isFactory ? '#92400e' : '#0369a1',
+                border: `1px solid ${isFactory ? '#fde68a' : '#bae6fd'}`,
+                fontSize: '0.82rem',
+                fontWeight: 600,
+                padding: '0.4rem 0.75rem',
+              }}
+            >
+              {isFactory ? '🏭' : '🏪'} {activeBranch?.name || 'My Branch'}
+            </span>
           )}
           {!showInvoicePrint && (
             <button className="btn btn-primary" onClick={() => {
@@ -1079,7 +1146,7 @@ export default function Sales({ userProfile, branches, addToast }) {
       </div>
 
       {/* SALES HISTORY LIST VIEW */}
-      <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+      <div className="no-print card" style={{ padding: 0, overflow: 'hidden' }}>
         <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem', padding: '1rem 1.25rem' }}>
           <h3 className="card-title" style={{ margin: 0 }}>Invoices History</h3>
           <div style={{ position: 'relative', width: '260px' }}>
@@ -1183,14 +1250,14 @@ export default function Sales({ userProfile, branches, addToast }) {
       {/* POS WORKSPACE MODAL */}
       {showPosModal && (
         <div className="modal-overlay">
-          <div className="modal-content modal-xl" style={{ display: 'flex', flexDirection: 'column', maxHeight: '95vh', overflow: 'hidden' }}>
+          <div className="modal-content modal-xl">
             <div className="modal-header">
-              <h3 className="modal-title">Create Sales Invoice (POS)</h3>
+              <h3 className="modal-title">New Invoice (POS)</h3>
               <button className="btn btn-secondary btn-sm" onClick={() => setShowPosModal(false)} style={{ borderRadius: '50%', padding: '0.4rem', border: 'none' }}>✕</button>
             </div>
-            <div className="modal-body pos-layout" style={{ flex: 1, overflowY: 'auto', padding: '1.5rem', margin: 0, background: 'var(--bg-app)' }}>
-              {/* Product Picker */}
-              <div className="pos-catalog">
+            <div className="modal-body pos-layout">
+              {/* Product Picker (Desktop Only) */}
+              <div className="pos-catalog pos-catalog-desktop-only">
                 <div className="card" style={{ padding: '1.25rem' }}>
                   <div className="catalog-search-bar">
                     <div style={{ position: 'relative', width: '100%' }}>
@@ -1199,7 +1266,7 @@ export default function Sales({ userProfile, branches, addToast }) {
                         type="text"
                         className="input-control"
                         style={{ paddingLeft: '2.75rem' }}
-                        placeholder="Search items by SKU, DTM color code, name..."
+                        placeholder="Search products..."
                         value={searchQuery}
                         onChange={(e) => setSearchQuery(e.target.value)}
                       />
@@ -1210,11 +1277,11 @@ export default function Sales({ userProfile, branches, addToast }) {
                 <div className="product-grid">
                   {loadingInventory ? (
                     <div className="card" style={{ gridColumn: '1 / -1' }}>
-                      <LoadingBlock message="Loading branch stock catalog..." />
+                      <LoadingBlock message="Loading stock catalog..." />
                     </div>
                   ) : filteredProducts.length === 0 ? (
                     <div className="card" style={{ gridColumn: '1 / -1', textAlign: 'center', padding: '3rem' }}>
-                      No available items found in this branch's stock.
+                      No available items found.
                     </div>
                   ) : (
                     filteredProducts.map((invItem) => (
@@ -1240,33 +1307,33 @@ export default function Sales({ userProfile, branches, addToast }) {
                 </div>
               </div>
 
-              {/* Cart & Customer Picker */}
+              {/* Cart & Customer Picker (Responsive & Mobile-First) */}
               <div className="pos-cart">
-                <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+                <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
 
                   {/* Customer Selector Type Toggle */}
-                  <div className="form-group" style={{ marginBottom: '0.45rem' }}>
-                    <label style={{ display: 'block', marginBottom: '0.25rem', fontWeight: 600 }}>Buyer Type</label>
+                  <div className="form-group" style={{ marginBottom: '0.25rem' }}>
+                    <label style={{ display: 'block', marginBottom: '0.25rem', fontWeight: 600 }}>Customer Type</label>
                     <select
                       className="input-control"
                       value={customerType}
                       onChange={(e) => setCustomerType(e.target.value)}
                     >
-                      <option value="existing">Existing</option>
-                      <option value="new">New</option>
+                      <option value="existing">Existing Buyer</option>
+                      <option value="new">New Buyer</option>
                     </select>
                   </div>
 
                   {customerType === 'existing' ? (
-                    <div className="form-group" style={{ marginBottom: '0.45rem' }}>
-                      <label>Select Buyer / Client *</label>
+                    <div className="form-group" style={{ marginBottom: '0.25rem' }}>
+                      <label>Customer *</label>
                       <select
                         className="input-control"
                         value={selectedCustomerId}
                         onChange={(e) => setSelectedCustomerId(e.target.value)}
                         required={customerType === 'existing'}
                       >
-                        <option value="">-- Choose Buyer / Client --</option>
+                        <option value="">-- Select Customer --</option>
                         {customers.map((c) => (
                           <option key={c.id} value={c.id}>
                             {c.name} {c.phone ? `(${c.phone})` : ''}
@@ -1275,36 +1342,36 @@ export default function Sales({ userProfile, branches, addToast }) {
                       </select>
                     </div>
                   ) : (
-                    <div style={{ border: '1px solid var(--border-color)', borderRadius: 'var(--border-radius-sm)', padding: '0.5rem', backgroundColor: '#f8fafc', display: 'flex', flexDirection: 'column', gap: '0.35rem', marginBottom: '0.45rem' }}>
-                      <div style={{ fontWeight: 700, fontSize: '0.74rem', color: 'var(--primary)' }}>New Client Registration Info</div>
+                    <div style={{ border: '1px solid var(--border-color)', borderRadius: 'var(--border-radius-sm)', padding: '0.5rem', backgroundColor: '#f8fafc', display: 'flex', flexDirection: 'column', gap: '0.35rem', marginBottom: '0.25rem' }}>
+                      <div style={{ fontWeight: 700, fontSize: '0.74rem', color: 'var(--primary)' }}>New Customer Details</div>
                       <div className="form-group" style={{ marginBottom: 0 }}>
-                        <label>Client Name *</label>
+                        <label>Name *</label>
                         <input
                           type="text"
                           className="input-control"
-                          placeholder="e.g. Arif Uddin"
+                          placeholder="Enter customer name"
                           value={newCustName}
                           onChange={(e) => setNewCustName(e.target.value)}
                           required={customerType === 'new'}
                         />
                       </div>
                       <div className="form-group" style={{ marginBottom: 0 }}>
-                        <label>Client Phone *</label>
+                        <label>Phone *</label>
                         <input
                           type="text"
                           className="input-control"
-                          placeholder="e.g. 018xxxxxxxx"
+                          placeholder="Enter phone number"
                           value={newCustPhone}
                           onChange={(e) => setNewCustPhone(e.target.value)}
                           required={customerType === 'new'}
                         />
                       </div>
                       <div className="form-group" style={{ marginBottom: 0 }}>
-                        <label>Client Address</label>
+                        <label>Address</label>
                         <input
                           type="text"
                           className="input-control"
-                          placeholder="e.g. Dhaka, Bangladesh"
+                          placeholder="Enter address (optional)..."
                           value={newCustAddress}
                           onChange={(e) => setNewCustAddress(e.target.value)}
                         />
@@ -1312,11 +1379,154 @@ export default function Sales({ userProfile, branches, addToast }) {
                     </div>
                   )}
 
+                  {/* QUICK SEARCH & ADD PRODUCT (Mobile & Quick-Desktop) */}
+                  <div ref={cartSearchRef} style={{ position: 'relative', marginBottom: '0.25rem' }}>
+                    <label style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.25rem', fontWeight: 600, fontSize: '0.82rem' }}>
+                      <span>Search & Add Product</span>
+                      <span style={{ fontSize: '0.72rem', color: '#0284c7', fontWeight: 500 }}>
+                        {cartSearchQuery ? 'Matching items' : 'Click to see all items'}
+                      </span>
+                    </label>
+                    <div style={{ position: 'relative' }}>
+                      <Search size={16} style={{ position: 'absolute', left: '0.75rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+                      <input
+                        type="text"
+                        className="input-control"
+                        placeholder="Search product code, name or SKU..."
+                        value={cartSearchQuery}
+                        onChange={(e) => {
+                          setCartSearchQuery(e.target.value);
+                          setShowCartSearchSuggestions(true);
+                        }}
+                        onFocus={() => setShowCartSearchSuggestions(true)}
+                        onClick={() => setShowCartSearchSuggestions(true)}
+                        style={{ paddingLeft: '2.25rem', paddingRight: cartSearchQuery ? '2rem' : '0.65rem', fontSize: '0.85rem' }}
+                      />
+                      {cartSearchQuery && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setCartSearchQuery('');
+                            setShowCartSearchSuggestions(false);
+                          }}
+                          style={{
+                            position: 'absolute',
+                            right: '0.5rem',
+                            top: '50%',
+                            transform: 'translateY(-50%)',
+                            background: 'none',
+                            border: 'none',
+                            color: 'var(--text-muted)',
+                            cursor: 'pointer',
+                            padding: '0.2rem',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center'
+                          }}
+                        >
+                          <X size={14} />
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Autocomplete Suggestions Popup */}
+                    {showCartSearchSuggestions && (
+                      <div
+                        className="pos-search-dropdown"
+                        style={{
+                          position: 'absolute',
+                          top: '100%',
+                          left: 0,
+                          right: 0,
+                          backgroundColor: '#ffffff',
+                          border: '1.5px solid #0284c7',
+                          borderRadius: 'var(--border-radius-sm)',
+                          boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.2), 0 8px 10px -6px rgba(0, 0, 0, 0.1)',
+                          maxHeight: '260px',
+                          overflowY: 'auto',
+                          zIndex: 1000,
+                          marginTop: '0.25rem'
+                        }}
+                      >
+                        {!cartSearchQuery.trim() && (
+                          <div style={{ padding: '0.4rem 0.85rem', backgroundColor: '#f8fafc', fontSize: '0.72rem', fontWeight: 700, color: '#0369a1', textTransform: 'uppercase', letterSpacing: '0.5px', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between' }}>
+                            <span>Available Products ({products.length})</span>
+                            <span style={{ fontWeight: 500, color: 'var(--text-muted)' }}>Tap to add</span>
+                          </div>
+                        )}
+                        {filteredCartSearchProducts.length === 0 ? (
+                          <div style={{ padding: '0.85rem', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.82rem' }}>
+                            No products matching "{cartSearchQuery}"
+                          </div>
+                        ) : (
+                          filteredCartSearchProducts.map((invItem) => {
+                            const isOutOfStock = !isFactory && invItem.quantity <= 0;
+                            return (
+                              <div
+                                key={invItem.product_id}
+                                onClick={() => {
+                                  if (isOutOfStock) {
+                                    showMessage('This item is currently out of stock.', 'error');
+                                    return;
+                                  }
+                                  addToCart(invItem);
+                                  setCartSearchQuery('');
+                                  setShowCartSearchSuggestions(false);
+                                }}
+                                style={{
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'space-between',
+                                  padding: '0.65rem 0.85rem',
+                                  borderBottom: '1px solid var(--border-color)',
+                                  cursor: isOutOfStock ? 'not-allowed' : 'pointer',
+                                  opacity: isOutOfStock ? 0.6 : 1,
+                                  backgroundColor: '#ffffff',
+                                  transition: 'background-color 0.15s ease'
+                                }}
+                                onMouseEnter={(e) => { if (!isOutOfStock) e.currentTarget.style.backgroundColor = '#f0f9ff'; }}
+                                onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = '#ffffff'; }}
+                              >
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.15rem', maxWidth: '65%' }}>
+                                  <div style={{ fontWeight: 600, fontSize: '0.84rem', color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                    {invItem.products?.name}
+                                  </div>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                                    <span style={{ fontFamily: 'monospace', fontWeight: 600, color: '#0284c7' }}>
+                                      {invItem.products?.sku || invItem.products?.product_code || 'NO-SKU'}
+                                    </span>
+                                    <span>•</span>
+                                    <span style={{ color: isOutOfStock ? 'var(--danger)' : 'var(--text-secondary)' }}>
+                                      {isFactory ? 'Direct Order' : `Stock: ${invItem.quantity} ${invItem.products?.unit || 'pcs'}`}
+                                    </span>
+                                  </div>
+                                </div>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+                                  <span style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 700, color: '#0284c7', fontSize: '0.95rem' }}>
+                                    ৳{(invItem.products?.sale_price || 0).toFixed(2)}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    className="btn btn-primary btn-sm"
+                                    disabled={isOutOfStock}
+                                    style={{ padding: '0.25rem 0.55rem', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.2rem' }}
+                                  >
+                                    <Plus size={13} /> Add
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          })
+                        )}
+                      </div>
+                    )}
+                  </div>
+
                   {/* Cart List */}
                   <div className="cart-items-list">
                     {cart.length === 0 ? (
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text-muted)', fontSize: '0.95rem' }}>
-                        Cart is empty. Click products on the left to add items.
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text-muted)', fontSize: '0.88rem', padding: '1.5rem 0', textAlign: 'center' }}>
+                        Cart is empty. Search above to add items to invoice.
                       </div>
                     ) : (
                       cart.map((item) => (
@@ -1333,7 +1543,7 @@ export default function Sales({ userProfile, branches, addToast }) {
                                 value={item.unitPrice !== undefined ? item.unitPrice : (item.product.sale_price || 0)}
                                 onChange={(e) => handleCustomPriceChange(item.product.id, e.target.value)}
                                 onBlur={() => handlePriceBlur(item.product.id)}
-                                title="Custom Unit Sale Price"
+                                title="Unit Sale Price"
                                 placeholder="Price"
                               />
                               <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>/ {item.product.unit || 'pcs'}</span>
@@ -1357,7 +1567,7 @@ export default function Sales({ userProfile, branches, addToast }) {
                               value={item.quantity}
                               onChange={(e) => handleCustomQtyChange(item.product.id, e.target.value)}
                               onBlur={() => handleQtyBlur(item.product.id)}
-                              title={`Enter quantity (Available stock: ${item.stockLimit})`}
+                              title={`Enter quantity (Available: ${item.stockLimit})`}
                             />
                             <button
                               type="button"
@@ -1423,7 +1633,7 @@ export default function Sales({ userProfile, branches, addToast }) {
                         style={{ marginTop: '0.5rem', padding: '0.8rem', fontWeight: 700 }}
                         onClick={() => {
                           if (!selectedCustomerId) {
-                            showMessage('Please select a Buyer / Client before checkout.', 'error');
+                            showMessage('Please select a customer before checkout.', 'error');
                             return;
                           }
                           setPaidAmount(getGrandTotal().toFixed(2));
@@ -1432,7 +1642,7 @@ export default function Sales({ userProfile, branches, addToast }) {
                           setShowCheckoutModal(true);
                         }}
                       >
-                        Proceed to Payment
+                        Checkout
                       </button>
                     </div>
                   )}
@@ -1452,7 +1662,7 @@ export default function Sales({ userProfile, branches, addToast }) {
             <div className="modal-header">
               <h3 className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
                 <CreditCard size={18} style={{ color: 'var(--primary-color)' }} />
-                Payment & Checkout
+                Checkout
               </h3>
               <button className="btn btn-secondary btn-sm" onClick={() => setShowCheckoutModal(false)} style={{ borderRadius: '50%', padding: '0.4rem', border: 'none' }}>✕</button>
             </div>
@@ -1564,8 +1774,8 @@ export default function Sales({ userProfile, branches, addToast }) {
                       onChange={(e) => setPaymentMethod(e.target.value)}
                     >
                       <option value="cash">Cash</option>
-                      <option value="mobile_banking">bKash / Nagad</option>
-                      <option value="bank">Bank Transfer</option>
+                      <option value="mobile_banking">Mobile Banking (bKash/Nagad)</option>
+                      <option value="bank">Bank</option>
                     </select>
                   </div>
                 </div>
@@ -1589,7 +1799,7 @@ export default function Sales({ userProfile, branches, addToast }) {
                         alignItems: 'center'
                       }}>
                         <span style={{ color: '#dc2626', fontWeight: 600, fontSize: '0.85rem' }}>
-                          Due Balance:
+                          Due:
                         </span>
                         <span style={{ color: '#dc2626', fontFamily: 'Outfit, sans-serif', fontWeight: 800, fontSize: '1.1rem' }}>
                           ৳{due.toFixed(2)}
@@ -1608,7 +1818,7 @@ export default function Sales({ userProfile, branches, addToast }) {
                         alignItems: 'center'
                       }}>
                         <span style={{ color: '#2563eb', fontWeight: 600, fontSize: '0.85rem' }}>
-                          Overpaid (Change):
+                          Change:
                         </span>
                         <span style={{ color: '#2563eb', fontFamily: 'Outfit, sans-serif', fontWeight: 800, fontSize: '1.1rem' }}>
                           ৳{overpaid.toFixed(2)}
@@ -1641,12 +1851,12 @@ export default function Sales({ userProfile, branches, addToast }) {
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
                   <div className="form-group" style={{ marginBottom: 0 }}>
                     <label style={{ fontSize: '0.78rem', color: 'var(--text-muted)', display: 'block', marginBottom: '0.2rem' }}>
-                      Reference / Trx ID
+                      Reference No
                     </label>
                     <input
                       type="text"
                       className="input-control"
-                      placeholder="Optional"
+                      placeholder="e.g. Trx ID"
                       style={{ fontSize: '0.82rem', padding: '0.35rem 0.5rem' }}
                       value={referenceNumber}
                       onChange={(e) => setReferenceNumber(e.target.value)}
@@ -1660,7 +1870,7 @@ export default function Sales({ userProfile, branches, addToast }) {
                     <input
                       type="text"
                       className="input-control"
-                      placeholder="Optional"
+                      placeholder="Enter notes (optional)..."
                       style={{ fontSize: '0.82rem', padding: '0.35rem 0.5rem' }}
                       value={notes}
                       onChange={(e) => setNotes(e.target.value)}
@@ -1688,12 +1898,15 @@ export default function Sales({ userProfile, branches, addToast }) {
           </div>
         </div>
       )}
-      {/* INVOICE PRINT MODAL */}
+      {/* SALES CHALLAN PRINT MODAL */}
       {showInvoicePrint && activeInvoice && (
         <div className="modal-overlay">
-          <div className="modal-content" style={{ maxWidth: '800px', width: '90%', maxHeight: '95vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+          <div className="modal-content" style={{ maxWidth: '850px', width: '95%', maxHeight: '95vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
             <div className="modal-header no-print">
-              <h3 className="modal-title">Receipt / Invoice Print Preview</h3>
+              <h3 className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                <Printer size={18} />
+                <span>Sales Challan Print Preview — {activeInvoice.invoice_number || `INV#${activeInvoice.id.substring(0, 8).toUpperCase()}`}</span>
+              </h3>
               <button 
                 className="btn btn-secondary btn-sm" 
                 onClick={() => setShowInvoicePrint(false)}
@@ -1703,107 +1916,278 @@ export default function Sales({ userProfile, branches, addToast }) {
               </button>
             </div>
             
-            <div className="modal-body" style={{ overflowY: 'auto', padding: '1.5rem' }}>
-              <div className="invoice-print-view" style={{ margin: 0, border: 'none', boxShadow: 'none' }}>
-                <div className="invoice-header">
-                  <div className="invoice-company-details">
-                    <div className="invoice-company-name">ALMAS ACCESSORIES</div>
-                    <div>{activeBranch ? activeBranch.name : 'Main Factory Outlet'}</div>
-                    {activeBranch?.phone && <div>Phone: {activeBranch.phone}</div>}
-                    {activeBranch?.address && <div>Address: {activeBranch.address}</div>}
-                  </div>
-                  <div className="invoice-meta">
-                    <div className="invoice-title">INVOICE</div>
-                    <div style={{ fontFamily: 'monospace', fontWeight: 700 }}>
-                      {activeInvoice.invoice_number || `INV#${activeInvoice.id.substring(0, 8).toUpperCase()}`}
+            <div className="modal-body" style={{ overflowY: 'auto', padding: '1.25rem', backgroundColor: '#f8fafc' }}>
+              <div 
+                className="invoice-print-view" 
+                style={{ 
+                  margin: '0 auto', 
+                  border: '1px solid #000', 
+                  backgroundColor: '#ffffff',
+                  padding: '0.8rem 1rem',
+                  position: 'relative',
+                  color: '#000',
+                  boxShadow: '0 2px 8px rgba(0,0,0,0.06)'
+                }}
+              >
+                {/* WATERMARK */}
+                <div style={{
+                  position: 'absolute',
+                  top: '55%',
+                  left: '50%',
+                  transform: 'translate(-50%, -50%) rotate(-25deg)',
+                  fontSize: '3.8rem',
+                  fontWeight: 900,
+                  color: 'rgba(0, 0, 0, 0.04)',
+                  letterSpacing: '10px',
+                  textTransform: 'uppercase',
+                  pointerEvents: 'none',
+                  whiteSpace: 'nowrap',
+                  border: '4px solid rgba(0,0,0,0.04)',
+                  padding: '0.5rem 2.5rem',
+                  borderRadius: '12px',
+                  fontFamily: 'Outfit, sans-serif'
+                }}>
+                  SALES CHALLAN
+                </div>
+
+                {/* 1. TOP HEADER WITH OFFICIAL LOGO & TITLE */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1.5px solid #000', paddingBottom: '0.3rem' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.55rem' }}>
+                    <img 
+                      src={almasLogo} 
+                      alt="Almas Logo" 
+                      style={{ width: '38px', height: '38px', objectFit: 'contain', border: '1px solid #000', padding: '1px', background: '#fff', borderRadius: '3px' }} 
+                    />
+                    <div>
+                      <h1 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 900, letterSpacing: '0.2px', color: '#000', textTransform: 'uppercase', fontFamily: 'Outfit, sans-serif', lineHeight: 1.1 }}>
+                        ALMAS ACCESSORIES INDUSTRIES
+                      </h1>
+                      <div style={{ fontSize: '0.68rem', fontWeight: 600, color: '#334155', fontStyle: 'italic', marginTop: '0.05rem' }}>
+                        100% Export Oriented Garments Accessories Industries
+                      </div>
                     </div>
-                    <div>Date: {new Date(activeInvoice.sale_date).toLocaleDateString()}</div>
+                  </div>
+
+                  {/* DISTINCTIVE SALES CHALLAN PILL BADGE */}
+                  <div style={{
+                    border: '1.5px solid #000',
+                    borderRadius: '9999px',
+                    padding: '0.2rem 0.85rem',
+                    textAlign: 'center',
+                    backgroundColor: '#ffffff',
+                    boxShadow: 'inset 0 0 0 1px #fff, inset 0 0 0 2px #000',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}>
+                    <span style={{
+                      fontFamily: '"Times New Roman", Times, Georgia, serif',
+                      fontSize: '0.85rem',
+                      fontWeight: 900,
+                      fontStyle: 'italic',
+                      letterSpacing: '1px',
+                      color: '#000',
+                      textTransform: 'uppercase',
+                      padding: '0 0.1rem',
+                      lineHeight: 1
+                    }}>
+                      SALES CHALLAN
+                    </span>
                   </div>
                 </div>
 
-                <div className="invoice-details-grid">
-                  <div className="invoice-bill-to">
-                    <div style={{ fontWeight: 700, textTransform: 'uppercase', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Bill To:</div>
-                    <div style={{ fontWeight: 600, fontSize: '1.05rem' }}>{activeInvoice.contacts?.name}</div>
-                    {activeInvoice.contacts?.phone && <div>Phone: {activeInvoice.contacts.phone}</div>}
-                    {activeInvoice.contacts?.address && <div>Address: {activeInvoice.contacts.address}</div>}
+                {/* 2. CHALLAN METADATA GRID */}
+                <div style={{ marginTop: '0.32rem', display: 'flex', flexDirection: 'column', gap: '0.18rem', fontSize: '0.76rem', lineHeight: 1.2 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div style={{ display: 'flex', gap: '0.3rem', width: '58%' }}>
+                      <span style={{ fontWeight: 700, whiteSpace: 'nowrap' }}>Challan No. :</span>
+                      <span style={{ fontWeight: 800, fontFamily: 'Outfit, sans-serif', letterSpacing: '0.2px', borderBottom: '1px dotted #000', flex: 1, paddingLeft: '0.2rem' }}>
+                        {activeInvoice.invoice_number || `INV#${activeInvoice.id.substring(0, 8).toUpperCase()}`}
+                      </span>
+                    </div>
+
+                    <div style={{ display: 'flex', gap: '0.3rem', width: '38%' }}>
+                      <span style={{ fontWeight: 700, whiteSpace: 'nowrap' }}>Date :</span>
+                      <span style={{ borderBottom: '1px dotted #000', flex: 1, paddingLeft: '0.2rem', fontWeight: 700 }}>
+                        {new Date(activeInvoice.sale_date).toLocaleDateString('en-GB')}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div style={{ display: 'flex', gap: '0.3rem', width: '58%' }}>
+                      <span style={{ fontWeight: 700, whiteSpace: 'nowrap' }}>Messrs :</span>
+                      <span style={{ fontWeight: 800, borderBottom: '1px dotted #000', flex: 1, paddingLeft: '0.2rem', fontSize: '0.84rem' }}>
+                        {activeInvoice.contacts?.name || ''}
+                      </span>
+                    </div>
+                    <div style={{ display: 'flex', gap: '0.3rem', width: '38%' }}>
+                      <span style={{ fontWeight: 700, whiteSpace: 'nowrap' }}>Branch :</span>
+                      <span style={{ borderBottom: '1px dotted #000', flex: 1, paddingLeft: '0.2rem', fontWeight: 700 }}>
+                        {branches.find((b) => b.id === activeInvoice.branch_id)?.name || branches.find((b) => b.id === selectedBranchId)?.name || ''}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div style={{ display: 'flex', gap: '0.3rem', width: '58%' }}>
+                      <span style={{ fontWeight: 700, whiteSpace: 'nowrap' }}>Address :</span>
+                      <span style={{ borderBottom: '1px dotted #000', flex: 1, paddingLeft: '0.2rem' }}>
+                        {activeInvoice.contacts?.address || ''}
+                      </span>
+                    </div>
+                    <div style={{ display: 'flex', gap: '0.3rem', width: '38%' }}>
+                      <span style={{ fontWeight: 700, whiteSpace: 'nowrap' }}>Location :</span>
+                      <span style={{ borderBottom: '1px dotted #000', flex: 1, paddingLeft: '0.2rem', fontWeight: 600 }}>
+                        {branches.find((b) => b.id === activeInvoice.branch_id)?.address || branches.find((b) => b.id === selectedBranchId)?.address || ''}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div style={{ display: 'flex', gap: '0.3rem', width: '58%' }}>
+                      <span style={{ fontWeight: 700, whiteSpace: 'nowrap' }}>Export L/c. No. :</span>
+                      <span style={{ borderBottom: '1px dotted #000', flex: 1 }}></span>
+                    </div>
+
+                    <div style={{ display: 'flex', gap: '0.3rem', width: '38%' }}>
+                      <span style={{ fontWeight: 700, whiteSpace: 'nowrap' }}>L/c. No. :</span>
+                      <span style={{ borderBottom: '1px dotted #000', flex: 1 }}></span>
+                    </div>
                   </div>
                 </div>
 
-                <table className="invoice-table" style={{ marginTop: '1rem' }}>
+                {/* 3. GOODS TABLE */}
+                <table 
+                  style={{ 
+                    width: '100%', 
+                    borderCollapse: 'collapse', 
+                    marginTop: '0.85rem', 
+                    border: '1.5px solid #000',
+                    fontSize: '0.84rem'
+                  }}
+                >
                   <thead>
-                    <tr>
-                      <th style={{ width: '50px' }}>SL</th>
-                      <th>Thread / Accessory</th>
-                      <th style={{ textAlign: 'center', width: '100px' }}>Quantity</th>
-                      <th style={{ textAlign: 'right', width: '120px' }}>Price</th>
-                      <th style={{ textAlign: 'right', width: '140px' }}>Total</th>
+                    <tr style={{ borderBottom: '1.5px solid #000', backgroundColor: '#f1f5f9' }}>
+                      <th style={{ width: '45px', borderRight: '1px solid #000', padding: '0.45rem 0.35rem', textAlign: 'center', fontWeight: 800 }}>Sl. No.</th>
+                      <th style={{ borderRight: '1px solid #000', padding: '0.45rem 0.5rem', textAlign: 'left', fontWeight: 800 }}>Description of Goods</th>
+                      <th style={{ width: '100px', borderRight: '1px solid #000', padding: '0.45rem 0.5rem', textAlign: 'center', fontWeight: 800 }}>Size / Code</th>
+                      <th style={{ width: '85px', borderRight: '1px solid #000', padding: '0.45rem 0.5rem', textAlign: 'center', fontWeight: 800 }}>Quantity</th>
+                      <th style={{ width: '95px', borderRight: '1px solid #000', padding: '0.45rem 0.5rem', textAlign: 'right', fontWeight: 800 }}>Price (৳)</th>
+                      <th style={{ width: '110px', padding: '0.45rem 0.5rem', textAlign: 'right', fontWeight: 800 }}>Total (৳)</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {invoiceItems.map((item, index) => (
-                      <tr key={item.id || index}>
-                        <td>{index + 1}</td>
-                        <td>
-                          <div style={{ fontWeight: 600 }}>{item.products?.name || item.product?.name || (item.product && item.product.name)}</div>
-                          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                            SKU: {item.products?.sku || item.product?.sku || (item.product && item.product.sku)}
-                          </div>
-                        </td>
-                        <td style={{ textAlign: 'center' }}>{item.quantity}</td>
-                        <td style={{ textAlign: 'right' }}>
-                          ৳{(item.unit_price || (item.product && item.product.sale_price) || 0).toFixed(2)}
-                        </td>
-                        <td style={{ textAlign: 'right', fontWeight: 600 }}>
-                          ৳{((item.unit_price || (item.product && item.product.sale_price) || 0) * item.quantity).toFixed(2)}
-                        </td>
-                      </tr>
-                    ))}
+                    {invoiceItems.map((item, index) => {
+                      const qty = parseFloat(item.quantity) || 1;
+                      const price = parseFloat(item.unit_price || item.product?.sale_price || 0);
+                      const total = parseFloat(item.total_price || (qty * price));
+                      return (
+                        <tr key={item.id || index} style={{ borderBottom: '1px solid #cbd5e1' }}>
+                          <td style={{ textAlign: 'center', borderRight: '1px solid #000', padding: '0.45rem 0.35rem', fontWeight: 600 }}>
+                            {index + 1}
+                          </td>
+                          <td style={{ borderRight: '1px solid #000', padding: '0.45rem 0.5rem' }}>
+                            <div style={{ fontWeight: 700 }}>{item.products?.name || item.product?.name || 'Item'}</div>
+                            <div style={{ fontSize: '0.72rem', color: '#475569' }}>
+                              Code: {item.products?.product_code || item.products?.sku || item.product?.sku || 'N/A'}
+                            </div>
+                          </td>
+                          <td style={{ textAlign: 'center', borderRight: '1px solid #000', padding: '0.45rem 0.5rem', fontSize: '0.78rem', fontWeight: 600 }}>
+                            {item.products?.category || item.product?.category || item.products?.sku || '120/2'}
+                          </td>
+                          <td style={{ textAlign: 'center', borderRight: '1px solid #000', padding: '0.45rem 0.5rem', fontWeight: 800 }}>
+                            {qty}
+                          </td>
+                          <td style={{ textAlign: 'right', borderRight: '1px solid #000', padding: '0.45rem 0.5rem' }}>
+                            ৳{price.toFixed(2)}
+                          </td>
+                          <td style={{ textAlign: 'right', padding: '0.45rem 0.5rem', fontWeight: 700 }}>
+                            ৳{total.toFixed(2)}
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
 
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', width: '280px', alignSelf: 'flex-end', marginTop: '1rem' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span>Subtotal:</span>
-                    <span>৳{(activeInvoice.total_amount || 0).toFixed(2)}</span>
-                  </div>
-                  {activeInvoice.discount > 0 && (
-                    <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--danger-text)' }}>
-                      <span>Discount:</span>
-                      <span>-৳{activeInvoice.discount.toFixed(2)}</span>
-                    </div>
-                  )}
-                  {activeInvoice.tax > 0 && (
+                {/* 4. TOTALS & BILLING SUMMARY */}
+                <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'flex-start', marginTop: '0.75rem' }}>
+                  <div style={{ width: '260px', display: 'flex', flexDirection: 'column', gap: '0.25rem', fontSize: '0.85rem', border: '1px solid #000', padding: '0.65rem 0.85rem', borderRadius: '4px', backgroundColor: '#fdfdfd' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span>Tax:</span>
-                      <span>৳{activeInvoice.tax.toFixed(2)}</span>
+                      <span style={{ fontWeight: 600 }}>Subtotal:</span>
+                      <span>৳{(activeInvoice.total_amount || 0).toFixed(2)}</span>
                     </div>
-                  )}
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 800, borderTop: '2px solid var(--text-primary)', paddingTop: '0.5rem', fontSize: '1.15rem' }}>
-                    <span>Grand Total:</span>
-                    <span>৳{(activeInvoice.net_amount || 0).toFixed(2)}</span>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--success-text)', fontSize: '0.95rem' }}>
-                    <span>Paid Amount:</span>
-                    <span>৳{(activeInvoice.paid_amount || 0).toFixed(2)}</span>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--warning-text)', fontWeight: 600, fontSize: '0.95rem' }}>
-                    <span>Due Balance:</span>
-                    <span>৳{Math.max(0, (activeInvoice.net_amount || 0) - (activeInvoice.paid_amount || 0)).toFixed(2)}</span>
+                    {activeInvoice.discount > 0 && (
+                      <div style={{ display: 'flex', justifyContent: 'space-between', color: '#dc2626' }}>
+                        <span>Discount:</span>
+                        <span>-৳{activeInvoice.discount.toFixed(2)}</span>
+                      </div>
+                    )}
+                    {activeInvoice.tax > 0 && (
+                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <span>Tax / VAT:</span>
+                        <span>৳{activeInvoice.tax.toFixed(2)}</span>
+                      </div>
+                    )}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 900, borderTop: '1.5px solid #000', paddingTop: '0.35rem', fontSize: '0.98rem' }}>
+                      <span>Total Bill:</span>
+                      <span>৳{(activeInvoice.net_amount || 0).toFixed(2)}</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', color: '#059669', fontWeight: 700 }}>
+                      <span>Paid Amount:</span>
+                      <span>৳{(activeInvoice.paid_amount || 0).toFixed(2)}</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', color: (activeInvoice.net_amount - activeInvoice.paid_amount) > 0 ? '#dc2626' : '#000', fontWeight: 800 }}>
+                      <span>Due Balance:</span>
+                      <span>৳{Math.max(0, (activeInvoice.net_amount || 0) - (activeInvoice.paid_amount || 0)).toFixed(2)}</span>
+                    </div>
                   </div>
                 </div>
 
-                <div style={{ borderTop: '1px dashed var(--border-color)', paddingTop: '1.5rem', textAlign: 'center', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
-                  Thank you for shopping with Almas Accessories!
+                {/* 5. FOUR SIGNATURE BOXES */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '0.75rem', marginTop: '3.5rem', textAlign: 'center', fontSize: '0.78rem' }}>
+                  <div>
+                    <div style={{ borderTop: '1px dotted #000', paddingTop: '0.35rem', fontWeight: 700 }}>Receiver's Signature</div>
+                  </div>
+                  <div>
+                    <div style={{ borderTop: '1px dotted #000', paddingTop: '0.35rem', fontWeight: 700 }}>Prepared by</div>
+                  </div>
+                  <div>
+                    <div style={{ borderTop: '1px dotted #000', paddingTop: '0.35rem', fontWeight: 700 }}>Store Incharge</div>
+                  </div>
+                  <div>
+                    <div style={{ borderTop: '1px dotted #000', paddingTop: '0.35rem', fontWeight: 700 }}>Authorised Signature</div>
+                  </div>
                 </div>
+
+                {/* 6. BOTTOM OFFICIAL FACTORY / BRANCH FOOTER */}
+                {(() => {
+                  const currentBranch = branches.find((b) => b.id === activeInvoice?.branch_id) || branches.find((b) => b.id === selectedBranchId);
+                  const isFactoryBranch = currentBranch ? Boolean(currentBranch.is_factory) : true;
+                  const label = isFactoryBranch ? 'Office & Factory' : 'Showroom';
+                  const branchAddr = currentBranch?.address || '604/750, Najir Ahamed Mistiri Sodok, West Jharnapara, Baro Quarter, Doublemooring, Chattogram, Bangladesh.';
+                  const branchCell = currentBranch?.phone || '01819-898617, 01845-069803';
+
+                  return (
+                    <div style={{ borderTop: '1.5px solid #000', marginTop: '1.25rem', paddingTop: '0.5rem', textAlign: 'center', fontSize: '0.74rem', color: '#1e293b', lineHeight: 1.4 }}>
+                      <div style={{ fontWeight: 700 }}>
+                        {label} : {branchAddr} &nbsp;|&nbsp; Cell : {branchCell}
+                      </div>
+                      <div style={{ color: '#475569' }}>
+                        E-mail : almasaccessoriesind@gmail.com, Web : www.almasaccessories.com
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
             </div>
 
             <div className="modal-footer no-print">
               <button type="button" className="btn btn-secondary" onClick={() => setShowInvoicePrint(false)}>Close</button>
-              <button type="button" className="btn btn-primary" onClick={handlePrint}>
+              <button type="button" className="btn btn-primary" onClick={handlePrint} style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
                 <Printer size={16} />
-                <span>Print Invoice</span>
+                <span>Print Sales Challan</span>
               </button>
             </div>
           </div>
@@ -2147,8 +2531,35 @@ export default function Sales({ userProfile, branches, addToast }) {
                                       style={{ width: '60px', textAlign: 'center', padding: '0.2rem' }}
                                     />
                                   </td>
-                                  <td style={{ textAlign: 'right' }}>৳{it.unit_price.toFixed(2)}</td>
-                                  <td style={{ textAlign: 'right', fontWeight: 700 }}>৳{(it.quantity * it.unit_price).toFixed(2)}</td>
+                                  <td style={{ textAlign: 'right' }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '0.15rem' }}>
+                                      <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>৳</span>
+                                      <input
+                                        type="number"
+                                        min="0"
+                                        step="any"
+                                        value={it.unit_price === '' ? '' : it.unit_price}
+                                        onChange={(e) => {
+                                          const val = e.target.value;
+                                          setExchangeCart(
+                                            exchangeCart.map((c, i) => {
+                                              if (i === idx) {
+                                                if (val === '') return { ...c, unit_price: '' };
+                                                const parsed = parseFloat(val);
+                                                return { ...c, unit_price: isNaN(parsed) ? 0 : parsed };
+                                              }
+                                              return c;
+                                            })
+                                          );
+                                        }}
+                                        className="input-control"
+                                        style={{ width: '70px', textAlign: 'right', padding: '0.2rem 0.35rem', fontSize: '0.82rem' }}
+                                      />
+                                    </div>
+                                  </td>
+                                  <td style={{ textAlign: 'right', fontWeight: 700 }}>
+                                    ৳{((parseFloat(it.quantity) || 0) * (parseFloat(it.unit_price) || 0)).toFixed(2)}
+                                  </td>
                                   <td>
                                     <button
                                       type="button"
@@ -2370,7 +2781,7 @@ export default function Sales({ userProfile, branches, addToast }) {
                     <div className="invoice-title" style={{ color: activeCreditNote.type === 'exchange' ? '#2563eb' : '#b45309' }}>
                       {activeCreditNote.type === 'exchange' ? 'EXCHANGE VOUCHER' : 'CREDIT NOTE'}
                     </div>
-                    <div style={{ fontFamily: 'monospace', fontWeight: 700 }}>
+                    <div style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 800, letterSpacing: '0.2px' }}>
                       {activeCreditNote.creditNoteNumber}
                     </div>
                     <div>Date: {new Date(activeCreditNote.date).toLocaleDateString()}</div>
@@ -2504,18 +2915,37 @@ export default function Sales({ userProfile, branches, addToast }) {
                   )}
                 </div>
 
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '3.5rem', paddingTop: '1rem', borderTop: '1px solid var(--border-color)', fontSize: '0.85rem' }}>
-                  <div style={{ textAlign: 'center', width: '180px' }}>
-                    <div style={{ borderTop: '1px dashed var(--text-muted)', paddingTop: '0.4rem', fontWeight: 600 }}>Customer Signature</div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '3.5rem', paddingTop: '0.5rem' }}>
+                  <div style={{ textAlign: 'center', width: '150px', borderTop: '1px dotted #000' }}>
+                    <p style={{ margin: '0.35rem 0', fontSize: '0.78rem', fontWeight: 700 }}>Customer Signature</p>
                   </div>
-                  <div style={{ textAlign: 'center', width: '180px' }}>
-                    <div style={{ borderTop: '1px dashed var(--text-muted)', paddingTop: '0.4rem', fontWeight: 600 }}>Store In-Charge</div>
+                  <div style={{ textAlign: 'center', width: '150px', borderTop: '1px dotted #000' }}>
+                    <p style={{ margin: '0.35rem 0', fontSize: '0.78rem', fontWeight: 700 }}>Store In-Charge</p>
+                  </div>
+                  <div style={{ textAlign: 'center', width: '150px', borderTop: '1px dotted #000' }}>
+                    <p style={{ margin: '0.35rem 0', fontSize: '0.78rem', fontWeight: 700 }}>Authorised Signature</p>
                   </div>
                 </div>
 
-                <div style={{ borderTop: '1px dashed var(--border-color)', marginTop: '2rem', paddingTop: '1rem', textAlign: 'center', color: 'var(--text-secondary)', fontSize: '0.82rem' }}>
-                  This is an official voucher issued by Almas Accessories for returned / exchanged merchandise.
-                </div>
+                {/* Official Footer */}
+                {(() => {
+                  const currentBranch = branches.find((b) => b.id === activeCreditNote?.sale?.branch_id) || activeBranch;
+                  const isFactoryBranch = currentBranch ? Boolean(currentBranch.is_factory) : true;
+                  const label = isFactoryBranch ? 'Office & Factory' : 'Showroom';
+                  const branchAddr = currentBranch?.address || '604/750, Najir Ahamed Mistiri Sodok, West Jharnapara, Baro Quarter, Doublemooring, Chattogram, Bangladesh.';
+                  const branchCell = currentBranch?.phone || '01819-898617, 01845-069803';
+
+                  return (
+                    <div style={{ borderTop: '1.5px solid #000', marginTop: '1.5rem', paddingTop: '0.5rem', textAlign: 'center', fontSize: '0.74rem', color: '#1e293b', lineHeight: 1.4 }}>
+                      <div style={{ fontWeight: 700 }}>
+                        {label} : {branchAddr} &nbsp;|&nbsp; Cell : {branchCell}
+                      </div>
+                      <div style={{ color: '#475569' }}>
+                        E-mail : almasaccessoriesind@gmail.com, Web : www.almasaccessories.com
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
             </div>
 
