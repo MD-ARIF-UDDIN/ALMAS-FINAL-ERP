@@ -3507,7 +3507,7 @@ export default function Sales({ userProfile, branches, addToast }) {
                 </div>
               </div>
 
-              {/* TABLE 2: CURRENT INVOICE ITEMS (RETAINED + REPLACEMENTS) */}
+              {/* TABLE 2 & TOTALS: CURRENT INVOICE ITEMS (RETAINED + REPLACEMENTS) */}
               {(() => {
                 // 1. Retained original items (initial qty - returned)
                 const retainedItems = saleDetailItems
@@ -3546,116 +3546,135 @@ export default function Sales({ userProfile, branches, addToast }) {
                 });
 
                 const currentItems = [...retainedItems, ...replacementItems];
+                const currentSubtotal = currentItems.reduce((acc, it) => acc + it.total, 0);
+                const initialSubtotal = saleDetailItems.reduce((acc, it) => acc + ((parseFloat(it.quantity) || 0) * (parseFloat(it.unit_price) || 0)), 0) || (selectedSaleForDetails.total_amount || 0);
+                const hasModifications = saleDetailReturns.length > 0 || saleDetailReplacements.length > 0;
+                
+                const discount = parseFloat(selectedSaleForDetails.discount) || 0;
+                const tax = parseFloat(selectedSaleForDetails.tax) || 0;
+                const currentNet = hasModifications 
+                  ? Math.max(0, currentSubtotal - discount + tax)
+                  : (parseFloat(selectedSaleForDetails.net_amount) || Math.max(0, currentSubtotal - discount + tax));
+                const paidAmount = parseFloat(selectedSaleForDetails.paid_amount) || 0;
+                const currentDue = Math.max(0, currentNet - paidAmount);
 
                 return (
-                  <div>
-                    <div style={{ fontWeight: 700, fontSize: '0.88rem', marginBottom: '0.4rem', color: '#0284c7', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                      <span>New Products (Current Invoice Items)</span>
-                      <span style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>
-                        {currentItems.length} {currentItems.length === 1 ? 'item' : 'items'}
-                      </span>
-                    </div>
-                    <div className="table-container">
-                      <table>
-                        <thead>
-                          <tr style={{ backgroundColor: '#f0f9ff' }}>
-                            <th style={{ width: '40px', textAlign: 'center' }}>#</th>
-                            <th>Product</th>
-                            <th style={{ width: '120px' }}>SKU / Code</th>
-                            <th style={{ textAlign: 'center', width: '90px' }}>Current Qty</th>
-                            <th style={{ textAlign: 'right', width: '100px' }}>Price</th>
-                            <th style={{ textAlign: 'right', width: '110px' }}>Total</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {loadingSaleDetails ? (
-                            <TableLoading colSpan={6} message="Loading current items..." />
-                          ) : currentItems.length === 0 ? (
-                            <tr>
-                              <td colSpan={6} style={{ textAlign: 'center', padding: '0.85rem', color: 'var(--text-muted)', fontSize: '0.82rem' }}>
-                                No active products on this invoice.
-                              </td>
+                  <>
+                    <div>
+                      <div style={{ fontWeight: 700, fontSize: '0.88rem', marginBottom: '0.4rem', color: '#0284c7', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <span>New Products (Current Invoice Items)</span>
+                        <span style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>
+                          {currentItems.length} {currentItems.length === 1 ? 'item' : 'items'}
+                        </span>
+                      </div>
+                      <div className="table-container">
+                        <table>
+                          <thead>
+                            <tr style={{ backgroundColor: '#f0f9ff' }}>
+                              <th style={{ width: '40px', textAlign: 'center' }}>#</th>
+                              <th>Product</th>
+                              <th style={{ width: '120px' }}>SKU / Code</th>
+                              <th style={{ textAlign: 'center', width: '90px' }}>Current Qty</th>
+                              <th style={{ textAlign: 'right', width: '100px' }}>Price</th>
+                              <th style={{ textAlign: 'right', width: '110px' }}>Total</th>
                             </tr>
-                          ) : (
-                            currentItems.map((it, idx) => (
-                              <tr key={it.key || idx}>
-                                <td style={{ textAlign: 'center', color: 'var(--text-muted)' }}>{idx + 1}</td>
-                                <td style={{ fontWeight: 600, color: it.isExchange ? '#0369a1' : 'var(--text-primary)' }}>
-                                  {it.name}
+                          </thead>
+                          <tbody>
+                            {loadingSaleDetails ? (
+                              <TableLoading colSpan={6} message="Loading current items..." />
+                            ) : currentItems.length === 0 ? (
+                              <tr>
+                                <td colSpan={6} style={{ textAlign: 'center', padding: '0.85rem', color: 'var(--text-muted)', fontSize: '0.82rem' }}>
+                                  No active products on this invoice.
                                 </td>
-                                <td style={{ fontFamily: 'monospace', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
-                                  {it.sku}
-                                </td>
-                                <td style={{ textAlign: 'center', fontWeight: 800, color: '#0284c7' }}>
-                                  {it.quantity}
-                                </td>
-                                <td style={{ textAlign: 'right' }}>৳{it.price.toFixed(2)}</td>
-                                <td style={{ textAlign: 'right', fontWeight: 700 }}>৳{it.total.toFixed(2)}</td>
                               </tr>
-                            ))
-                          )}
-                        </tbody>
-                      </table>
+                            ) : (
+                              currentItems.map((it, idx) => (
+                                <tr key={it.key || idx}>
+                                  <td style={{ textAlign: 'center', color: 'var(--text-muted)' }}>{idx + 1}</td>
+                                  <td style={{ fontWeight: 600, color: it.isExchange ? '#0369a1' : 'var(--text-primary)' }}>
+                                    {it.name}
+                                  </td>
+                                  <td style={{ fontFamily: 'monospace', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                                    {it.sku}
+                                  </td>
+                                  <td style={{ textAlign: 'center', fontWeight: 800, color: '#0284c7' }}>
+                                    {it.quantity}
+                                  </td>
+                                  <td style={{ textAlign: 'right' }}>৳{it.price.toFixed(2)}</td>
+                                  <td style={{ textAlign: 'right', fontWeight: 700 }}>৳{it.total.toFixed(2)}</td>
+                                </tr>
+                              ))
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
                     </div>
-                  </div>
+
+                    {/* TOTALS & OPTIONAL NOTES */}
+                    <div style={{ display: 'flex', justifyContent: selectedSaleForDetails.notes ? 'space-between' : 'flex-end', alignItems: 'flex-start', flexWrap: 'wrap', gap: '1rem' }}>
+                      {selectedSaleForDetails.notes && (
+                        <div style={{ flex: 1, minWidth: '220px', fontSize: '0.82rem', backgroundColor: '#f8fafc', padding: '0.65rem 0.85rem', borderRadius: '6px', border: '1px solid var(--border-color)' }}>
+                          <span style={{ fontWeight: 700, color: 'var(--text-muted)', fontSize: '0.74rem', display: 'block', marginBottom: '0.2rem' }}>NOTES</span>
+                          <div style={{ color: 'var(--text-secondary)', whiteSpace: 'pre-line' }}>{selectedSaleForDetails.notes}</div>
+                        </div>
+                      )}
+
+                      <div style={{
+                        width: '270px',
+                        backgroundColor: '#ffffff',
+                        border: '1px solid var(--border-color)',
+                        borderRadius: '6px',
+                        padding: '0.75rem 1rem',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '0.35rem',
+                        fontSize: '0.85rem'
+                      }}>
+                        {hasModifications && (
+                          <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-secondary)', fontSize: '0.8rem' }}>
+                            <span>Initial Total:</span>
+                            <span>৳{initialSubtotal.toFixed(2)}</span>
+                          </div>
+                        )}
+                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                          <span style={{ color: 'var(--text-secondary)' }}>{hasModifications ? 'Current Subtotal:' : 'Subtotal:'}</span>
+                          <span style={{ fontWeight: 600 }}>৳{currentSubtotal.toFixed(2)}</span>
+                        </div>
+                        {discount > 0 && (
+                          <div style={{ display: 'flex', justifyContent: 'space-between', color: '#dc2626' }}>
+                            <span>Discount:</span>
+                            <span>-৳{discount.toFixed(2)}</span>
+                          </div>
+                        )}
+                        {tax > 0 && (
+                          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                            <span>Tax:</span>
+                            <span>+৳{tax.toFixed(2)}</span>
+                          </div>
+                        )}
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 800, borderTop: '1px solid var(--border-color)', paddingTop: '0.35rem', marginTop: '0.15rem' }}>
+                          <span>{hasModifications ? 'Current Total Bill:' : 'Total Bill:'}</span>
+                          <span style={{ color: '#0284c7' }}>৳{currentNet.toFixed(2)}</span>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', color: '#059669', fontWeight: 700 }}>
+                          <span>Paid:</span>
+                          <span>৳{paidAmount.toFixed(2)}</span>
+                        </div>
+                        <div style={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          fontWeight: 800,
+                          color: currentDue > 0.01 ? '#dc2626' : '#059669'
+                        }}>
+                          <span>{hasModifications ? 'Current Due:' : 'Due:'}</span>
+                          <span>৳{currentDue.toFixed(2)}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </>
                 );
               })()}
-
-              {/* 4. TOTALS & OPTIONAL NOTES */}
-              <div style={{ display: 'flex', justifyContent: selectedSaleForDetails.notes ? 'space-between' : 'flex-end', alignItems: 'flex-start', flexWrap: 'wrap', gap: '1rem' }}>
-                {selectedSaleForDetails.notes && (
-                  <div style={{ flex: 1, minWidth: '220px', fontSize: '0.82rem', backgroundColor: '#f8fafc', padding: '0.65rem 0.85rem', borderRadius: '6px', border: '1px solid var(--border-color)' }}>
-                    <span style={{ fontWeight: 700, color: 'var(--text-muted)', fontSize: '0.74rem', display: 'block', marginBottom: '0.2rem' }}>NOTES</span>
-                    <div style={{ color: 'var(--text-secondary)', whiteSpace: 'pre-line' }}>{selectedSaleForDetails.notes}</div>
-                  </div>
-                )}
-
-                <div style={{
-                  width: '260px',
-                  backgroundColor: '#ffffff',
-                  border: '1px solid var(--border-color)',
-                  borderRadius: '6px',
-                  padding: '0.75rem 1rem',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: '0.35rem',
-                  fontSize: '0.85rem'
-                }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span style={{ color: 'var(--text-secondary)' }}>Subtotal:</span>
-                    <span>৳{(selectedSaleForDetails.total_amount || 0).toFixed(2)}</span>
-                  </div>
-                  {selectedSaleForDetails.discount > 0 && (
-                    <div style={{ display: 'flex', justifyContent: 'space-between', color: '#dc2626' }}>
-                      <span>Discount:</span>
-                      <span>-৳{(selectedSaleForDetails.discount || 0).toFixed(2)}</span>
-                    </div>
-                  )}
-                  {selectedSaleForDetails.tax > 0 && (
-                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span style={{ color: 'var(--text-secondary)' }}>Tax:</span>
-                      <span>+৳{(selectedSaleForDetails.tax || 0).toFixed(2)}</span>
-                    </div>
-                  )}
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 800, borderTop: '1px solid var(--border-color)', paddingTop: '0.35rem', marginTop: '0.15rem' }}>
-                    <span>Total Bill:</span>
-                    <span style={{ color: '#0284c7' }}>৳{(selectedSaleForDetails.net_amount || 0).toFixed(2)}</span>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', color: '#059669', fontWeight: 700 }}>
-                    <span>Paid:</span>
-                    <span>৳{(selectedSaleForDetails.paid_amount || 0).toFixed(2)}</span>
-                  </div>
-                  <div style={{
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    fontWeight: 800,
-                    color: (selectedSaleForDetails.net_amount - selectedSaleForDetails.paid_amount) > 0.01 ? '#dc2626' : '#059669'
-                  }}>
-                    <span>Due:</span>
-                    <span>৳{Math.max(0, (selectedSaleForDetails.net_amount || 0) - (selectedSaleForDetails.paid_amount || 0)).toFixed(2)}</span>
-                  </div>
-                </div>
-              </div>
 
             </div>
 
