@@ -129,10 +129,22 @@ function App() {
 
   if (loading) {
     return (
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', backgroundColor: '#f8fafc', color: 'var(--text-primary)' }}>
-        <div style={{ textAlign: 'center' }}>
-          <h2 style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 700, fontSize: '1.5rem', marginBottom: '0.5rem' }}>Loading ALMAS Accessories ERP...</h2>
-          <p style={{ color: 'var(--text-secondary)' }}>Connecting securely to your database...</p>
+      <div className="app-loader-container">
+        <div className="app-loader-card">
+          <div className="app-loader-logo-wrapper">
+            <div className="app-loader-ring"></div>
+            <div className="app-loader-ring-pulse"></div>
+            <img src={logo} alt="ALMAS ERP" className="app-loader-logo-img" />
+          </div>
+          <h2 className="app-loader-title">ALMAS <span>ACCESSORIES</span></h2>
+          <p className="app-loader-subtitle">Enterprise Resource Planning</p>
+          <div className="app-loader-progress-track">
+            <div className="app-loader-progress-bar"></div>
+          </div>
+          <div className="app-loader-status">
+            <div className="app-loader-status-dot"></div>
+            <span>Connecting securely to database...</span>
+          </div>
         </div>
       </div>
     );

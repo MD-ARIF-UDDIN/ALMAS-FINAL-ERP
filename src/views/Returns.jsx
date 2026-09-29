@@ -426,6 +426,7 @@ export default function Returns({ userProfile, branches, addToast }) {
 
       if (resolutionMode === 'refund') {
         // Direct Refund or Due Deduction
+        let newTotal = Math.max(0, (parseFloat(selectedInvoice.total_amount) || originalNet) - totalReturnCredit);
         let newNet = Math.max(0, originalNet - totalReturnCredit);
         let newPaid = originalPaid;
         let newStatus = selectedInvoice.payment_status;
@@ -454,6 +455,7 @@ export default function Returns({ userProfile, branches, addToast }) {
         const updatedNotes = selectedInvoice.notes ? `${selectedInvoice.notes}\n${noteEntry}` : noteEntry;
 
         await supabase.from('sales').update({
+          total_amount: newTotal,
           net_amount: newNet,
           paid_amount: newPaid,
           payment_status: newStatus,
@@ -489,10 +491,31 @@ export default function Returns({ userProfile, branches, addToast }) {
           }
         }
 
+        let newTotal = Math.max(0, (parseFloat(selectedInvoice.total_amount) || originalNet) - totalReturnCredit + totalExchangeValue);
+        let newNet = Math.max(0, originalNet + exchangeDifference);
+        let newPaid = originalPaid;
+
+        if (exchangeDifference > 0) {
+          newPaid = originalPaid + exchangeDifference;
+        } else if (exchangeDifference < 0) {
+          if (refundMethod === 'deduct_due') {
+            newPaid = originalPaid;
+          } else {
+            newPaid = Math.max(0, originalPaid - Math.abs(exchangeDifference));
+          }
+        }
+
+        const newDue = Math.max(0, newNet - newPaid);
+        const newStatus = newDue <= 0.01 ? 'paid' : (newPaid > 0 ? 'partial' : 'unpaid');
+
         const noteEntry = `[${voucherNumber}: Product Exchange - Returned ৳${totalReturnCredit.toFixed(2)}, Taken ৳${totalExchangeValue.toFixed(2)}, Net diff: ৳${exchangeDifference.toFixed(2)}]`;
         const updatedNotes = selectedInvoice.notes ? `${selectedInvoice.notes}\n${noteEntry}` : noteEntry;
 
         await supabase.from('sales').update({
+          total_amount: newTotal,
+          net_amount: newNet,
+          paid_amount: newPaid,
+          payment_status: newStatus,
           notes: updatedNotes,
         }).eq('id', selectedInvoice.id);
       }

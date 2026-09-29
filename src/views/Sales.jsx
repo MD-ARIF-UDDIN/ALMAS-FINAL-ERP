@@ -2,7 +2,27 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useLocation } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
 import almasLogo from '../assets/almas_logo.jpg';
-import { Search, ShoppingCart, Trash2, Printer, Plus, UserPlus, CreditCard, RotateCcw, FileText, CheckCircle2, AlertCircle, X, DollarSign, RefreshCw } from 'lucide-react';
+import {
+  Search,
+  ShoppingCart,
+  Trash2,
+  Printer,
+  Plus,
+  UserPlus,
+  CreditCard,
+  RotateCcw,
+  FileText,
+  CheckCircle2,
+  AlertCircle,
+  X,
+  DollarSign,
+  RefreshCw,
+  Eye,
+  Edit,
+  Calendar,
+  User,
+  Package,
+} from 'lucide-react';
 import { TableLoading, LoadingBlock } from '../components/TableLoading';
 import Pagination from '../components/Pagination';
 
@@ -23,6 +43,30 @@ export default function Sales({ userProfile, branches, addToast }) {
   const [salesPageSize, setSalesPageSize] = useState(25);
   const [salesTotalCount, setSalesTotalCount] = useState(0);
   const [historySearchQuery, setHistorySearchQuery] = useState('');
+
+  // Sales Details Modal State
+  const [showSaleDetailsModal, setShowSaleDetailsModal] = useState(false);
+  const [selectedSaleForDetails, setSelectedSaleForDetails] = useState(null);
+  const [saleDetailItems, setSaleDetailItems] = useState([]);
+  const [saleDetailReturns, setSaleDetailReturns] = useState([]);
+  const [saleDetailReplacements, setSaleDetailReplacements] = useState([]);
+  const [loadingSaleDetails, setLoadingSaleDetails] = useState(false);
+
+  // Sales Edit Modal State
+  const [showEditSaleModal, setShowEditSaleModal] = useState(false);
+  const [editingSale, setEditingSale] = useState(null);
+  const [editCustomerId, setEditCustomerId] = useState('');
+  const [editSaleDate, setEditSaleDate] = useState('');
+  const [editCart, setEditCart] = useState([]);
+  const [originalSaleItems, setOriginalSaleItems] = useState([]);
+  const [editDiscount, setEditDiscount] = useState(0);
+  const [editTaxRate, setEditTaxRate] = useState(0);
+  const [editNotes, setEditNotes] = useState('');
+  const [editProductSearch, setEditProductSearch] = useState('');
+  const [showEditSearchDropdown, setShowEditSearchDropdown] = useState(false);
+  const [isSubmittingEdit, setIsSubmittingEdit] = useState(false);
+  const [loadingEditItems, setLoadingEditItems] = useState(false);
+  const editSearchRef = useRef(null);
 
   // Sales Return / Credit Note States
   const [showReturnModal, setShowReturnModal] = useState(false);
@@ -69,6 +113,9 @@ export default function Sales({ userProfile, branches, addToast }) {
     const handleClickOutside = (event) => {
       if (cartSearchRef.current && !cartSearchRef.current.contains(event.target)) {
         setShowCartSearchSuggestions(false);
+      }
+      if (editSearchRef.current && !editSearchRef.current.contains(event.target)) {
+        setShowEditSearchDropdown(false);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
@@ -739,6 +786,366 @@ export default function Sales({ userProfile, branches, addToast }) {
     window.print();
   };
 
+  // Open Sale Details Modal
+  const handleOpenSaleDetails = async (sale) => {
+    setSelectedSaleForDetails(sale);
+    setShowSaleDetailsModal(true);
+    setLoadingSaleDetails(true);
+
+    try {
+      const { data: items, error } = await supabase
+        .from('sale_items')
+        .select(`
+          id,
+          sale_id,
+          product_id,
+          quantity,
+          unit_price,
+          total_price,
+          products (
+            id,
+            sku,
+            product_code,
+            name,
+            sale_price,
+            category
+          )
+        `)
+        .eq('sale_id', sale.id);
+
+      if (error) throw error;
+
+      let fullSale = sale;
+      if (!sale.contacts && sale.customer_id) {
+        const { data: cust } = await supabase
+          .from('contacts')
+          .select('name, phone, address')
+          .eq('id', sale.customer_id)
+          .maybeSingle();
+        if (cust) {
+          fullSale = { ...sale, contacts: cust };
+          setSelectedSaleForDetails(fullSale);
+        }
+      }
+
+      setSaleDetailItems(items || []);
+
+      // Fetch returned and exchange replacement products logged for this invoice
+      const invNumber = sale.invoice_number || '';
+      const saleIdSub = sale.id ? sale.id.substring(0, 8) : '';
+      
+      let movementsQuery = supabase
+        .from('inventory_movements')
+        .select(`
+          id,
+          type,
+          quantity,
+          description,
+          created_at,
+          products (
+            id,
+            name,
+            sku,
+            product_code,
+            sale_price,
+            category
+          )
+        `);
+
+      if (invNumber && saleIdSub) {
+        movementsQuery = movementsQuery.or(`description.ilike.%${invNumber}%,description.ilike.%${saleIdSub}%`);
+      } else if (invNumber) {
+        movementsQuery = movementsQuery.ilike('description', `%${invNumber}%`);
+      } else if (saleIdSub) {
+        movementsQuery = movementsQuery.ilike('description', `%${saleIdSub}%`);
+      }
+
+      const { data: movements } = await movementsQuery.order('created_at', { ascending: false });
+
+      const returnsList = [];
+      const replacementsList = [];
+
+      (movements || []).forEach((m) => {
+        const desc = (m.description || '').toLowerCase();
+        if (desc.includes('return') || desc.includes('restocked') || desc.includes('crn-')) {
+          returnsList.push({
+            id: m.id,
+            product: m.products,
+            quantity: m.quantity,
+            date: m.created_at,
+            description: m.description,
+          });
+        } else if (desc.includes('exchange out') || desc.includes('exchange replacement') || desc.includes('replacement out')) {
+          replacementsList.push({
+            id: m.id,
+            product: m.products,
+            quantity: m.quantity,
+            date: m.created_at,
+            description: m.description,
+          });
+        }
+      });
+
+      setSaleDetailReturns(returnsList);
+      setSaleDetailReplacements(replacementsList);
+    } catch (err) {
+      console.error('Error loading sale details:', err);
+      showMessage('Failed to load invoice items details.', 'error');
+    } finally {
+      setLoadingSaleDetails(false);
+    }
+  };
+
+  // Open Edit Sale Modal
+  const handleOpenEditSale = async (sale) => {
+    setEditingSale(sale);
+    setEditCustomerId(sale.customer_id || '');
+    setEditSaleDate(sale.sale_date ? new Date(sale.sale_date).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10));
+    setEditDiscount(sale.discount || 0);
+    const sub = parseFloat(sale.total_amount || 0);
+    const disc = parseFloat(sale.discount || 0);
+    const subAfterDisc = Math.max(0, sub - disc);
+    const taxAmt = parseFloat(sale.tax || 0);
+    const computedTaxRate = subAfterDisc > 0 ? (taxAmt / subAfterDisc) * 100 : 0;
+    setEditTaxRate(Math.round(computedTaxRate * 100) / 100);
+    setEditNotes(sale.notes || '');
+    setEditProductSearch('');
+    setShowEditSearchDropdown(false);
+    setShowEditSaleModal(true);
+    setLoadingEditItems(true);
+
+    try {
+      const { data: items, error } = await supabase
+        .from('sale_items')
+        .select(`
+          id,
+          sale_id,
+          product_id,
+          quantity,
+          unit_price,
+          total_price,
+          products (
+            id,
+            sku,
+            product_code,
+            name,
+            sale_price,
+            category
+          )
+        `)
+        .eq('sale_id', sale.id);
+
+      if (error) throw error;
+
+      const mapped = (items || []).map((it) => ({
+        id: it.id,
+        product_id: it.product_id,
+        product: it.products || { id: it.product_id, name: 'Item', sku: '' },
+        quantity: parseFloat(it.quantity) || 1,
+        unit_price: parseFloat(it.unit_price) || 0,
+        total_price: parseFloat(it.total_price) || 0,
+        original_quantity: parseFloat(it.quantity) || 1,
+      }));
+
+      setEditCart(mapped);
+      setOriginalSaleItems(mapped);
+    } catch (err) {
+      console.error('Error loading sale items for edit:', err);
+      showMessage('Failed to load invoice items for editing.', 'error');
+    } finally {
+      setLoadingEditItems(false);
+    }
+  };
+
+  // Calculations for Edit Modal
+  const getEditSubtotal = () => {
+    return editCart.reduce((sum, item) => sum + (parseFloat(item.unit_price) || 0) * (parseFloat(item.quantity) || 0), 0);
+  };
+
+  const getEditTaxAmount = () => {
+    const sub = getEditSubtotal();
+    const disc = parseFloat(editDiscount) || 0;
+    return Math.max(0, sub - disc) * ((parseFloat(editTaxRate) || 0) / 100);
+  };
+
+  const getEditGrandTotal = () => {
+    const sub = getEditSubtotal();
+    const disc = parseFloat(editDiscount) || 0;
+    const subAfterDisc = Math.max(0, sub - disc);
+    return Math.max(0, subAfterDisc + getEditTaxAmount());
+  };
+
+  const addToEditCart = (invProduct) => {
+    const p = invProduct.products || invProduct;
+    const existing = editCart.find((c) => c.product_id === p.id);
+    if (existing) {
+      setEditCart(
+        editCart.map((c) =>
+          c.product_id === p.id ? { ...c, quantity: (parseFloat(c.quantity) || 0) + 1 } : c
+        )
+      );
+    } else {
+      setEditCart([
+        ...editCart,
+        {
+          product_id: p.id,
+          product: p,
+          quantity: 1,
+          unit_price: parseFloat(p.sale_price) || 0,
+          total_price: parseFloat(p.sale_price) || 0,
+          original_quantity: 0,
+        },
+      ]);
+    }
+    setEditProductSearch('');
+    setShowEditSearchDropdown(false);
+  };
+
+  const removeFromEditCart = (productId) => {
+    setEditCart(editCart.filter((c) => c.product_id !== productId));
+  };
+
+  // Submit Edited Sale
+  const handleSaveEditedSale = async (e) => {
+    e.preventDefault();
+    if (!editingSale) return;
+
+    if (!editCustomerId) {
+      showMessage('Please select a customer for this invoice.', 'error');
+      return;
+    }
+
+    if (editCart.length === 0) {
+      showMessage('Invoice must contain at least one item.', 'error');
+      return;
+    }
+
+    for (const item of editCart) {
+      const q = parseFloat(item.quantity);
+      const p = parseFloat(item.unit_price);
+      if (isNaN(q) || q <= 0) {
+        showMessage(`Invalid quantity for ${item.product?.name || 'item'}.`, 'error');
+        return;
+      }
+      if (isNaN(p) || p < 0) {
+        showMessage(`Invalid unit price for ${item.product?.name || 'item'}.`, 'error');
+        return;
+      }
+    }
+
+    setIsSubmittingEdit(true);
+    try {
+      const targetBranchId = editingSale.branch_id || selectedBranchId;
+      const subtotal = getEditSubtotal();
+      const disc = parseFloat(editDiscount) || 0;
+      const taxAmt = getEditTaxAmount();
+      const grandTotal = getEditGrandTotal();
+      const currentPaid = parseFloat(editingSale.paid_amount || 0);
+
+      // 1. Physical Inventory Adjustments (if not factory)
+      if (!isFactory) {
+        const originalMap = {};
+        originalSaleItems.forEach((it) => {
+          originalMap[it.product_id] = (originalMap[it.product_id] || 0) + it.original_quantity;
+        });
+
+        const newMap = {};
+        editCart.forEach((it) => {
+          newMap[it.product_id] = (newMap[it.product_id] || 0) + parseFloat(it.quantity);
+        });
+
+        const allProductIds = Array.from(new Set([...Object.keys(originalMap), ...Object.keys(newMap)]));
+
+        for (const prodId of allProductIds) {
+          const oldQ = originalMap[prodId] || 0;
+          const newQ = newMap[prodId] || 0;
+          const diff = newQ - oldQ; // > 0 means sold more (deduct stock), < 0 means sold less (restock)
+
+          if (diff !== 0) {
+            const { data: invItem } = await supabase
+              .from('inventory')
+              .select('id, quantity')
+              .eq('branch_id', targetBranchId)
+              .eq('product_id', prodId)
+              .maybeSingle();
+
+            if (invItem) {
+              const updatedStock = Math.max(0, (invItem.quantity || 0) - diff);
+              await supabase
+                .from('inventory')
+                .update({
+                  quantity: updatedStock,
+                  updated_at: new Date().toISOString(),
+                })
+                .eq('id', invItem.id);
+            }
+
+            // Log movement audit
+            await supabase.from('inventory_movements').insert([
+              {
+                branch_id: targetBranchId,
+                product_id: prodId,
+                type: diff > 0 ? 'sale' : 'adjustment_in',
+                quantity: Math.abs(diff),
+                description: `Invoice Edited [${editingSale.invoice_number || editingSale.id.substring(0, 8)}]: Qty changed from ${oldQ} to ${newQ}`,
+                created_by: userProfile.id,
+              },
+            ]);
+          }
+        }
+      }
+
+      // 2. Delete and re-insert sale_items
+      await supabase.from('sale_items').delete().eq('sale_id', editingSale.id);
+
+      const newSaleItems = editCart.map((it) => {
+        const qty = parseFloat(it.quantity) || 1;
+        const price = parseFloat(it.unit_price) || 0;
+        return {
+          sale_id: editingSale.id,
+          product_id: it.product_id,
+          quantity: qty,
+          unit_price: price,
+          total_price: qty * price,
+        };
+      });
+
+      const { error: itemsErr } = await supabase.from('sale_items').insert(newSaleItems);
+      if (itemsErr) throw itemsErr;
+
+      // 3. Recalculate Payment Status
+      const newStatus = currentPaid >= grandTotal - 0.01 ? 'paid' : (currentPaid > 0 ? 'partial' : 'unpaid');
+
+      // 4. Update Sales Table
+      const { error: saleErr } = await supabase
+        .from('sales')
+        .update({
+          customer_id: editCustomerId,
+          sale_date: editSaleDate,
+          total_amount: subtotal,
+          discount: disc,
+          tax: taxAmt,
+          net_amount: grandTotal,
+          payment_status: newStatus,
+          notes: editNotes || null,
+        })
+        .eq('id', editingSale.id);
+
+      if (saleErr) throw saleErr;
+
+      showMessage(`Invoice ${editingSale.invoice_number || editingSale.id.substring(0, 8)} updated successfully!`, 'success');
+      setShowEditSaleModal(false);
+      fetchSalesHistory();
+      fetchBranchInventory();
+    } catch (err) {
+      console.error('Error saving edited sale:', err);
+      showMessage(err.message || 'Failed to update invoice.', 'error');
+    } finally {
+      setIsSubmittingEdit(false);
+    }
+  };
+
+
   // Open Sales Return Modal for a specific invoice
   const handleOpenReturnModal = async (sale) => {
     setSelectedSaleForReturn(sale);
@@ -1177,7 +1584,7 @@ export default function Sales({ userProfile, branches, addToast }) {
                   <th>Paid Amount</th>
                   <th>Dues</th>
                   <th>Payment Status</th>
-                  <th style={{ width: '160px', textAlign: 'center' }}>Actions</th>
+                  <th style={{ minWidth: '240px', textAlign: 'center' }}>Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -1196,7 +1603,11 @@ export default function Sales({ userProfile, branches, addToast }) {
                     return (
                       <tr key={sale.id}>
                         <td>{rowNumber}</td>
-                        <td style={{ fontFamily: 'monospace', fontWeight: 700, fontSize: '0.82rem' }}>
+                        <td 
+                          style={{ fontFamily: 'monospace', fontWeight: 700, fontSize: '0.82rem', color: '#0284c7', cursor: 'pointer' }}
+                          onClick={() => handleOpenSaleDetails(sale)}
+                          title="Click to view full invoice breakdown"
+                        >
                           {sale.invoice_number || `INV#${sale.id.substring(0, 8).toUpperCase()}`}
                         </td>
                         {userProfile?.role === 'owner' && (
@@ -1211,7 +1622,24 @@ export default function Sales({ userProfile, branches, addToast }) {
                           <span className={`badge badge-${sale.payment_status}`}>{sale.payment_status}</span>
                         </td>
                         <td style={{ textAlign: 'center' }}>
-                          <div style={{ display: 'inline-flex', gap: '0.35rem', justifyContent: 'center' }}>
+                          <div style={{ display: 'inline-flex', gap: '0.3rem', justifyContent: 'center' }}>
+                            <button
+                              className="btn btn-secondary btn-sm"
+                              onClick={() => handleOpenSaleDetails(sale)}
+                              title="View Sales Details"
+                            >
+                              <Eye size={13} style={{ color: '#0284c7' }} />
+                              <span style={{ marginLeft: '0.2rem' }}>Details</span>
+                            </button>
+                            <button
+                              className="btn btn-secondary btn-sm"
+                              onClick={() => handleOpenEditSale(sale)}
+                              title="Edit Invoice"
+                              style={{ color: '#4f46e5' }}
+                            >
+                              <Edit size={13} />
+                              <span style={{ marginLeft: '0.2rem' }}>Edit</span>
+                            </button>
                             <button
                               className="btn btn-secondary btn-sm"
                               onClick={() => handleRePrint(sale)}
@@ -2959,6 +3387,718 @@ export default function Sales({ userProfile, branches, addToast }) {
           </div>
         </div>
       )}
+
+      {/* SALES DETAILS MODAL (CLEAN & MINIMAL) */}
+      {showSaleDetailsModal && selectedSaleForDetails && (
+        <div className="modal-overlay">
+          <div className="modal-content modal-lg" style={{ maxHeight: '92vh', display: 'flex', flexDirection: 'column' }}>
+            {/* Header */}
+            <div className="modal-header" style={{ padding: '1rem 1.25rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                <FileText size={18} style={{ color: '#0284c7' }} />
+                <h3 className="modal-title" style={{ margin: 0, fontSize: '1.1rem', fontWeight: 800 }}>
+                  Invoice {selectedSaleForDetails.invoice_number || `INV#${selectedSaleForDetails.id.substring(0, 8).toUpperCase()}`}
+                </h3>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                <span className={`badge badge-${selectedSaleForDetails.payment_status}`} style={{ textTransform: 'capitalize' }}>
+                  {selectedSaleForDetails.payment_status}
+                </span>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => setShowSaleDetailsModal(false)}
+                  style={{ borderRadius: '50%', padding: '0.35rem', border: 'none' }}
+                >
+                  <X size={15} />
+                </button>
+              </div>
+            </div>
+
+            {/* Modal Body */}
+            <div className="modal-body" style={{ overflowY: 'auto', padding: '1.25rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              
+              {/* Clean Meta Info Bar */}
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+                gap: '0.75rem',
+                backgroundColor: '#f8fafc',
+                border: '1px solid var(--border-color)',
+                borderRadius: '6px',
+                padding: '0.75rem 1rem',
+                fontSize: '0.84rem'
+              }}>
+                <div>
+                  <span style={{ color: 'var(--text-muted)', fontSize: '0.74rem', display: 'block', fontWeight: 600 }}>BUYER</span>
+                  <strong>{selectedSaleForDetails.contacts?.name || 'Walk-in Customer'}</strong>
+                  {selectedSaleForDetails.contacts?.phone && <span style={{ color: 'var(--text-secondary)' }}> ({selectedSaleForDetails.contacts.phone})</span>}
+                </div>
+                <div>
+                  <span style={{ color: 'var(--text-muted)', fontSize: '0.74rem', display: 'block', fontWeight: 600 }}>OUTLET / BRANCH</span>
+                  <strong>{branches.find(b => b.id === selectedSaleForDetails.branch_id)?.name || 'Main Factory'}</strong>
+                </div>
+                <div>
+                  <span style={{ color: 'var(--text-muted)', fontSize: '0.74rem', display: 'block', fontWeight: 600 }}>INVOICE DATE</span>
+                  <strong>{new Date(selectedSaleForDetails.sale_date).toLocaleDateString()}</strong>
+                </div>
+              </div>
+
+              {/* TABLE 1: OLD PRODUCTS (INITIAL SOLD ITEMS & RETURNS) */}
+              <div>
+                <div style={{ fontWeight: 700, fontSize: '0.88rem', marginBottom: '0.4rem', color: '#0f172a', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <span>Old Products (Initial Sold & Returns)</span>
+                  <span style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>
+                    {saleDetailItems.length} {saleDetailItems.length === 1 ? 'item' : 'items'}
+                  </span>
+                </div>
+                <div className="table-container">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th style={{ width: '40px', textAlign: 'center' }}>#</th>
+                        <th>Product</th>
+                        <th style={{ width: '120px' }}>SKU / Code</th>
+                        <th style={{ textAlign: 'center', width: '90px' }}>Initial Qty</th>
+                        <th style={{ textAlign: 'center', width: '90px', color: '#c2410c' }}>Returned</th>
+                        <th style={{ textAlign: 'right', width: '100px' }}>Price</th>
+                        <th style={{ textAlign: 'right', width: '110px' }}>Total</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {loadingSaleDetails ? (
+                        <TableLoading colSpan={7} message="Loading items..." />
+                      ) : saleDetailItems.length === 0 ? (
+                        <tr>
+                          <td colSpan={7} style={{ textAlign: 'center', padding: '1rem', color: 'var(--text-muted)' }}>
+                            No items recorded.
+                          </td>
+                        </tr>
+                      ) : (
+                        saleDetailItems.map((item, idx) => {
+                          const initialQty = parseFloat(item.quantity) || 1;
+                          const price = parseFloat(item.unit_price) || 0;
+                          const initialTotal = initialQty * price;
+                          
+                          // Calculate returned quantity for this specific product
+                          const returnedQty = saleDetailReturns
+                            .filter((r) => r.product?.id === item.product_id || r.product_id === item.product_id)
+                            .reduce((sum, r) => sum + (parseFloat(r.quantity) || 0), 0);
+
+                          return (
+                            <tr key={item.id || idx}>
+                              <td style={{ textAlign: 'center', color: 'var(--text-muted)' }}>{idx + 1}</td>
+                              <td style={{ fontWeight: 600 }}>{item.products?.name || 'Product'}</td>
+                              <td style={{ fontFamily: 'monospace', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                                {item.products?.sku || item.products?.product_code || '—'}
+                              </td>
+                              <td style={{ textAlign: 'center', fontWeight: 600 }}>{initialQty}</td>
+                              <td style={{ textAlign: 'center', fontWeight: 700, color: returnedQty > 0 ? '#c2410c' : 'var(--text-muted)' }}>
+                                {returnedQty > 0 ? `${returnedQty}` : '0'}
+                              </td>
+                              <td style={{ textAlign: 'right' }}>৳{price.toFixed(2)}</td>
+                              <td style={{ textAlign: 'right', fontWeight: 700 }}>৳{initialTotal.toFixed(2)}</td>
+                            </tr>
+                          );
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* TABLE 2: CURRENT INVOICE ITEMS (RETAINED + REPLACEMENTS) */}
+              {(() => {
+                // 1. Retained original items (initial qty - returned)
+                const retainedItems = saleDetailItems
+                  .map((item) => {
+                    const initialQty = parseFloat(item.quantity) || 0;
+                    const price = parseFloat(item.unit_price) || 0;
+                    const returnedQty = saleDetailReturns
+                      .filter((r) => r.product?.id === item.product_id || r.product_id === item.product_id)
+                      .reduce((sum, r) => sum + (parseFloat(r.quantity) || 0), 0);
+                    const currentQty = Math.max(0, initialQty - returnedQty);
+                    return {
+                      key: `orig-${item.id || item.product_id}`,
+                      name: item.products?.name || 'Product',
+                      sku: item.products?.sku || item.products?.product_code || '—',
+                      quantity: currentQty,
+                      price: price,
+                      total: currentQty * price,
+                      isExchange: false,
+                    };
+                  })
+                  .filter((it) => it.quantity > 0);
+
+                // 2. Replacement exchange items
+                const replacementItems = saleDetailReplacements.map((rep, idx) => {
+                  const repQty = parseFloat(rep.quantity) || 1;
+                  const repPrice = parseFloat(rep.product?.sale_price) || 0;
+                  return {
+                    key: `rep-${rep.id || idx}`,
+                    name: `${rep.product?.name || 'Replacement Item'} (Replacement)`,
+                    sku: rep.product?.sku || rep.product?.product_code || '—',
+                    quantity: repQty,
+                    price: repPrice,
+                    total: repQty * repPrice,
+                    isExchange: true,
+                  };
+                });
+
+                const currentItems = [...retainedItems, ...replacementItems];
+
+                return (
+                  <div>
+                    <div style={{ fontWeight: 700, fontSize: '0.88rem', marginBottom: '0.4rem', color: '#0284c7', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <span>New Products (Current Invoice Items)</span>
+                      <span style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>
+                        {currentItems.length} {currentItems.length === 1 ? 'item' : 'items'}
+                      </span>
+                    </div>
+                    <div className="table-container">
+                      <table>
+                        <thead>
+                          <tr style={{ backgroundColor: '#f0f9ff' }}>
+                            <th style={{ width: '40px', textAlign: 'center' }}>#</th>
+                            <th>Product</th>
+                            <th style={{ width: '120px' }}>SKU / Code</th>
+                            <th style={{ textAlign: 'center', width: '90px' }}>Current Qty</th>
+                            <th style={{ textAlign: 'right', width: '100px' }}>Price</th>
+                            <th style={{ textAlign: 'right', width: '110px' }}>Total</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {loadingSaleDetails ? (
+                            <TableLoading colSpan={6} message="Loading current items..." />
+                          ) : currentItems.length === 0 ? (
+                            <tr>
+                              <td colSpan={6} style={{ textAlign: 'center', padding: '0.85rem', color: 'var(--text-muted)', fontSize: '0.82rem' }}>
+                                No active products on this invoice.
+                              </td>
+                            </tr>
+                          ) : (
+                            currentItems.map((it, idx) => (
+                              <tr key={it.key || idx}>
+                                <td style={{ textAlign: 'center', color: 'var(--text-muted)' }}>{idx + 1}</td>
+                                <td style={{ fontWeight: 600, color: it.isExchange ? '#0369a1' : 'var(--text-primary)' }}>
+                                  {it.name}
+                                </td>
+                                <td style={{ fontFamily: 'monospace', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                                  {it.sku}
+                                </td>
+                                <td style={{ textAlign: 'center', fontWeight: 800, color: '#0284c7' }}>
+                                  {it.quantity}
+                                </td>
+                                <td style={{ textAlign: 'right' }}>৳{it.price.toFixed(2)}</td>
+                                <td style={{ textAlign: 'right', fontWeight: 700 }}>৳{it.total.toFixed(2)}</td>
+                              </tr>
+                            ))
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* 4. TOTALS & OPTIONAL NOTES */}
+              <div style={{ display: 'flex', justifyContent: selectedSaleForDetails.notes ? 'space-between' : 'flex-end', alignItems: 'flex-start', flexWrap: 'wrap', gap: '1rem' }}>
+                {selectedSaleForDetails.notes && (
+                  <div style={{ flex: 1, minWidth: '220px', fontSize: '0.82rem', backgroundColor: '#f8fafc', padding: '0.65rem 0.85rem', borderRadius: '6px', border: '1px solid var(--border-color)' }}>
+                    <span style={{ fontWeight: 700, color: 'var(--text-muted)', fontSize: '0.74rem', display: 'block', marginBottom: '0.2rem' }}>NOTES</span>
+                    <div style={{ color: 'var(--text-secondary)', whiteSpace: 'pre-line' }}>{selectedSaleForDetails.notes}</div>
+                  </div>
+                )}
+
+                <div style={{
+                  width: '260px',
+                  backgroundColor: '#ffffff',
+                  border: '1px solid var(--border-color)',
+                  borderRadius: '6px',
+                  padding: '0.75rem 1rem',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '0.35rem',
+                  fontSize: '0.85rem'
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span style={{ color: 'var(--text-secondary)' }}>Subtotal:</span>
+                    <span>৳{(selectedSaleForDetails.total_amount || 0).toFixed(2)}</span>
+                  </div>
+                  {selectedSaleForDetails.discount > 0 && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', color: '#dc2626' }}>
+                      <span>Discount:</span>
+                      <span>-৳{(selectedSaleForDetails.discount || 0).toFixed(2)}</span>
+                    </div>
+                  )}
+                  {selectedSaleForDetails.tax > 0 && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span style={{ color: 'var(--text-secondary)' }}>Tax:</span>
+                      <span>+৳{(selectedSaleForDetails.tax || 0).toFixed(2)}</span>
+                    </div>
+                  )}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 800, borderTop: '1px solid var(--border-color)', paddingTop: '0.35rem', marginTop: '0.15rem' }}>
+                    <span>Total Bill:</span>
+                    <span style={{ color: '#0284c7' }}>৳{(selectedSaleForDetails.net_amount || 0).toFixed(2)}</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', color: '#059669', fontWeight: 700 }}>
+                    <span>Paid:</span>
+                    <span>৳{(selectedSaleForDetails.paid_amount || 0).toFixed(2)}</span>
+                  </div>
+                  <div style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    fontWeight: 800,
+                    color: (selectedSaleForDetails.net_amount - selectedSaleForDetails.paid_amount) > 0.01 ? '#dc2626' : '#059669'
+                  }}>
+                    <span>Due:</span>
+                    <span>৳{Math.max(0, (selectedSaleForDetails.net_amount || 0) - (selectedSaleForDetails.paid_amount || 0)).toFixed(2)}</span>
+                  </div>
+                </div>
+              </div>
+
+            </div>
+
+            {/* Modal Footer */}
+            <div className="modal-footer" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem', padding: '0.75rem 1.25rem' }}>
+              <div style={{ display: 'flex', gap: '0.4rem' }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => {
+                    setShowSaleDetailsModal(false);
+                    handleOpenEditSale(selectedSaleForDetails);
+                  }}
+                  style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', color: '#4f46e5' }}
+                >
+                  <Edit size={13} />
+                  <span>Edit</span>
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => {
+                    setShowSaleDetailsModal(false);
+                    handleOpenReturnModal(selectedSaleForDetails);
+                  }}
+                  style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', color: 'var(--warning-text, #d97706)' }}
+                >
+                  <RotateCcw size={13} />
+                  <span>Return</span>
+                </button>
+              </div>
+
+              <div style={{ display: 'flex', gap: '0.4rem' }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => setShowSaleDetailsModal(false)}
+                >
+                  Close
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-primary btn-sm"
+                  onClick={() => {
+                    setShowSaleDetailsModal(false);
+                    handleRePrint(selectedSaleForDetails);
+                  }}
+                  style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}
+                >
+                  <Printer size={13} />
+                  <span>Print</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* SALES EDIT INVOICE MODAL */}
+      {showEditSaleModal && editingSale && (
+        <div className="modal-overlay">
+          <div className="modal-content modal-lg" style={{ maxHeight: '95vh', display: 'flex', flexDirection: 'column' }}>
+            <div className="modal-header">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+                <div style={{
+                  width: '36px',
+                  height: '36px',
+                  borderRadius: '8px',
+                  background: 'rgba(79, 70, 229, 0.1)',
+                  color: '#4f46e5',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}>
+                  <Edit size={18} />
+                </div>
+                <div>
+                  <h3 className="modal-title" style={{ margin: 0, fontSize: '1.15rem' }}>
+                    Edit Sales Invoice — {editingSale.invoice_number || `INV#${editingSale.id.substring(0, 8).toUpperCase()}`}
+                  </h3>
+                  <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                    Update buyer, items, prices, discounts, and order notes
+                  </div>
+                </div>
+              </div>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => setShowEditSaleModal(false)}
+                style={{ borderRadius: '50%', padding: '0.35rem', border: 'none' }}
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveEditedSale} style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
+              <div className="modal-body" style={{ overflowY: 'auto', padding: '1.25rem', display: 'flex', flexDirection: 'column', gap: '1.15rem' }}>
+                
+                {/* Customer & Date Selection */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '0.85rem' }}>
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label style={{ fontWeight: 600, fontSize: '0.82rem', marginBottom: '0.3rem', display: 'block' }}>
+                      Customer / Buyer *
+                    </label>
+                    <select
+                      className="input-control"
+                      value={editCustomerId}
+                      onChange={(e) => setEditCustomerId(e.target.value)}
+                      required
+                    >
+                      <option value="">-- Select Customer --</option>
+                      {customers.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name} {c.phone ? `(${c.phone})` : ''}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label style={{ fontWeight: 600, fontSize: '0.82rem', marginBottom: '0.3rem', display: 'block' }}>
+                      Invoice Date *
+                    </label>
+                    <input
+                      type="date"
+                      className="input-control"
+                      value={editSaleDate}
+                      onChange={(e) => setEditSaleDate(e.target.value)}
+                      required
+                    />
+                  </div>
+                </div>
+
+                {/* Quick Search & Add Product */}
+                <div ref={editSearchRef} style={{ position: 'relative' }}>
+                  <label style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.3rem', fontWeight: 600, fontSize: '0.82rem' }}>
+                    <span>Add More Products from Stock</span>
+                    <span style={{ fontSize: '0.74rem', color: '#0284c7' }}>Click below to search catalog</span>
+                  </label>
+                  <div style={{ position: 'relative' }}>
+                    <Search size={15} style={{ position: 'absolute', left: '0.75rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+                    <input
+                      type="text"
+                      className="input-control"
+                      placeholder="Search product name, code or SKU to add..."
+                      value={editProductSearch}
+                      onChange={(e) => {
+                        setEditProductSearch(e.target.value);
+                        setShowEditSearchDropdown(true);
+                      }}
+                      onFocus={() => setShowEditSearchDropdown(true)}
+                      style={{ paddingLeft: '2.25rem', fontSize: '0.85rem' }}
+                    />
+                  </div>
+
+                  {showEditSearchDropdown && (
+                    <div
+                      style={{
+                        position: 'absolute',
+                        top: '100%',
+                        left: 0,
+                        right: 0,
+                        backgroundColor: '#ffffff',
+                        border: '1.5px solid #0284c7',
+                        borderRadius: 'var(--border-radius-sm)',
+                        boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.2)',
+                        maxHeight: '220px',
+                        overflowY: 'auto',
+                        zIndex: 1000,
+                        marginTop: '0.25rem'
+                      }}
+                    >
+                      {products
+                        .filter((item) => {
+                          if (!editProductSearch.trim()) return true;
+                          const q = editProductSearch.toLowerCase();
+                          const p = item.products;
+                          return (
+                            p?.name?.toLowerCase().includes(q) ||
+                            p?.sku?.toLowerCase().includes(q) ||
+                            p?.product_code?.toLowerCase().includes(q)
+                          );
+                        })
+                        .map((invItem) => (
+                          <div
+                            key={invItem.product_id || invItem.id}
+                            onClick={() => addToEditCart(invItem)}
+                            style={{
+                              padding: '0.55rem 0.85rem',
+                              borderBottom: '1px solid var(--border-color)',
+                              display: 'flex',
+                              justifyContent: 'space-between',
+                              alignItems: 'center',
+                              cursor: 'pointer',
+                              transition: 'background 0.15s'
+                            }}
+                            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = '#f0f9ff')}
+                            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
+                          >
+                            <div>
+                              <div style={{ fontWeight: 600, fontSize: '0.85rem' }}>{invItem.products?.name}</div>
+                              <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>
+                                SKU: {invItem.products?.sku || invItem.products?.product_code || 'N/A'}
+                              </div>
+                            </div>
+                            <div style={{ textAlign: 'right' }}>
+                              <div style={{ fontWeight: 700, color: '#0284c7', fontSize: '0.85rem' }}>
+                                ৳{(invItem.products?.sale_price || 0).toFixed(2)}
+                              </div>
+                              <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                                Stock: {isFactory ? '∞' : invItem.quantity}
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Items in Cart Table */}
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: '0.88rem', marginBottom: '0.45rem' }}>
+                    Invoice Line Items ({editCart.length})
+                  </div>
+                  <div className="table-container" style={{ maxHeight: '240px', overflowY: 'auto' }}>
+                    <table>
+                      <thead>
+                        <tr>
+                          <th style={{ width: '40px', textAlign: 'center' }}>SL</th>
+                          <th>Product Name</th>
+                          <th style={{ width: '100px', textAlign: 'center' }}>Quantity</th>
+                          <th style={{ width: '120px', textAlign: 'right' }}>Unit Price (৳)</th>
+                          <th style={{ width: '120px', textAlign: 'right' }}>Total (৳)</th>
+                          <th style={{ width: '45px', textAlign: 'center' }}></th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {loadingEditItems ? (
+                          <TableLoading colSpan={6} message="Loading invoice items..." />
+                        ) : editCart.length === 0 ? (
+                          <tr>
+                            <td colSpan={6} style={{ textAlign: 'center', padding: '1.5rem', color: '#dc2626' }}>
+                              Please add at least one product to this invoice.
+                            </td>
+                          </tr>
+                        ) : (
+                          editCart.map((item, index) => {
+                            const lineTotal = (parseFloat(item.quantity) || 0) * (parseFloat(item.unit_price) || 0);
+                            return (
+                              <tr key={item.product_id || index}>
+                                <td style={{ textAlign: 'center', fontWeight: 600 }}>{index + 1}</td>
+                                <td>
+                                  <div style={{ fontWeight: 600 }}>{item.product?.name || 'Item'}</div>
+                                  <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                                    {item.product?.sku || item.product?.product_code || ''}
+                                  </div>
+                                </td>
+                                <td style={{ textAlign: 'center' }}>
+                                  <input
+                                    type="number"
+                                    min="1"
+                                    step="1"
+                                    className="input-control"
+                                    style={{ width: '70px', textAlign: 'center', padding: '0.25rem 0.35rem', margin: '0 auto' }}
+                                    value={item.quantity}
+                                    onChange={(e) => {
+                                      const val = e.target.value;
+                                      setEditCart(
+                                        editCart.map((c, i) =>
+                                          i === index ? { ...c, quantity: val } : c
+                                        )
+                                      );
+                                    }}
+                                  />
+                                </td>
+                                <td style={{ textAlign: 'right' }}>
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    step="any"
+                                    className="input-control"
+                                    style={{ width: '95px', textAlign: 'right', padding: '0.25rem 0.45rem', marginLeft: 'auto' }}
+                                    value={item.unit_price}
+                                    onChange={(e) => {
+                                      const val = e.target.value;
+                                      setEditCart(
+                                        editCart.map((c, i) =>
+                                          i === index ? { ...c, unit_price: val } : c
+                                        )
+                                      );
+                                    }}
+                                  />
+                                </td>
+                                <td style={{ textAlign: 'right', fontWeight: 700, fontFamily: 'Outfit, sans-serif' }}>
+                                  ৳{lineTotal.toFixed(2)}
+                                </td>
+                                <td style={{ textAlign: 'center' }}>
+                                  <button
+                                    type="button"
+                                    onClick={() => removeFromEditCart(item.product_id)}
+                                    style={{
+                                      background: 'none',
+                                      border: 'none',
+                                      color: '#ef4444',
+                                      cursor: 'pointer',
+                                      padding: '0.3rem',
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      justifyContent: 'center',
+                                      borderRadius: '4px'
+                                    }}
+                                    title="Remove Item"
+                                  >
+                                    <Trash2 size={14} />
+                                  </button>
+                                </td>
+                              </tr>
+                            );
+                          })
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                {/* Calculation Inputs & Summary */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '1rem' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                    <div className="form-group" style={{ marginBottom: 0 }}>
+                      <label style={{ fontSize: '0.8rem', fontWeight: 600, display: 'block', marginBottom: '0.25rem' }}>
+                        Discount Amount (৳)
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        step="any"
+                        className="input-control"
+                        value={editDiscount}
+                        onChange={(e) => setEditDiscount(Math.max(0, parseFloat(e.target.value) || 0))}
+                      />
+                    </div>
+
+                    <div className="form-group" style={{ marginBottom: 0 }}>
+                      <label style={{ fontSize: '0.8rem', fontWeight: 600, display: 'block', marginBottom: '0.25rem' }}>
+                        Tax Rate (%)
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        step="any"
+                        className="input-control"
+                        value={editTaxRate}
+                        onChange={(e) => setEditTaxRate(Math.max(0, parseFloat(e.target.value) || 0))}
+                      />
+                    </div>
+
+                    <div className="form-group" style={{ marginBottom: 0 }}>
+                      <label style={{ fontSize: '0.8rem', fontWeight: 600, display: 'block', marginBottom: '0.25rem' }}>
+                        Invoice Notes / Remarks
+                      </label>
+                      <textarea
+                        className="input-control"
+                        rows={2}
+                        placeholder="Add optional notes or update details..."
+                        value={editNotes}
+                        onChange={(e) => setEditNotes(e.target.value)}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Live Total Card */}
+                  <div style={{
+                    padding: '1rem',
+                    borderRadius: 'var(--border-radius-sm)',
+                    border: '1px solid var(--border-color)',
+                    backgroundColor: '#f8fafc',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '0.45rem',
+                    justifyContent: 'center'
+                  }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem' }}>
+                      <span>Subtotal:</span>
+                      <span style={{ fontWeight: 600 }}>৳{getEditSubtotal().toFixed(2)}</span>
+                    </div>
+                    {editDiscount > 0 && (
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', color: '#dc2626' }}>
+                        <span>Discount:</span>
+                        <span>-৳{parseFloat(editDiscount).toFixed(2)}</span>
+                      </div>
+                    )}
+                    {editTaxRate > 0 && (
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem' }}>
+                        <span>Tax ({editTaxRate}%):</span>
+                        <span>+৳{getEditTaxAmount().toFixed(2)}</span>
+                      </div>
+                    )}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 800, fontSize: '1.1rem', borderTop: '1.5px solid var(--border-color)', paddingTop: '0.4rem', marginTop: '0.2rem' }}>
+                      <span>New Grand Total:</span>
+                      <span style={{ color: '#4f46e5' }}>৳{getEditGrandTotal().toFixed(2)}</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', color: '#059669', fontWeight: 700 }}>
+                      <span>Already Paid:</span>
+                      <span>৳{(editingSale.paid_amount || 0).toFixed(2)}</span>
+                    </div>
+                    <div style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      fontSize: '0.9rem',
+                      fontWeight: 800,
+                      color: (getEditGrandTotal() - (editingSale.paid_amount || 0)) > 0.01 ? '#dc2626' : '#059669'
+                    }}>
+                      <span>Updated Due:</span>
+                      <span>৳{Math.max(0, getEditGrandTotal() - (editingSale.paid_amount || 0)).toFixed(2)}</span>
+                    </div>
+                  </div>
+                </div>
+
+              </div>
+
+              <div className="modal-footer" style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem' }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => setShowEditSaleModal(false)}
+                  disabled={isSubmittingEdit}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="btn btn-primary"
+                  disabled={isSubmittingEdit}
+                  style={{ fontWeight: 700, minWidth: '150px' }}
+                >
+                  {isSubmittingEdit ? 'Saving Changes...' : 'Save & Update Invoice'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
+
