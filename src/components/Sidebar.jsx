@@ -8,6 +8,7 @@ import {
   UserPlus,
   Building,
   Shield,
+  ShieldCheck,
   Package,
   Layers,
   ShoppingCart,
@@ -21,6 +22,9 @@ import {
   ChevronDown,
   Truck,
   RotateCcw,
+  TrendingUp,
+  History,
+  User,
 } from 'lucide-react';
 
 import { hasPermission } from '../utils/permissions';
@@ -31,24 +35,46 @@ export default function Sidebar({ userProfile, onLogout, branches, isOpen, setIs
   const activeBranch = branches.find((b) => b.id === assignedBranchId);
 
   const location = useLocation();
-  const getActiveView = () => {
-    const path = location.pathname;
-    if (path === '/') return 'dashboard';
-    return path.substring(1); // removes leading slash
-  };
-  const activeView = getActiveView();
+  const currentPath = location.pathname;
+  const currentSearch = location.search || '';
+  const currentTab = new URLSearchParams(currentSearch).get('tab');
 
-  const [expandedMenus, setExpandedMenus] = useState({
-    users: true,
-  });
+  // Stores manual user toggle overrides for menus
+  const [userToggledMenus, setUserToggledMenus] = useState({});
 
-  const toggleSubmenu = (menuId, e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setExpandedMenus((prev) => ({
+  const toggleSubmenu = (menuId, currentlyExpanded, e) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    setUserToggledMenus((prev) => ({
       ...prev,
-      [menuId]: !prev[menuId],
+      [menuId]: !currentlyExpanded,
     }));
+  };
+
+  const checkIsSubActive = (sub) => {
+    const subBasePath = sub.path.split('?')[0];
+    if (subBasePath !== currentPath) return false;
+
+    const subTab = new URLSearchParams(sub.path.split('?')[1] || '').get('tab');
+    if (subTab) {
+      if (currentTab) {
+        return currentTab === subTab;
+      }
+      return Boolean(sub.isDefault);
+    }
+    return true;
+  };
+
+  const checkIsItemActive = (item) => {
+    if (item.subItems && item.subItems.length > 0) {
+      return item.subItems.some((sub) => checkIsSubActive(sub)) || currentPath === `/${item.id}`;
+    }
+    if (item.id === 'dashboard') {
+      return currentPath === '/';
+    }
+    return currentPath === `/${item.id}`;
   };
 
   const menuGroups = [
@@ -70,22 +96,59 @@ export default function Sidebar({ userProfile, onLogout, branches, isOpen, setIs
       title: 'Inventory & Stock',
       items: [
         { id: 'products', name: 'Products', icon: Layers, perm: 'product.view' },
-        { id: 'inventory', name: 'Inventory', icon: Package, perm: 'inventory.view' },
+        {
+          id: 'inventory',
+          name: 'Inventory',
+          icon: Package,
+          perm: 'inventory.view',
+          subItems: [
+            { id: 'stock', name: 'Stock Levels', icon: Package, path: '/inventory?tab=stock', isDefault: true },
+            { id: 'logs', name: 'Stock Logs', icon: History, path: '/inventory?tab=logs' },
+          ],
+        },
         { id: 'challans', name: 'Challans', icon: Truck, perm: 'inventory.view' },
       ],
     },
     {
       title: 'Finance & Accounts',
       items: [
-        { id: 'payments', name: 'Payments', icon: CreditCard, perm: 'payments.view' },
+        {
+          id: 'payments',
+          name: 'Payments',
+          icon: CreditCard,
+          perm: 'payments.view',
+          subItems: [
+            { id: 'invoices', name: 'Invoices Due', icon: Receipt, path: '/payments?tab=invoices', isDefault: true },
+            { id: 'ledger', name: 'Payment Ledger', icon: History, path: '/payments?tab=ledger' },
+          ],
+        },
         { id: 'expenses', name: 'Expenses', icon: Receipt, perm: 'expenses.view' },
       ],
     },
     {
       title: 'Reports & Admin',
       items: [
-        { id: 'reports', name: 'Reports', icon: BarChart3, perm: 'reports.view' },
-        { id: 'contacts', name: 'Contacts', icon: Users, perm: 'contacts.view' },
+        {
+          id: 'reports',
+          name: 'Reports',
+          icon: BarChart3,
+          perm: 'reports.view',
+          subItems: [
+            { id: 'overall', name: 'Sales & Turnover', icon: TrendingUp, path: '/reports?tab=overall', isDefault: true },
+            { id: 'customer', name: 'Customer Statement', icon: User, path: '/reports?tab=customer' },
+            { id: 'payments', name: 'Payment Collections', icon: CreditCard, path: '/reports?tab=payments' },
+          ],
+        },
+        {
+          id: 'contacts',
+          name: 'Contacts',
+          icon: Users,
+          perm: 'contacts.view',
+          subItems: [
+            { id: 'customer', name: 'Customers', icon: User, path: '/contacts?tab=customer', isDefault: true },
+            { id: 'supplier', name: 'Suppliers', icon: Building, path: '/contacts?tab=supplier' },
+          ],
+        },
         {
           id: 'users',
           name: 'Staff & Users',
@@ -93,7 +156,7 @@ export default function Sidebar({ userProfile, onLogout, branches, isOpen, setIs
           perm: 'users.manage',
           ownerOnly: true,
           subItems: [
-            { id: 'users', name: 'Staff Accounts', icon: UserPlus, path: '/users' },
+            { id: 'users', name: 'Staff Accounts', icon: UserPlus, path: '/users', isDefault: true },
             { id: 'branches', name: 'Branch Locations', icon: Building, path: '/branches' },
             { id: 'permissions', name: 'Role Permissions', icon: Shield, path: '/permissions' },
           ],
@@ -152,9 +215,10 @@ export default function Sidebar({ userProfile, onLogout, branches, isOpen, setIs
             {group.items.map((item) => {
               const Icon = item.icon;
               const hasSubs = Array.isArray(item.subItems) && item.subItems.length > 0;
-              const isChildActive = hasSubs && item.subItems.some((sub) => activeView === sub.id);
-              const isItemActive = activeView === item.id || isChildActive;
-              const isExpanded = expandedMenus[item.id] ?? true;
+              const isItemActive = checkIsItemActive(item);
+              const isExpanded = userToggledMenus[item.id] !== undefined 
+                ? userToggledMenus[item.id] 
+                : isItemActive;
 
               if (hasSubs) {
                 return (
@@ -164,8 +228,9 @@ export default function Sidebar({ userProfile, onLogout, branches, isOpen, setIs
                       onClick={(e) => {
                         if (isCollapsed) {
                           setIsCollapsed(false);
+                          toggleSubmenu(item.id, false, e);
                         } else {
-                          toggleSubmenu(item.id, e);
+                          toggleSubmenu(item.id, isExpanded, e);
                         }
                       }}
                       title={item.name}
@@ -182,10 +247,10 @@ export default function Sidebar({ userProfile, onLogout, branches, isOpen, setIs
                       <div className="sidebar-submenu">
                         {item.subItems.map((sub) => {
                           const SubIcon = sub.icon;
-                          const isSubActive = activeView === sub.id;
+                          const isSubActive = checkIsSubActive(sub);
                           return (
                             <Link
-                              key={sub.id}
+                              key={sub.id + sub.path}
                               to={sub.path}
                               className={`sidebar-subitem ${isSubActive ? 'active' : ''}`}
                               onClick={() => setIsOpen(false)}

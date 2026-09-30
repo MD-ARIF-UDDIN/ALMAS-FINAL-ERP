@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
 import { Users, Plus, Search, Trash2, Edit, Building, Mail, Phone, MapPin, Receipt, History, DollarSign } from 'lucide-react';
 import { TableLoading } from '../components/TableLoading';
@@ -6,11 +7,14 @@ import Pagination from '../components/Pagination';
 import { formatAmount } from '../utils/format';
 
 export default function Contacts({ userProfile, branches = [], addToast }) {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeTab = searchParams.get('tab') === 'supplier' ? 'supplier' : 'customer';
+  const setActiveTab = (tab) => setSearchParams({ tab }, { replace: true });
+
   const [contacts, setContacts] = useState([]);
   const [sales, setSales] = useState([]);
   const [purchases, setPurchases] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState('customer'); // 'customer' or 'supplier'
 
   // Pagination states
   const [page, setPage] = useState(1);

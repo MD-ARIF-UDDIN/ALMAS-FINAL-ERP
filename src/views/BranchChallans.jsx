@@ -54,9 +54,6 @@ export default function BranchChallans({ userProfile, branches = [], addToast })
     (isOwner && selectedBranchId === 'all')
   );
 
-  // Navigation View Tab: 'challans', 'approvals', 'payments_history'
-  const [activeMainTab, setActiveMainTab] = useState('challans');
-
   // State lists
   const [challans, setChallans] = useState([]);
   const [branchPayments, setBranchPayments] = useState([]);

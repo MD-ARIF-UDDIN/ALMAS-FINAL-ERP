@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
 import almasLogo from '../assets/almas_logo.jpg';
 import {
@@ -19,7 +20,11 @@ import { formatAmount } from '../utils/format';
 
 export default function Reports({ userProfile, branches = [] }) {
   // 3 Major Report Tabs
-  const [activeTab, setActiveTab] = useState('overall'); // 'overall' | 'customer' | 'payments'
+  const [searchParams, setSearchParams] = useSearchParams();
+  const validTabs = ['overall', 'customer', 'payments'];
+  const tabParam = searchParams.get('tab');
+  const activeTab = validTabs.includes(tabParam) ? tabParam : 'overall';
+  const setActiveTab = (tab) => setSearchParams({ tab }, { replace: true });
   const [loading, setLoading] = useState(false);
 
   // Date filters

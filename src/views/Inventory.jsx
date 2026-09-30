@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
 import { 
   Package, 
@@ -15,10 +16,13 @@ import { hasPermission } from '../utils/permissions';
 import { formatAmount } from '../utils/format';
 
 export default function Inventory({ userProfile, branches, addToast }) {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeTab = searchParams.get('tab') === 'logs' ? 'logs' : 'stock';
+  const setActiveTab = (tab) => setSearchParams({ tab }, { replace: true });
+
   const [stockItems, setStockItems] = useState([]);
   const [movements, setMovements] = useState([]);
   const [allProductsForAdjustment, setAllProductsForAdjustment] = useState([]);
-  const [activeTab, setActiveTab] = useState('stock'); // 'stock', 'logs'
   const [loadingStock, setLoadingStock] = useState(false);
   const [loadingMovements, setLoadingMovements] = useState(false);
   const [submittingAdjustment, setSubmittingAdjustment] = useState(false);

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
 import { CreditCard, TrendingUp, TrendingDown, Plus, Search, HelpCircle, DollarSign, History, X, Receipt } from 'lucide-react';
 import { TableLoading } from '../components/TableLoading';
@@ -6,7 +7,9 @@ import Pagination from '../components/Pagination';
 import { formatAmount, formatPlainNumber } from '../utils/format';
 
 export default function Payments({ userProfile, branches, addToast }) {
-  const [activeSubTab, setActiveSubTab] = useState('invoices'); // 'invoices' or 'ledger'
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeSubTab = searchParams.get('tab') === 'ledger' ? 'ledger' : 'invoices';
+  const setActiveSubTab = (tab) => setSearchParams({ tab }, { replace: true });
   const [invoiceType, setInvoiceType] = useState('sales'); // 'sales' (receivables) or 'purchases' (payables)
   const [loading, setLoading] = useState(true);
   const [loadingLedger, setLoadingLedger] = useState(false);
