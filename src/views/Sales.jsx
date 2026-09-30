@@ -2500,7 +2500,7 @@ export default function Sales({ userProfile, branches, addToast }) {
                 </div>
 
                 {/* QUICK PRESETS */}
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.5rem' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
                   <button
                     type="button"
                     onClick={() => {
@@ -2515,7 +2515,7 @@ export default function Sales({ userProfile, branches, addToast }) {
                       color: parseFloat(paidAmount || 0) === getGrandTotal() && getGrandTotal() > 0 ? '#059669' : 'inherit',
                       cursor: 'pointer',
                       fontWeight: 700,
-                      fontSize: '0.82rem'
+                      fontSize: '0.85rem'
                     }}
                   >
                     Full Paid
@@ -2534,29 +2534,10 @@ export default function Sales({ userProfile, branches, addToast }) {
                       color: parseFloat(paidAmount || 0) === 0 ? '#dc2626' : 'inherit',
                       cursor: 'pointer',
                       fontWeight: 700,
-                      fontSize: '0.82rem'
+                      fontSize: '0.85rem'
                     }}
                   >
                     Full Due
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setPaidAmount(formatPlainNumber(getGrandTotal() / 2));
-                    }}
-                    style={{
-                      padding: '0.55rem',
-                      borderRadius: '6px',
-                      border: parseFloat(paidAmount || 0) > 0 && parseFloat(paidAmount || 0) < getGrandTotal() ? '2px solid #d97706' : '1px solid var(--border-color)',
-                      background: parseFloat(paidAmount || 0) > 0 && parseFloat(paidAmount || 0) < getGrandTotal() ? 'rgba(217,119,6,0.1)' : 'var(--bg-secondary)',
-                      color: parseFloat(paidAmount || 0) > 0 && parseFloat(paidAmount || 0) < getGrandTotal() ? '#b45309' : 'inherit',
-                      cursor: 'pointer',
-                      fontWeight: 700,
-                      fontSize: '0.82rem'
-                    }}
-                  >
-                    50% Paid
                   </button>
                 </div>
 
