@@ -127,6 +127,8 @@ CREATE TABLE public.inventory (
     product_id UUID REFERENCES public.products(id) ON DELETE CASCADE NOT NULL,
     quantity INTEGER NOT NULL DEFAULT 0,
     min_stock_level INTEGER DEFAULT 5,
+    purchase_price DECIMAL(12, 2),
+    sale_price DECIMAL(12, 2),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
     UNIQUE(branch_id, product_id)
 );
@@ -177,7 +179,8 @@ CREATE TABLE public.purchases (
 CREATE TABLE public.purchase_items (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     purchase_id UUID REFERENCES public.purchases(id) ON DELETE CASCADE NOT NULL,
-    product_id UUID REFERENCES public.products(id) NOT NULL,
+    product_id UUID REFERENCES public.products(id) ON DELETE RESTRICT,
+    item_name VARCHAR(255),
     quantity INTEGER NOT NULL,
     unit_price DECIMAL(12, 2) NOT NULL,
     total_price DECIMAL(12, 2) NOT NULL
@@ -205,6 +208,8 @@ CREATE TABLE public.sale_items (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     sale_id UUID REFERENCES public.sales(id) ON DELETE CASCADE NOT NULL,
     product_id UUID REFERENCES public.products(id) NOT NULL,
+    size VARCHAR(100),
+    number_of_carton INTEGER DEFAULT 0,
     quantity INTEGER NOT NULL,
     unit_price DECIMAL(12, 2) NOT NULL,
     total_price DECIMAL(12, 2) NOT NULL
@@ -367,6 +372,29 @@ CREATE TRIGGER on_auth_user_created
   AFTER INSERT ON auth.users
   FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
 
+-- 6.4 Admin User Deletion Procedure
+CREATE OR REPLACE FUNCTION public.delete_user_by_admin(target_user_id UUID)
+RETURNS VOID AS $$
+BEGIN
+    DELETE FROM auth.users WHERE id = target_user_id;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, auth;
+
+GRANT EXECUTE ON FUNCTION public.delete_user_by_admin(UUID) TO authenticated, anon;
+
+-- 6.5 Admin User Password Reset Procedure
+CREATE OR REPLACE FUNCTION public.update_user_password_by_admin(target_user_id UUID, new_password TEXT)
+RETURNS VOID AS $$
+BEGIN
+    UPDATE auth.users 
+    SET encrypted_password = crypt(new_password, gen_salt('bf')),
+        updated_at = now()
+    WHERE id = target_user_id;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, auth, extensions;
+
+GRANT EXECUTE ON FUNCTION public.update_user_password_by_admin(UUID, TEXT) TO authenticated, anon;
+
 -- ====================================================================
 -- 7. PERFORMANCE INDEXES
 -- ====================================================================
@@ -463,3 +491,11 @@ CREATE POLICY "Allow anon full access to branch_challan_items" ON public.branch_
 
 CREATE POLICY "Allow authenticated full access to branch_payments" ON public.branch_payments FOR ALL TO authenticated USING (true) WITH CHECK (true);
 CREATE POLICY "Allow anon full access to branch_payments" ON public.branch_payments FOR ALL TO anon USING (true) WITH CHECK (true);
+
+-- Performance Indexes
+CREATE INDEX IF NOT EXISTS idx_sales_branch_date ON public.sales (branch_id, sale_date DESC);
+CREATE INDEX IF NOT EXISTS idx_sales_invoice_number ON public.sales (invoice_number);
+CREATE INDEX IF NOT EXISTS idx_inventory_movements_branch_created ON public.inventory_movements (branch_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_sale_items_sale_id ON public.sale_items (sale_id);
+CREATE INDEX IF NOT EXISTS idx_inventory_movements_product ON public.inventory_movements (product_id);
+

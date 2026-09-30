@@ -11,6 +11,7 @@ import {
 import { TableLoading } from '../components/TableLoading';
 import Pagination from '../components/Pagination';
 import { hasPermission } from '../utils/permissions';
+import { formatAmount } from '../utils/format';
 
 export default function Product({ userProfile, branches, addToast }) {
   const [products, setProducts] = useState([]);
@@ -30,13 +31,17 @@ export default function Product({ userProfile, branches, addToast }) {
   const [editId, setEditId] = useState(null);
   const [saving, setSaving] = useState(false);
 
-  // Form Fields: Product Code, Name, Category, Description, Buy Price, Sell Price
+  // Form Fields: Product Code, Name, Category, Description
   const [productCode, setProductCode] = useState('');
   const [name, setName] = useState('');
   const [category, setCategory] = useState('');
   const [description, setDescription] = useState('');
-  const [purchasePrice, setPurchasePrice] = useState('');
-  const [salePrice, setSalePrice] = useState('');
+  const [branchPrices, setBranchPrices] = useState({});
+
+  const isOwner = userProfile?.role === 'owner';
+  const userBranchId = userProfile?.branch_id;
+  const userBranch = branches.find((b) => b.id === userBranchId);
+  const activeBranches = (isOwner || !userBranchId) ? (branches || []) : branches.filter((b) => b.id === userBranchId);
 
   // Permissions
   const canView = hasPermission(userProfile, 'product.items_view') || hasPermission(userProfile, 'product.view') || hasPermission(userProfile, 'inventory.catalog_view');
@@ -81,7 +86,37 @@ export default function Product({ userProfile, branches, addToast }) {
 
       const { data, count, error } = await query;
       if (error) throw error;
-      setProducts(data || []);
+
+      const prods = data || [];
+      if (prods.length > 0) {
+        const prodIds = prods.map((p) => p.id);
+        const { data: invPrices, error: invErr } = await supabase
+          .from('inventory')
+          .select('product_id, branch_id, purchase_price, sale_price')
+          .in('product_id', prodIds);
+
+        if (!invErr && invPrices) {
+          const priceMap = {};
+          invPrices.forEach((inv) => {
+            if (!priceMap[inv.product_id]) priceMap[inv.product_id] = {};
+            priceMap[inv.product_id][inv.branch_id] = {
+              purchase_price: inv.purchase_price,
+              sale_price: inv.sale_price,
+            };
+          });
+
+          const enriched = prods.map((p) => ({
+            ...p,
+            branch_prices: priceMap[p.id] || {},
+          }));
+          setProducts(enriched);
+        } else {
+          setProducts(prods);
+        }
+      } else {
+        setProducts([]);
+      }
+
       setTotalCount(count || 0);
     } catch (err) {
       console.error('Error fetching products:', err);
@@ -104,14 +139,18 @@ export default function Product({ userProfile, branches, addToast }) {
     setName('');
     setCategory('');
     setDescription('');
-    setPurchasePrice('');
-    setSalePrice('');
+    setBranchPrices({});
     setIsEditing(false);
     setEditId(null);
   };
 
   const handleOpenCreate = () => {
     resetForm();
+    const initBranchPrices = {};
+    (branches || []).forEach((b) => {
+      initBranchPrices[b.id] = { buyPrice: '', salePrice: '' };
+    });
+    setBranchPrices(initBranchPrices);
     setShowModal(true);
   };
 
@@ -120,8 +159,24 @@ export default function Product({ userProfile, branches, addToast }) {
     setName(prod.name || '');
     setCategory(prod.category || '');
     setDescription(prod.description || '');
-    setPurchasePrice(prod.purchase_price ?? '');
-    setSalePrice(prod.sale_price ?? '');
+
+    const initBranchPrices = {};
+    (branches || []).forEach((b) => {
+      const existing = prod.branch_prices?.[b.id];
+      const bBuy = existing?.purchase_price !== null && existing?.purchase_price !== undefined 
+        ? existing.purchase_price 
+        : (prod.purchase_price ?? '');
+      const bSell = existing?.sale_price !== null && existing?.sale_price !== undefined 
+        ? existing.sale_price 
+        : (prod.sale_price ?? '');
+
+      initBranchPrices[b.id] = { 
+        buyPrice: bBuy !== '' && bBuy !== null && bBuy !== undefined ? bBuy : '', 
+        salePrice: bSell !== '' && bSell !== null && bSell !== undefined ? bSell : '' 
+      };
+    });
+    setBranchPrices(initBranchPrices);
+
     setIsEditing(true);
     setEditId(prod.id);
     setShowModal(true);
@@ -133,8 +188,6 @@ export default function Product({ userProfile, branches, addToast }) {
     const cleanName = name.trim();
     const cleanCategory = category.trim();
     const cleanDesc = description.trim();
-    const buyPriceNum = parseFloat(purchasePrice) || 0;
-    const sellPriceNum = parseFloat(salePrice) || 0;
 
     if (!cleanCode) {
       showMessage('Please provide a Product Code.', 'error');
@@ -144,20 +197,34 @@ export default function Product({ userProfile, branches, addToast }) {
     setSaving(true);
     try {
       const displayName = cleanName || cleanCode;
-      const payload = {
+      let savedProdId = editId;
+
+      // Find first non-empty price to store as fallback on products table
+      let firstBuy = null;
+      let firstSell = null;
+      Object.values(branchPrices).forEach((bp) => {
+        if (firstBuy === null && bp.buyPrice !== '' && !isNaN(parseFloat(bp.buyPrice))) {
+          firstBuy = parseFloat(bp.buyPrice);
+        }
+        if (firstSell === null && bp.salePrice !== '' && !isNaN(parseFloat(bp.salePrice))) {
+          firstSell = parseFloat(bp.salePrice);
+        }
+      });
+
+      const productPayload = {
         sku: cleanCode,
         product_code: cleanCode,
         name: displayName,
         category: cleanCategory || null,
         description: cleanDesc || null,
-        purchase_price: buyPriceNum,
-        sale_price: sellPriceNum,
+        purchase_price: firstBuy ?? 0,
+        sale_price: firstSell ?? 0,
       };
 
       if (isEditing) {
         const { error } = await supabase
           .from('products')
-          .update(payload)
+          .update(productPayload)
           .eq('id', editId);
 
         if (error) throw error;
@@ -165,24 +232,72 @@ export default function Product({ userProfile, branches, addToast }) {
       } else {
         const { data: newProd, error } = await supabase
           .from('products')
-          .insert([payload])
+          .insert([productPayload])
           .select()
           .single();
 
         if (error) throw error;
+        savedProdId = newProd.id;
+        showMessage(`Created product "${displayName}".`, 'success');
+      }
 
-        // Auto initialize inventory across all branches
-        if (branches && branches.length > 0 && newProd) {
-          const invRecords = branches.map((b) => ({
-            branch_id: b.id,
-            product_id: newProd.id,
-            quantity: 0,
-            min_stock_level: 5,
-          }));
-          await supabase.from('inventory').insert(invRecords);
+      // Upsert branch prices into inventory table for each active branch
+      if (branches && branches.length > 0 && savedProdId) {
+        let invUpserts = [];
+
+        if (isOwner) {
+          invUpserts = branches.map((b) => {
+            const bp = branchPrices[b.id] || {};
+            const customBuy = bp.buyPrice !== '' && !isNaN(parseFloat(bp.buyPrice)) ? parseFloat(bp.buyPrice) : null;
+            const customSell = bp.salePrice !== '' && !isNaN(parseFloat(bp.salePrice)) ? parseFloat(bp.salePrice) : null;
+
+            return {
+              branch_id: b.id,
+              product_id: savedProdId,
+              purchase_price: customBuy,
+              sale_price: customSell,
+              updated_at: new Date().toISOString(),
+            };
+          });
+        } else if (userBranchId) {
+          const bp = branchPrices[userBranchId] || {};
+          const customBuy = bp.buyPrice !== '' && !isNaN(parseFloat(bp.buyPrice)) ? parseFloat(bp.buyPrice) : null;
+          const customSell = bp.salePrice !== '' && !isNaN(parseFloat(bp.salePrice)) ? parseFloat(bp.salePrice) : null;
+
+          invUpserts = [
+            {
+              branch_id: userBranchId,
+              product_id: savedProdId,
+              purchase_price: customBuy,
+              sale_price: customSell,
+              updated_at: new Date().toISOString(),
+            },
+          ];
+
+          if (!isEditing) {
+            branches.forEach((b) => {
+              if (b.id !== userBranchId) {
+                invUpserts.push({
+                  branch_id: b.id,
+                  product_id: savedProdId,
+                  purchase_price: null,
+                  sale_price: null,
+                  updated_at: new Date().toISOString(),
+                });
+              }
+            });
+          }
         }
 
-        showMessage(`Created product "${displayName}".`, 'success');
+        if (invUpserts.length > 0) {
+          const { error: upsertErr } = await supabase
+            .from('inventory')
+            .upsert(invUpserts, { onConflict: 'branch_id,product_id', ignoreDuplicates: false });
+
+          if (upsertErr) {
+            console.warn('Inventory upsert warning:', upsertErr);
+          }
+        }
       }
 
       resetForm();
@@ -200,7 +315,7 @@ export default function Product({ userProfile, branches, addToast }) {
     try {
       // 1. Check for sales or purchase records
       const { count: salesCount } = await supabase
-        .from('sales_items')
+        .from('sale_items')
         .select('*', { count: 'exact', head: true })
         .eq('product_id', prodId);
 
@@ -234,6 +349,123 @@ export default function Product({ userProfile, branches, addToast }) {
     }
   };
 
+  // Filter states
+  const [selectedPriceBranch, setSelectedPriceBranch] = useState('all');
+
+  const getBranchBuyPrice = (p, branchId) => {
+    const custom = p.branch_prices?.[branchId]?.purchase_price;
+    if (custom !== null && custom !== undefined && custom !== '') return custom;
+    if (p.purchase_price !== null && p.purchase_price !== undefined && p.purchase_price !== '') return p.purchase_price;
+    return null;
+  };
+
+  const getBranchSellPrice = (p, branchId) => {
+    const custom = p.branch_prices?.[branchId]?.sale_price;
+    if (custom !== null && custom !== undefined && custom !== '') return custom;
+    if (p.sale_price !== null && p.sale_price !== undefined && p.sale_price !== '') return p.sale_price;
+    return null;
+  };
+
+  const renderBuyPrice = (p) => {
+    if (!isOwner) {
+      const price = getBranchBuyPrice(p, userBranchId);
+      return price !== null && price !== undefined && parseFloat(price) > 0 ? (
+        <span style={{ fontWeight: 600 }}>৳{formatAmount(price)}</span>
+      ) : (
+        <span style={{ color: 'var(--text-muted)' }}>—</span>
+      );
+    }
+
+    if (selectedPriceBranch !== 'all') {
+      const price = getBranchBuyPrice(p, selectedPriceBranch);
+      return price !== null && price !== undefined && parseFloat(price) > 0 ? (
+        <span style={{ fontWeight: 600 }}>৳{formatAmount(price)}</span>
+      ) : (
+        <span style={{ color: 'var(--text-muted)' }}>—</span>
+      );
+    }
+
+    // Owner "All Branches" view
+    const branchPriceList = (branches || []).map((b) => ({
+      ...b,
+      price: getBranchBuyPrice(p, b.id),
+    })).filter((b) => b.price !== null && b.price !== undefined && parseFloat(b.price) > 0);
+
+    if (branchPriceList.length === 0) {
+      return <span style={{ color: 'var(--text-muted)' }}>—</span>;
+    }
+
+    const firstVal = branchPriceList[0].price;
+    const allSame = branchPriceList.every((b) => b.price === firstVal);
+
+    if (allSame && branchPriceList.length === branches.length) {
+      return (
+        <span style={{ fontWeight: 600 }}>৳{formatAmount(firstVal)}</span>
+      );
+    }
+
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', alignItems: 'flex-end' }}>
+        {branchPriceList.map((b) => (
+          <div key={b.id} style={{ fontSize: '0.74rem', whiteSpace: 'nowrap' }}>
+            <span style={{ color: 'var(--text-muted)', fontWeight: 500 }}>{b.name}: </span>
+            <span style={{ fontWeight: 600 }}>৳{formatAmount(b.price)}</span>
+          </div>
+        ))}
+      </div>
+    );
+  };
+
+  const renderSellPrice = (p) => {
+    if (!isOwner) {
+      const price = getBranchSellPrice(p, userBranchId);
+      return price !== null && price !== undefined && parseFloat(price) > 0 ? (
+        <span style={{ fontWeight: 700, color: 'var(--success-text)' }}>৳{formatAmount(price)}</span>
+      ) : (
+        <span style={{ color: 'var(--text-muted)' }}>—</span>
+      );
+    }
+
+    if (selectedPriceBranch !== 'all') {
+      const price = getBranchSellPrice(p, selectedPriceBranch);
+      return price !== null && price !== undefined && parseFloat(price) > 0 ? (
+        <span style={{ fontWeight: 700, color: 'var(--success-text)' }}>৳{formatAmount(price)}</span>
+      ) : (
+        <span style={{ color: 'var(--text-muted)' }}>—</span>
+      );
+    }
+
+    // Owner "All Branches" view
+    const branchPriceList = (branches || []).map((b) => ({
+      ...b,
+      price: getBranchSellPrice(p, b.id),
+    })).filter((b) => b.price !== null && b.price !== undefined && parseFloat(b.price) > 0);
+
+    if (branchPriceList.length === 0) {
+      return <span style={{ color: 'var(--text-muted)' }}>—</span>;
+    }
+
+    const firstVal = branchPriceList[0].price;
+    const allSame = branchPriceList.every((b) => b.price === firstVal);
+
+    if (allSame && branchPriceList.length === branches.length) {
+      return (
+        <span style={{ fontWeight: 700, color: 'var(--success-text)' }}>৳{formatAmount(firstVal)}</span>
+      );
+    }
+
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', alignItems: 'flex-end' }}>
+        {branchPriceList.map((b) => (
+          <div key={b.id} style={{ fontSize: '0.74rem', whiteSpace: 'nowrap' }}>
+            <span style={{ color: 'var(--text-secondary)', fontWeight: 500 }}>{b.name}: </span>
+            <span style={{ fontWeight: 700, color: 'var(--success-text)' }}>৳{formatAmount(b.price)}</span>
+          </div>
+        ))}
+      </div>
+    );
+  };
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
       {/* Top Header */}
@@ -255,8 +487,8 @@ export default function Product({ userProfile, branches, addToast }) {
       <div className="card">
         {/* Search & Category Filter Bar */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem', marginBottom: '1rem' }}>
-          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flex: 1, minWidth: '260px' }}>
-            <div style={{ position: 'relative', width: '100%', maxWidth: '340px' }}>
+          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flex: 1, minWidth: '260px', flexWrap: 'wrap' }}>
+            <div style={{ position: 'relative', width: '100%', maxWidth: '320px' }}>
               <Search 
                 size={15} 
                 style={{ position: 'absolute', left: '0.75rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} 
@@ -274,7 +506,7 @@ export default function Product({ userProfile, branches, addToast }) {
             {categories.length > 0 && (
               <select
                 className="input-control"
-                style={{ width: '180px', fontSize: '0.85rem' }}
+                style={{ width: '160px', fontSize: '0.85rem' }}
                 value={categoryFilter}
                 onChange={(e) => setCategoryFilter(e.target.value)}
               >
@@ -286,6 +518,22 @@ export default function Product({ userProfile, branches, addToast }) {
                 ))}
               </select>
             )}
+
+            {isOwner && branches && branches.length > 1 && (
+              <select
+                className="input-control"
+                style={{ width: '190px', fontSize: '0.85rem' }}
+                value={selectedPriceBranch}
+                onChange={(e) => setSelectedPriceBranch(e.target.value)}
+              >
+                <option value="all">Pricing: All Branches</option>
+                {branches.map((b) => (
+                  <option key={b.id} value={b.id}>
+                    Pricing: {b.name}
+                  </option>
+                ))}
+              </select>
+            )}
           </div>
         </div>
 
@@ -293,23 +541,54 @@ export default function Product({ userProfile, branches, addToast }) {
         <div className="table-container">
           <table>
             <thead>
-              <tr>
-                <th style={{ width: '50px', textAlign: 'center' }}>SL</th>
-                <th style={{ width: '150px' }}>Product Code</th>
-                <th style={{ width: '240px' }}>Product Name</th>
-                <th style={{ width: '140px' }}>Category</th>
-                <th>Description</th>
-                <th style={{ width: '120px', textAlign: 'right' }}>Buy Price</th>
-                <th style={{ width: '120px', textAlign: 'right' }}>Sell Price</th>
-                <th style={{ width: '90px', textAlign: 'center' }}>Actions</th>
-              </tr>
+              {isOwner && branches && branches.length > 1 ? (
+                <>
+                  <tr>
+                    <th rowSpan={2} style={{ width: '45px', textAlign: 'center' }}>SL</th>
+                    <th rowSpan={2} style={{ width: '130px' }}>Product Code</th>
+                    <th rowSpan={2} style={{ width: '220px' }}>Product Name</th>
+                    <th rowSpan={2} style={{ width: '120px' }}>Category</th>
+                    <th rowSpan={2}>Description</th>
+                    <th colSpan={branches.length} style={{ textAlign: 'center', borderBottom: '1px solid var(--border-color)' }}>
+                      Buy Price (৳)
+                    </th>
+                    <th colSpan={branches.length} style={{ textAlign: 'center', borderBottom: '1px solid var(--border-color)' }}>
+                      Sell Price (৳)
+                    </th>
+                    <th rowSpan={2} style={{ width: '85px', textAlign: 'center' }}>Actions</th>
+                  </tr>
+                  <tr>
+                    {branches.map((b) => (
+                      <th key={`buy-${b.id}`} style={{ textAlign: 'right', fontSize: '0.74rem', width: '110px' }}>
+                        {b.name}
+                      </th>
+                    ))}
+                    {branches.map((b) => (
+                      <th key={`sell-${b.id}`} style={{ textAlign: 'right', fontSize: '0.74rem', width: '110px' }}>
+                        {b.name}
+                      </th>
+                    ))}
+                  </tr>
+                </>
+              ) : (
+                <tr>
+                  <th style={{ width: '45px', textAlign: 'center' }}>SL</th>
+                  <th style={{ width: '140px' }}>Product Code</th>
+                  <th style={{ width: '230px' }}>Product Name</th>
+                  <th style={{ width: '130px' }}>Category</th>
+                  <th>Description</th>
+                  <th style={{ width: '120px', textAlign: 'right' }}>Buy Price (৳)</th>
+                  <th style={{ width: '120px', textAlign: 'right' }}>Sell Price (৳)</th>
+                  <th style={{ width: '85px', textAlign: 'center' }}>Actions</th>
+                </tr>
+              )}
             </thead>
             <tbody>
               {loading ? (
-                <TableLoading colSpan={8} message="Loading products..." />
+                <TableLoading colSpan={isOwner && branches && branches.length > 1 ? 6 + branches.length * 2 : 8} message="Loading products..." />
               ) : products.length === 0 ? (
                 <tr>
-                  <td colSpan={8} style={{ textAlign: 'center', padding: '3rem 1rem', color: 'var(--text-muted)' }}>
+                  <td colSpan={isOwner && branches && branches.length > 1 ? 6 + branches.length * 2 : 8} style={{ textAlign: 'center', padding: '3rem 1rem', color: 'var(--text-muted)' }}>
                     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.5rem' }}>
                       <Package size={36} style={{ color: 'var(--border-focus)', opacity: 0.5 }} />
                       <div style={{ fontWeight: 600, fontSize: '0.95rem' }}>No products found</div>
@@ -357,12 +636,57 @@ export default function Product({ userProfile, branches, addToast }) {
                     <td style={{ color: p.description ? 'var(--text-secondary)' : 'var(--text-muted)', fontSize: '0.85rem' }}>
                       {p.description || '—'}
                     </td>
-                    <td style={{ textAlign: 'right', fontWeight: 600 }}>
-                      ৳{parseFloat(p.purchase_price || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                    </td>
-                    <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--success-text)' }}>
-                      ৳{parseFloat(p.sale_price || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                    </td>
+                    {isOwner && branches && branches.length > 1 ? (
+                      <>
+                        {branches.map((b) => {
+                          const price = getBranchBuyPrice(p, b.id);
+                          return (
+                            <td key={`buy-${b.id}`} style={{ textAlign: 'right', fontWeight: 600 }}>
+                              {price !== null && price !== undefined && parseFloat(price) > 0 ? (
+                                `৳${formatAmount(price)}`
+                              ) : (
+                                <span style={{ color: 'var(--text-muted)' }}>—</span>
+                              )}
+                            </td>
+                          );
+                        })}
+                        {branches.map((b) => {
+                          const price = getBranchSellPrice(p, b.id);
+                          return (
+                            <td key={`sell-${b.id}`} style={{ textAlign: 'right', fontWeight: 700, color: 'var(--success-text)' }}>
+                              {price !== null && price !== undefined && parseFloat(price) > 0 ? (
+                                `৳${formatAmount(price)}`
+                              ) : (
+                                <span style={{ color: 'var(--text-muted)' }}>—</span>
+                              )}
+                            </td>
+                          );
+                        })}
+                      </>
+                    ) : (
+                      <>
+                        <td style={{ textAlign: 'right', fontWeight: 600 }}>
+                          {(() => {
+                            const price = getBranchBuyPrice(p, userBranchId);
+                            return price !== null && price !== undefined && parseFloat(price) > 0 ? (
+                              `৳${formatAmount(price)}`
+                            ) : (
+                              <span style={{ color: 'var(--text-muted)' }}>—</span>
+                            );
+                          })()}
+                        </td>
+                        <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--success-text)' }}>
+                          {(() => {
+                            const price = getBranchSellPrice(p, userBranchId);
+                            return price !== null && price !== undefined && parseFloat(price) > 0 ? (
+                              `৳${formatAmount(price)}`
+                            ) : (
+                              <span style={{ color: 'var(--text-muted)' }}>—</span>
+                            );
+                          })()}
+                        </td>
+                      </>
+                    )}
                     <td style={{ textAlign: 'center' }}>
                       <div style={{ display: 'flex', gap: '0.35rem', justifyContent: 'center' }}>
                         <button
@@ -407,7 +731,7 @@ export default function Product({ userProfile, branches, addToast }) {
       {/* CREATE / EDIT PRODUCT MODAL */}
       {showModal && (
         <div className="modal-overlay">
-          <div className="modal-content" style={{ maxWidth: '540px', width: '95vw' }}>
+          <div className="modal-content" style={{ maxWidth: '560px', width: '95vw', maxHeight: '90vh', display: 'flex', flexDirection: 'column' }}>
             <div className="modal-header">
               <h3 className="modal-title">
                 {isEditing ? 'Edit Product' : 'New Product'}
@@ -420,8 +744,8 @@ export default function Product({ userProfile, branches, addToast }) {
                 ✕
               </button>
             </div>
-            <form onSubmit={handleSaveProduct}>
-              <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '1rem', padding: '1.25rem' }}>
+            <form onSubmit={handleSaveProduct} style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+              <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '1rem', padding: '1.25rem', overflowY: 'auto' }}>
                 <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '0.75rem' }}>
                   <div className="form-group">
                     <label>Product Code *</label>
@@ -458,40 +782,73 @@ export default function Product({ userProfile, branches, addToast }) {
                   />
                 </div>
 
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
-                  <div className="form-group">
-                    <label>Buy Price (৳) *</label>
-                    <input
-                      type="number"
-                      step="any"
-                      min="0"
-                      className="input-control"
-                      placeholder="0.00"
-                      value={purchasePrice}
-                      onChange={(e) => setPurchasePrice(e.target.value)}
-                      required
-                    />
+                {/* Per-Branch Direct Pricing Rows */}
+                {activeBranches && activeBranches.length > 0 && (
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label style={{ fontWeight: 600, fontSize: '0.85rem' }}>
+                      {isOwner ? 'Branch & Factory Pricing (Optional)' : `Branch Pricing (${userBranch?.name || 'Your Branch'})`}
+                    </label>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: '0.35rem' }}>
+                      {activeBranches.map((b) => (
+                        <div 
+                          key={b.id} 
+                          style={{ 
+                            display: 'grid', 
+                            gridTemplateColumns: activeBranches.length > 1 ? '1.2fr 1fr 1fr' : '1fr 1fr', 
+                            gap: '0.5rem', 
+                            alignItems: 'center', 
+                            padding: '0.5rem', 
+                            borderRadius: '6px', 
+                            backgroundColor: 'var(--bg-app)',
+                            border: '1px solid var(--border-color)' 
+                          }}
+                        >
+                          {activeBranches.length > 1 && (
+                            <span style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={b.name}>
+                              {b.name}
+                            </span>
+                          )}
+                          <div>
+                            <input
+                              type="number"
+                              step="any"
+                              min="0"
+                              className="input-control"
+                              style={{ height: '32px', fontSize: '0.82rem' }}
+                              placeholder="Buy Price (৳)"
+                              value={branchPrices[b.id]?.buyPrice ?? ''}
+                              onChange={(e) => setBranchPrices({
+                                ...branchPrices,
+                                [b.id]: { ...(branchPrices[b.id] || {}), buyPrice: e.target.value }
+                              })}
+                            />
+                          </div>
+                          <div>
+                            <input
+                              type="number"
+                              step="any"
+                              min="0"
+                              className="input-control"
+                              style={{ height: '32px', fontSize: '0.82rem' }}
+                              placeholder="Sell Price (৳)"
+                              value={branchPrices[b.id]?.salePrice ?? ''}
+                              onChange={(e) => setBranchPrices({
+                                ...branchPrices,
+                                [b.id]: { ...(branchPrices[b.id] || {}), salePrice: e.target.value }
+                              })}
+                            />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                  <div className="form-group">
-                    <label>Sell Price (৳) *</label>
-                    <input
-                      type="number"
-                      step="any"
-                      min="0"
-                      className="input-control"
-                      placeholder="0.00"
-                      value={salePrice}
-                      onChange={(e) => setSalePrice(e.target.value)}
-                      required
-                    />
-                  </div>
-                </div>
+                )}
 
                 <div className="form-group">
                   <label>Description</label>
                   <textarea
                     className="input-control"
-                    style={{ minHeight: '75px', resize: 'vertical' }}
+                    style={{ minHeight: '65px', resize: 'vertical' }}
                     placeholder="Enter description (optional)..."
                     value={description}
                     onChange={(e) => setDescription(e.target.value)}

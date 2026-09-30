@@ -25,6 +25,7 @@ import {
 } from 'lucide-react';
 import { TableLoading, LoadingBlock } from '../components/TableLoading';
 import Pagination from '../components/Pagination';
+import { formatAmount, formatPlainNumber } from '../utils/format';
 
 export default function Sales({ userProfile, branches, addToast }) {
   const location = useLocation();
@@ -50,10 +51,12 @@ export default function Sales({ userProfile, branches, addToast }) {
   const [saleDetailItems, setSaleDetailItems] = useState([]);
   const [saleDetailReturns, setSaleDetailReturns] = useState([]);
   const [saleDetailReplacements, setSaleDetailReplacements] = useState([]);
+  const [saleDetailPayments, setSaleDetailPayments] = useState([]);
   const [loadingSaleDetails, setLoadingSaleDetails] = useState(false);
 
   // Sales Edit Modal State
   const [showEditSaleModal, setShowEditSaleModal] = useState(false);
+  const [showEditConfirmModal, setShowEditConfirmModal] = useState(false);
   const [editingSale, setEditingSale] = useState(null);
   const [editCustomerId, setEditCustomerId] = useState('');
   const [editSaleDate, setEditSaleDate] = useState('');
@@ -197,11 +200,13 @@ export default function Sales({ userProfile, branches, addToast }) {
         }));
         setProducts(mapped);
       } else {
-        const { data, error } = await supabase
+        let { data, error } = await supabase
           .from('inventory')
           .select(`
             quantity,
             product_id,
+            purchase_price,
+            sale_price,
             products (
               id,
               sku,
@@ -215,7 +220,30 @@ export default function Sales({ userProfile, branches, addToast }) {
           `)
           .eq('branch_id', selectedBranchId);
 
-        if (error) throw error;
+        if (error) {
+          // Graceful fallback if inventory table doesn't have purchase_price/sale_price columns yet
+          const fallbackRes = await supabase
+            .from('inventory')
+            .select(`
+              quantity,
+              product_id,
+              products (
+                id,
+                sku,
+                product_code,
+                name,
+                sale_price,
+                purchase_price,
+                category,
+                description
+              )
+            `)
+            .eq('branch_id', selectedBranchId);
+
+          if (fallbackRes.error) throw fallbackRes.error;
+          data = fallbackRes.data;
+        }
+
         setProducts(data || []);
       }
     } catch (err) {
@@ -269,7 +297,19 @@ export default function Sales({ userProfile, branches, addToast }) {
       }
 
       if (historySearchQuery.trim()) {
-        query = query.ilike('invoice_number', `%${historySearchQuery.trim()}%`);
+        const clean = historySearchQuery.trim();
+        const { data: matchedContacts } = await supabase
+          .from('contacts')
+          .select('id')
+          .or(`name.ilike.%${clean}%,phone.ilike.%${clean}%`)
+          .limit(30);
+
+        if (matchedContacts && matchedContacts.length > 0) {
+          const contactIds = matchedContacts.map((c) => c.id).join(',');
+          query = query.or(`invoice_number.ilike.%${clean}%,notes.ilike.%${clean}%,customer_id.in.(${contactIds})`);
+        } else {
+          query = query.or(`invoice_number.ilike.%${clean}%,notes.ilike.%${clean}%`);
+        }
       }
 
       const { data, count, error } = await query;
@@ -376,12 +416,18 @@ export default function Sales({ userProfile, branches, addToast }) {
         showMessage('Item is out of stock.', 'error');
         return;
       }
+      const effectivePrice = (invItem.sale_price !== null && invItem.sale_price !== undefined)
+        ? parseFloat(invItem.sale_price) || 0
+        : (product.sale_price !== undefined ? parseFloat(product.sale_price) || 0 : 0);
+
       setCart([
         ...cart,
         {
           product,
           quantity: 1,
-          unitPrice: product.sale_price !== undefined ? product.sale_price : 0,
+          size: '',
+          number_of_carton: '',
+          unitPrice: effectivePrice,
           stockLimit: isFactory ? 999999 : invItem.quantity,
         },
       ]);
@@ -390,6 +436,14 @@ export default function Sales({ userProfile, branches, addToast }) {
 
   const removeFromCart = (productId) => {
     setCart(cart.filter((item) => item.product.id !== productId));
+  };
+
+  const updateItemSize = (productId, size) => {
+    setCart(cart.map((item) => (item.product.id === productId ? { ...item, size } : item)));
+  };
+
+  const updateItemCarton = (productId, number_of_carton) => {
+    setCart(cart.map((item) => (item.product.id === productId ? { ...item, number_of_carton } : item)));
   };
 
   const updateQty = (productId, amount) => {
@@ -568,61 +622,79 @@ export default function Sales({ userProfile, branches, addToast }) {
 
     setLoading(true);
     try {
-      // Create contact if it's a new customer
+      // Create or link contact if it's a new customer
       if (customerType === 'new') {
         const trimmedCustName = newCustName.trim();
         const trimmedCustPhone = newCustPhone.trim();
         const trimmedCustAddress = newCustAddress.trim();
 
         if (!trimmedCustName) {
-          showMessage('Please enter the client name.', 'error');
+          showMessage('Please enter the customer name.', 'error');
           setLoading(false);
           return;
         }
 
-        if (!trimmedCustPhone) {
-          showMessage('Client phone number is mandatory.', 'error');
-          setLoading(false);
-          return;
+        if (trimmedCustPhone) {
+          if (!/^\+?[0-9\s\-()]{7,15}$/.test(trimmedCustPhone)) {
+            showMessage('Please enter a valid customer phone number (7-15 digits).', 'error');
+            setLoading(false);
+            return;
+          }
+
+          // Check if customer with this phone number already exists
+          const { data: dupClient, error: dupErr } = await supabase
+            .from('contacts')
+            .select('id, name, phone')
+            .eq('phone', trimmedCustPhone)
+            .eq('type', 'customer');
+
+          if (dupErr) throw dupErr;
+
+          if (dupClient && dupClient.length > 0) {
+            const existingCustomer = dupClient[0];
+            customerId = existingCustomer.id;
+            setSelectedCustomerId(existingCustomer.id);
+            showMessage(`Customer with phone "${trimmedCustPhone}" already exists (${existingCustomer.name}). Linking invoice to existing profile.`, 'info');
+          } else {
+            const { data: contactData, error: contactError } = await supabase
+              .from('contacts')
+              .insert([
+                {
+                  type: 'customer',
+                  name: trimmedCustName,
+                  phone: trimmedCustPhone,
+                  address: trimmedCustAddress || null,
+                  branch_id: selectedBranchId,
+                }
+              ])
+              .select()
+              .single();
+
+            if (contactError) throw contactError;
+            customerId = contactData.id;
+            setCustomers((prev) => [contactData, ...prev]);
+            setSelectedCustomerId(contactData.id);
+          }
+        } else {
+          const { data: contactData, error: contactError } = await supabase
+            .from('contacts')
+            .insert([
+              {
+                type: 'customer',
+                name: trimmedCustName,
+                phone: null,
+                address: trimmedCustAddress || null,
+                branch_id: selectedBranchId,
+              }
+            ])
+            .select()
+            .single();
+
+          if (contactError) throw contactError;
+          customerId = contactData.id;
+          setCustomers((prev) => [contactData, ...prev]);
+          setSelectedCustomerId(contactData.id);
         }
-
-        if (!/^\+?[0-9\s\-()]{7,15}$/.test(trimmedCustPhone)) {
-          showMessage('Please enter a valid client phone number (7-15 digits).', 'error');
-          setLoading(false);
-          return;
-        }
-
-        // Duplicate phone check for customer
-        const { data: dupClient, error: dupErr } = await supabase
-          .from('contacts')
-          .select('id, name, phone')
-          .eq('phone', trimmedCustPhone)
-          .eq('type', 'customer');
-
-        if (dupErr) throw dupErr;
-
-        if (dupClient && dupClient.length > 0) {
-          showMessage(`A buyer with phone "${trimmedCustPhone}" already exists (${dupClient[0].name}). Please select them from the buyer list.`, 'error');
-          setLoading(false);
-          return;
-        }
-
-        const { data: contactData, error: contactError } = await supabase
-          .from('contacts')
-          .insert([
-            {
-              type: 'customer',
-              name: trimmedCustName,
-              phone: trimmedCustPhone,
-              address: trimmedCustAddress || null,
-              branch_id: selectedBranchId,
-            }
-          ])
-          .select()
-          .single();
-
-        if (contactError) throw contactError;
-        customerId = contactData.id;
       }
 
       const subtotal = getSubtotal();
@@ -652,21 +724,45 @@ export default function Sales({ userProfile, branches, addToast }) {
       if (saleError) throw saleError;
       const saleId = saleData[0].id;
 
-      // 2. Insert Sale Items
+      // 2. Insert Sale Items (including size and number_of_carton)
       const saleItemsData = cart.map((item) => {
         const qty = parseFloat(item.quantity) || 1;
         const price = getItemPrice(item);
-        return {
+        const row = {
           sale_id: saleId,
           product_id: item.product.id,
           quantity: qty,
           unit_price: price,
           total_price: price * qty,
         };
+        if (item.size) row.size = item.size;
+        if (item.number_of_carton) {
+          const ctn = parseInt(item.number_of_carton, 10);
+          if (!isNaN(ctn)) row.number_of_carton = ctn;
+        }
+        return row;
       });
 
       const { error: itemsError } = await supabase.from('sale_items').insert(saleItemsData);
-      if (itemsError) throw itemsError;
+      if (itemsError) {
+        if (itemsError.message?.includes('size') || itemsError.message?.includes('number_of_carton')) {
+          const fallbackData = cart.map((item) => {
+            const qty = parseFloat(item.quantity) || 1;
+            const price = getItemPrice(item);
+            return {
+              sale_id: saleId,
+              product_id: item.product.id,
+              quantity: qty,
+              unit_price: price,
+              total_price: price * qty,
+            };
+          });
+          const { error: fbErr } = await supabase.from('sale_items').insert(fallbackData);
+          if (fbErr) throw fbErr;
+        } else {
+          throw itemsError;
+        }
+      }
 
       // 2.1 FIFO deduction on branch_challan_items for this branch (tracks sold vs left on Challans)
       if (!isFactory) {
@@ -796,12 +892,7 @@ export default function Sales({ userProfile, branches, addToast }) {
       const { data: items, error } = await supabase
         .from('sale_items')
         .select(`
-          id,
-          sale_id,
-          product_id,
-          quantity,
-          unit_price,
-          total_price,
+          *,
           products (
             id,
             sku,
@@ -888,6 +979,19 @@ export default function Sales({ userProfile, branches, addToast }) {
 
       setSaleDetailReturns(returnsList);
       setSaleDetailReplacements(replacementsList);
+
+      // Fetch payment records for this invoice
+      try {
+        const { data: payHistory } = await supabase
+          .from('payments')
+          .select('*')
+          .eq('reference_invoice_id', sale.id)
+          .order('payment_date', { ascending: true });
+        setSaleDetailPayments(payHistory || []);
+      } catch (payErr) {
+        console.error('Error loading sale payments:', payErr);
+        setSaleDetailPayments([]);
+      }
     } catch (err) {
       console.error('Error loading sale details:', err);
       showMessage('Failed to load invoice items details.', 'error');
@@ -918,12 +1022,7 @@ export default function Sales({ userProfile, branches, addToast }) {
       const { data: items, error } = await supabase
         .from('sale_items')
         .select(`
-          id,
-          sale_id,
-          product_id,
-          quantity,
-          unit_price,
-          total_price,
+          *,
           products (
             id,
             sku,
@@ -942,6 +1041,8 @@ export default function Sales({ userProfile, branches, addToast }) {
         product_id: it.product_id,
         product: it.products || { id: it.product_id, name: 'Item', sku: '' },
         quantity: parseFloat(it.quantity) || 1,
+        size: it.size || '',
+        number_of_carton: it.number_of_carton === 0 ? '0' : (it.number_of_carton || ''),
         unit_price: parseFloat(it.unit_price) || 0,
         total_price: parseFloat(it.total_price) || 0,
         original_quantity: parseFloat(it.quantity) || 1,
@@ -991,6 +1092,8 @@ export default function Sales({ userProfile, branches, addToast }) {
           product_id: p.id,
           product: p,
           quantity: 1,
+          size: '',
+          number_of_carton: '',
           unit_price: parseFloat(p.sale_price) || 0,
           total_price: parseFloat(p.sale_price) || 0,
           original_quantity: 0,
@@ -1005,8 +1108,8 @@ export default function Sales({ userProfile, branches, addToast }) {
     setEditCart(editCart.filter((c) => c.product_id !== productId));
   };
 
-  // Submit Edited Sale
-  const handleSaveEditedSale = async (e) => {
+  // Validate and prompt confirmation before saving edited invoice
+  const handlePromptSaveEditedSale = (e) => {
     e.preventDefault();
     if (!editingSale) return;
 
@@ -1032,6 +1135,13 @@ export default function Sales({ userProfile, branches, addToast }) {
         return;
       }
     }
+
+    setShowEditConfirmModal(true);
+  };
+
+  // Perform actual save after user confirms
+  const handleConfirmSaveEditedSale = async () => {
+    if (!editingSale) return;
 
     setIsSubmittingEdit(true);
     try {
@@ -1095,23 +1205,47 @@ export default function Sales({ userProfile, branches, addToast }) {
         }
       }
 
-      // 2. Delete and re-insert sale_items
+      // 2. Delete and re-insert sale_items (including size and number_of_carton)
       await supabase.from('sale_items').delete().eq('sale_id', editingSale.id);
 
       const newSaleItems = editCart.map((it) => {
         const qty = parseFloat(it.quantity) || 1;
         const price = parseFloat(it.unit_price) || 0;
-        return {
+        const row = {
           sale_id: editingSale.id,
           product_id: it.product_id,
           quantity: qty,
           unit_price: price,
           total_price: qty * price,
         };
+        if (it.size) row.size = it.size;
+        if (it.number_of_carton) {
+          const ctn = parseInt(it.number_of_carton, 10);
+          if (!isNaN(ctn)) row.number_of_carton = ctn;
+        }
+        return row;
       });
 
       const { error: itemsErr } = await supabase.from('sale_items').insert(newSaleItems);
-      if (itemsErr) throw itemsErr;
+      if (itemsErr) {
+        if (itemsErr.message?.includes('size') || itemsErr.message?.includes('number_of_carton')) {
+          const fallbackData = editCart.map((it) => {
+            const qty = parseFloat(it.quantity) || 1;
+            const price = parseFloat(it.unit_price) || 0;
+            return {
+              sale_id: editingSale.id,
+              product_id: it.product_id,
+              quantity: qty,
+              unit_price: price,
+              total_price: qty * price,
+            };
+          });
+          const { error: fbErr } = await supabase.from('sale_items').insert(fallbackData);
+          if (fbErr) throw fbErr;
+        } else {
+          throw itemsErr;
+        }
+      }
 
       // 3. Recalculate Payment Status
       const newStatus = currentPaid >= grandTotal - 0.01 ? 'paid' : (currentPaid > 0 ? 'partial' : 'unpaid');
@@ -1134,6 +1268,7 @@ export default function Sales({ userProfile, branches, addToast }) {
       if (saleErr) throw saleErr;
 
       showMessage(`Invoice ${editingSale.invoice_number || editingSale.id.substring(0, 8)} updated successfully!`, 'success');
+      setShowEditConfirmModal(false);
       setShowEditSaleModal(false);
       fetchSalesHistory();
       fetchBranchInventory();
@@ -1142,6 +1277,172 @@ export default function Sales({ userProfile, branches, addToast }) {
       showMessage(err.message || 'Failed to update invoice.', 'error');
     } finally {
       setIsSubmittingEdit(false);
+    }
+  };
+
+  // Delete Sale Handler (Allowed only if no payment history and no return history)
+  const handleDeleteSale = async (sale) => {
+    if (!sale) return;
+
+    const invNum = sale.invoice_number || `INV#${sale.id.substring(0, 8).toUpperCase()}`;
+
+    // 1. Check if sale has any recorded paid amount
+    const paid = parseFloat(sale.paid_amount || 0);
+    if (paid > 0) {
+      showMessage(`Cannot delete invoice ${invNum}. It has recorded payments of ৳${formatAmount(paid)}. Only unpaid sales without payment history can be deleted.`, 'error');
+      return;
+    }
+
+    try {
+      // Check payments table for any linked records
+      const { data: payments, error: payErr } = await supabase
+        .from('payments')
+        .select('id, amount')
+        .eq('reference_invoice_id', sale.id);
+
+      if (payErr) throw payErr;
+
+      if (payments && payments.length > 0) {
+        showMessage(`Cannot delete invoice ${invNum}. It has ${payments.length} payment record(s) linked to it.`, 'error');
+        return;
+      }
+
+      // 2. Check if sale has any returns / exchanges recorded
+      const saleIdSub = sale.id ? sale.id.substring(0, 8) : '';
+      let movementsQuery = supabase
+        .from('inventory_movements')
+        .select('id, description');
+
+      if (sale.invoice_number && saleIdSub) {
+        movementsQuery = movementsQuery.or(`description.ilike.%${sale.invoice_number}%,description.ilike.%${saleIdSub}%`);
+      } else if (sale.invoice_number) {
+        movementsQuery = movementsQuery.ilike('description', `%${sale.invoice_number}%`);
+      } else if (saleIdSub) {
+        movementsQuery = movementsQuery.ilike('description', `%${saleIdSub}%`);
+      }
+
+      const { data: movements, error: movErr } = await movementsQuery;
+      if (movErr) throw movErr;
+
+      const hasReturnRecords = (movements || []).some((m) => {
+        const desc = (m.description || '').toLowerCase();
+        return desc.includes('return') || desc.includes('restocked') || desc.includes('crn-') || desc.includes('exchange');
+      });
+
+      if (hasReturnRecords) {
+        showMessage(`Cannot delete invoice ${invNum}. It has associated return or exchange records.`, 'error');
+        return;
+      }
+
+      // 3. User Confirmation
+      const confirmed = window.confirm(
+        `Are you sure you want to permanently delete Invoice ${invNum}?\n\nAll items in this invoice will be restored to inventory stock.`
+      );
+      if (!confirmed) return;
+
+      setLoading(true);
+
+      // 4. Fetch sale items to restore inventory
+      const { data: itemsToRestore, error: itemsFetchErr } = await supabase
+        .from('sale_items')
+        .select('id, product_id, quantity')
+        .eq('sale_id', sale.id);
+
+      if (itemsFetchErr) throw itemsFetchErr;
+
+      const targetBranchId = sale.branch_id || selectedBranchId;
+      const branchObj = branches.find((b) => b.id === targetBranchId);
+      const isTargetFactory = branchObj ? Boolean(branchObj.is_factory) : false;
+
+      // 5. Restore stock for physical branch
+      if (!isTargetFactory && itemsToRestore && itemsToRestore.length > 0) {
+        for (const it of itemsToRestore) {
+          const restoreQty = parseFloat(it.quantity) || 0;
+          if (restoreQty <= 0) continue;
+
+          // 5.1 Update branch inventory
+          const { data: invItem } = await supabase
+            .from('inventory')
+            .select('id, quantity')
+            .eq('branch_id', targetBranchId)
+            .eq('product_id', it.product_id)
+            .maybeSingle();
+
+          if (invItem) {
+            await supabase
+              .from('inventory')
+              .update({
+                quantity: (invItem.quantity || 0) + restoreQty,
+                updated_at: new Date().toISOString(),
+              })
+              .eq('id', invItem.id);
+          }
+
+          // 5.2 Log movement audit
+          await supabase.from('inventory_movements').insert([
+            {
+              branch_id: targetBranchId,
+              product_id: it.product_id,
+              type: 'adjustment_in',
+              quantity: restoreQty,
+              description: `Invoice Deleted [${invNum}]: Restored ${restoreQty} units back to stock`,
+              created_by: userProfile.id,
+            },
+          ]);
+
+          // 5.3 Restore Challan FIFO remaining_qty if applicable
+          try {
+            const { data: chItems } = await supabase
+              .from('branch_challan_items')
+              .select('id, sold_qty, remaining_qty, challan_id, branch_challans!inner(to_branch_id)')
+              .eq('product_id', it.product_id)
+              .eq('branch_challans.to_branch_id', targetBranchId)
+              .gt('sold_qty', 0)
+              .order('created_at', { ascending: false });
+
+            if (chItems && chItems.length > 0) {
+              let qtyRemainingToRestore = restoreQty;
+              for (const chItem of chItems) {
+                if (qtyRemainingToRestore <= 0) break;
+                const canRestore = Math.min(qtyRemainingToRestore, chItem.sold_qty);
+                await supabase
+                  .from('branch_challan_items')
+                  .update({
+                    sold_qty: Math.max(0, (chItem.sold_qty || 0) - canRestore),
+                    remaining_qty: (chItem.remaining_qty || 0) + canRestore,
+                  })
+                  .eq('id', chItem.id);
+                qtyRemainingToRestore -= canRestore;
+              }
+            }
+          } catch (chErr) {
+            console.error('Error rolling back challan remaining qty on sale delete:', chErr);
+          }
+        }
+      }
+
+      // 6. Delete the sale record (CASCADE deletes sale_items)
+      const { error: delErr } = await supabase
+        .from('sales')
+        .delete()
+        .eq('id', sale.id);
+
+      if (delErr) throw delErr;
+
+      showMessage(`Invoice ${invNum} was deleted successfully and stock has been restored.`, 'success');
+      
+      if (showSaleDetailsModal) {
+        setShowSaleDetailsModal(false);
+      }
+
+      // 7. Refresh data
+      fetchSales();
+      fetchInventory();
+    } catch (err) {
+      console.error('Error deleting sale:', err);
+      showMessage(err.message || 'Failed to delete invoice.', 'error');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -1213,13 +1514,17 @@ export default function Sales({ userProfile, branches, addToast }) {
         showMessage('Item is out of stock.', 'error');
         return;
       }
+      const effectivePrice = (invItem.sale_price !== null && invItem.sale_price !== undefined)
+        ? parseFloat(invItem.sale_price) || 0
+        : (product.sale_price !== undefined ? parseFloat(product.sale_price) || 0 : 0);
+
       setExchangeCart([
         ...exchangeCart,
         {
           product_id: product.id,
           product: product,
           quantity: 1,
-          unit_price: product.sale_price !== undefined ? product.sale_price : 0,
+          unit_price: effectivePrice,
           maxStock: maxStock,
         },
       ]);
@@ -1426,8 +1731,8 @@ export default function Sales({ userProfile, branches, addToast }) {
 
       // 4. Update Sale record with notes
       const returnNote = isExchange
-        ? `[Exchange ${creditNoteNumber}: Returned ৳${totalReturnCredit.toFixed(2)}, Replacement ৳${totalExchangeValue.toFixed(2)}, Net diff: ৳${exchangeDifference.toFixed(2)}]`
-        : `[Return ${creditNoteNumber}: ৳${totalReturnCredit.toFixed(2)} (${refundMethod}) - ${returnReasonCategory} ${returnReasonNotes ? `(${returnReasonNotes})` : ''}]`;
+        ? `[Exchange ${creditNoteNumber}: Returned ৳${formatAmount(totalReturnCredit)}, Replacement ৳${formatAmount(totalExchangeValue)}, Net diff: ৳${formatAmount(exchangeDifference)}]`
+        : `[Return ${creditNoteNumber}: ৳${formatAmount(totalReturnCredit)} (${refundMethod}) - ${returnReasonCategory} ${returnReasonNotes ? `(${returnReasonNotes})` : ''}]`;
       const combinedNotes = sale.notes ? `${sale.notes}\n${returnNote}` : returnNote;
 
       const { error: saleUpdateErr } = await supabase
@@ -1445,7 +1750,7 @@ export default function Sales({ userProfile, branches, addToast }) {
       showMessage(
         isExchange
           ? `Product exchange processed successfully!`
-          : `Sales return of ৳${totalReturnCredit.toLocaleString(undefined, { minimumFractionDigits: 2 })} processed & restocked!`,
+          : `Sales return of ৳${formatAmount(totalReturnCredit)} processed & restocked!`,
         'success'
       );
 
@@ -1556,13 +1861,13 @@ export default function Sales({ userProfile, branches, addToast }) {
       <div className="no-print card" style={{ padding: 0, overflow: 'hidden' }}>
         <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem', padding: '1rem 1.25rem' }}>
           <h3 className="card-title" style={{ margin: 0 }}>Invoices History</h3>
-          <div style={{ position: 'relative', width: '260px' }}>
+          <div style={{ position: 'relative', width: '320px' }}>
             <Search size={14} style={{ position: 'absolute', left: '0.75rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
             <input
               type="text"
               className="input-control"
               style={{ paddingLeft: '2.25rem', padding: '0.35rem 0.6rem 0.35rem 2.25rem', fontSize: '0.82rem' }}
-              placeholder="Search invoice number..."
+              placeholder="Search by invoice #, customer, phone..."
               value={historySearchQuery}
               onChange={(e) => {
                 setHistorySearchQuery(e.target.value);
@@ -1593,7 +1898,7 @@ export default function Sales({ userProfile, branches, addToast }) {
                 ) : salesHistory.length === 0 ? (
                   <tr>
                     <td colSpan={userProfile?.role === 'owner' ? 10 : 9} style={{ textAlign: 'center', padding: '2rem' }}>
-                      No sales invoices recorded yet. Click "Create Invoice (POS)" to sell items.
+                      {historySearchQuery.trim() ? `No sales invoices found matching "${historySearchQuery}".` : 'No sales invoices recorded yet. Click "Create Invoice (POS)" to sell items.'}
                     </td>
                   </tr>
                 ) : (
@@ -1614,48 +1919,59 @@ export default function Sales({ userProfile, branches, addToast }) {
                           <td style={{ fontWeight: 600 }}>{branches.find(b => b.id === sale.branch_id)?.name || 'Unknown'}</td>
                         )}
                         <td>{new Date(sale.sale_date).toLocaleDateString()}</td>
-                        <td style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{sale.contacts?.name || 'Walk-in Customer'}</td>
-                        <td style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 600 }}>৳{sale.net_amount.toFixed(2)}</td>
-                        <td style={{ fontFamily: 'Outfit, sans-serif', color: 'var(--success-text)' }}>৳{sale.paid_amount.toFixed(2)}</td>
-                        <td style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 700, color: due > 0 ? 'var(--danger-text)' : 'inherit' }}>৳{due.toFixed(2)}</td>
+                        <td>
+                          <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{sale.contacts?.name || 'Walk-in Customer'}</div>
+                          {sale.contacts?.phone && (
+                            <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>{sale.contacts.phone}</div>
+                          )}
+                        </td>
+                        <td style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 600 }}>৳{formatAmount(sale.net_amount)}</td>
+                        <td style={{ fontFamily: 'Outfit, sans-serif', color: 'var(--success-text)' }}>৳{formatAmount(sale.paid_amount)}</td>
+                        <td style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 700, color: due > 0 ? 'var(--danger-text)' : 'inherit' }}>৳{formatAmount(due)}</td>
                         <td>
                           <span className={`badge badge-${sale.payment_status}`}>{sale.payment_status}</span>
                         </td>
                         <td style={{ textAlign: 'center' }}>
-                          <div style={{ display: 'inline-flex', gap: '0.3rem', justifyContent: 'center' }}>
+                          <div style={{ display: 'inline-flex', gap: '0.35rem', justifyContent: 'center', alignItems: 'center' }}>
                             <button
-                              className="btn btn-secondary btn-sm"
+                              className="btn btn-secondary btn-sm btn-icon"
                               onClick={() => handleOpenSaleDetails(sale)}
-                              title="View Sales Details"
+                              title="View Invoice Details"
+                              style={{ color: '#0284c7', padding: '0.35rem 0.45rem' }}
                             >
-                              <Eye size={13} style={{ color: '#0284c7' }} />
-                              <span style={{ marginLeft: '0.2rem' }}>Details</span>
+                              <Eye size={15} />
                             </button>
                             <button
-                              className="btn btn-secondary btn-sm"
+                              className="btn btn-secondary btn-sm btn-icon"
                               onClick={() => handleOpenEditSale(sale)}
                               title="Edit Invoice"
-                              style={{ color: '#4f46e5' }}
+                              style={{ color: '#4f46e5', padding: '0.35rem 0.45rem' }}
                             >
-                              <Edit size={13} />
-                              <span style={{ marginLeft: '0.2rem' }}>Edit</span>
+                              <Edit size={15} />
                             </button>
                             <button
-                              className="btn btn-secondary btn-sm"
+                              className="btn btn-secondary btn-sm btn-icon"
                               onClick={() => handleRePrint(sale)}
-                              title="Re-Print Invoice / Challan"
+                              title="Print Invoice / Challan"
+                              style={{ color: '#334155', padding: '0.35rem 0.45rem' }}
                             >
-                              <Printer size={13} />
-                              <span style={{ marginLeft: '0.2rem' }}>Print</span>
+                              <Printer size={15} />
                             </button>
                             <button
-                              className="btn btn-secondary btn-sm"
+                              className="btn btn-secondary btn-sm btn-icon"
                               onClick={() => handleOpenReturnModal(sale)}
                               title="Process Sales Return / Credit Note"
-                              style={{ color: 'var(--warning-text, #d97706)' }}
+                              style={{ color: 'var(--warning-text, #d97706)', padding: '0.35rem 0.45rem' }}
                             >
-                              <RotateCcw size={13} />
-                              <span style={{ marginLeft: '0.2rem' }}>Return</span>
+                              <RotateCcw size={15} />
+                            </button>
+                            <button
+                              className="btn btn-secondary btn-sm btn-icon"
+                              onClick={() => handleDeleteSale(sale)}
+                              title="Delete Invoice (Restores Inventory Stock)"
+                              style={{ color: 'var(--danger, #ef4444)', padding: '0.35rem 0.45rem' }}
+                            >
+                              <Trash2 size={15} />
                             </button>
                           </div>
                         </td>
@@ -1727,7 +2043,7 @@ export default function Sales({ userProfile, branches, addToast }) {
                       >
                         <div className="pos-product-sku">{invItem.products?.sku}</div>
                         <div className="pos-product-name">{invItem.products?.name}</div>
-                        <span className="pos-product-price">৳{invItem.products?.sale_price.toFixed(2)}</span>
+                        <span className="pos-product-price">৳{formatAmount(invItem.products?.sale_price)}</span>
                         <span className="pos-product-stock">Stock: {invItem.quantity} {invItem.products?.unit}</span>
                       </div>
                     ))
@@ -1931,7 +2247,7 @@ export default function Sales({ userProfile, branches, addToast }) {
                                 </div>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
                                   <span style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 700, color: '#0284c7', fontSize: '0.95rem' }}>
-                                    ৳{(invItem.products?.sale_price || 0).toFixed(2)}
+                                    ৳{formatAmount(invItem.products?.sale_price)}
                                   </span>
                                   <button
                                     type="button"
@@ -1950,77 +2266,132 @@ export default function Sales({ userProfile, branches, addToast }) {
                     )}
                   </div>
 
-                  {/* Cart List */}
-                  <div className="cart-items-list">
-                    {cart.length === 0 ? (
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text-muted)', fontSize: '0.88rem', padding: '1.5rem 0', textAlign: 'center' }}>
-                        Cart is empty. Search above to add items to invoice.
-                      </div>
-                    ) : (
-                      cart.map((item) => (
-                        <div key={item.product.id} className="cart-item">
-                          <div className="cart-item-info">
-                            <div className="cart-item-name">{item.product.name}</div>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', marginTop: '0.2rem' }}>
-                              <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)' }}>৳</span>
-                              <input
-                                type="number"
-                                className="input-control cart-item-price-input"
-                                min="0"
-                                step="any"
-                                value={item.unitPrice !== undefined ? item.unitPrice : (item.product.sale_price || 0)}
-                                onChange={(e) => handleCustomPriceChange(item.product.id, e.target.value)}
-                                onBlur={() => handlePriceBlur(item.product.id)}
-                                title="Unit Sale Price"
-                                placeholder="Price"
-                              />
-                              <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>/ {item.product.unit || 'pcs'}</span>
-                            </div>
-                          </div>
-                          <div className="cart-item-qty-controls">
-                            <button
-                              type="button"
-                              className="btn btn-secondary btn-sm qty-btn"
-                              onClick={() => updateQty(item.product.id, -1)}
-                              title="Decrease quantity"
-                            >
-                              -
-                            </button>
-                            <input
-                              type="number"
-                              className="input-control cart-item-qty-input"
-                              min="1"
-                              step="any"
-                              max={!isFactory ? item.stockLimit : undefined}
-                              value={item.quantity}
-                              onChange={(e) => handleCustomQtyChange(item.product.id, e.target.value)}
-                              onBlur={() => handleQtyBlur(item.product.id)}
-                              title={`Enter quantity (Available: ${item.stockLimit})`}
-                            />
-                            <button
-                              type="button"
-                              className="btn btn-secondary btn-sm qty-btn"
-                              onClick={() => updateQty(item.product.id, 1)}
-                              title="Increase quantity"
-                            >
-                              +
-                            </button>
-                          </div>
-                          <div style={{ fontWeight: 600, color: 'var(--text-primary)', minWidth: '70px', textAlign: 'right' }}>
-                            ৳{(getItemPrice(item) * (parseFloat(item.quantity) || 0)).toFixed(2)}
-                          </div>
-                          <button
-                            type="button"
-                            className="btn btn-danger btn-sm btn-icon"
-                            style={{ background: 'none', border: 'none', color: 'var(--danger)' }}
-                            onClick={() => removeFromCart(item.product.id)}
-                            title="Remove item"
-                          >
-                            <Trash2 size={16} />
-                          </button>
-                        </div>
-                      ))
-                    )}
+                  {/* Cart Items Table */}
+                  <div className="table-container" style={{ maxHeight: '320px', overflowY: 'auto', border: '1px solid var(--border-color)', borderRadius: 'var(--border-radius-sm)', marginTop: '0.4rem' }}>
+                    <table style={{ margin: 0, fontSize: '0.82rem' }}>
+                      <thead style={{ position: 'sticky', top: 0, zIndex: 5, backgroundColor: 'var(--bg-secondary, #f8fafc)' }}>
+                        <tr>
+                          <th style={{ textAlign: 'left', padding: '0.45rem 0.5rem' }}>Product</th>
+                          <th style={{ width: '90px', textAlign: 'center', padding: '0.45rem 0.35rem' }}>Size</th>
+                          <th style={{ width: '70px', textAlign: 'center', padding: '0.45rem 0.35rem' }}>Cartons</th>
+                          <th style={{ width: '100px', textAlign: 'center', padding: '0.45rem 0.35rem' }}>Qty</th>
+                          <th style={{ width: '95px', textAlign: 'right', padding: '0.45rem 0.35rem' }}>Price (৳)</th>
+                          <th style={{ width: '85px', textAlign: 'right', padding: '0.45rem 0.5rem' }}>Total (৳)</th>
+                          <th style={{ width: '36px', textAlign: 'center', padding: '0.45rem 0.25rem' }}></th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {cart.length === 0 ? (
+                          <tr>
+                            <td colSpan={7} style={{ textAlign: 'center', padding: '2rem 1rem', color: 'var(--text-muted)' }}>
+                              Cart is empty. Search above to add items to invoice.
+                            </td>
+                          </tr>
+                        ) : (
+                          cart.map((item) => {
+                            const unitPrice = item.unitPrice !== undefined ? item.unitPrice : (item.product.sale_price || 0);
+                            const lineTotal = (parseFloat(unitPrice) || 0) * (parseFloat(item.quantity) || 0);
+                            return (
+                              <tr key={item.product.id} style={{ borderBottom: '1px solid var(--border-color)' }}>
+                                <td style={{ padding: '0.45rem 0.5rem', verticalAlign: 'middle' }}>
+                                  <div style={{ fontWeight: 600, color: 'var(--text-primary)', lineHeight: 1.25 }}>
+                                    {item.product.name}
+                                  </div>
+                                  <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '0.15rem' }}>
+                                    {item.product.sku || item.product.product_code ? (
+                                      <span style={{ fontFamily: 'monospace' }}>{item.product.sku || item.product.product_code}</span>
+                                    ) : null}
+                                    {item.product.unit ? ` • ${item.product.unit}` : ''}
+                                  </div>
+                                </td>
+                                <td style={{ textAlign: 'center', padding: '0.35rem 0.25rem', verticalAlign: 'middle' }}>
+                                  <input
+                                    type="text"
+                                    className="input-control"
+                                    placeholder="Size"
+                                    style={{ width: '100%', minWidth: '70px', padding: '0.25rem 0.35rem', fontSize: '0.8rem', textAlign: 'center', height: '28px', minHeight: '28px' }}
+                                    value={item.size || ''}
+                                    onChange={(e) => updateItemSize(item.product.id, e.target.value)}
+                                  />
+                                </td>
+                                <td style={{ textAlign: 'center', padding: '0.35rem 0.25rem', verticalAlign: 'middle' }}>
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    step="1"
+                                    placeholder="0"
+                                    className="input-control"
+                                    style={{ width: '100%', minWidth: '55px', padding: '0.25rem 0.35rem', fontSize: '0.8rem', textAlign: 'center', height: '28px', minHeight: '28px' }}
+                                    value={item.number_of_carton === '' ? '' : (item.number_of_carton ?? '')}
+                                    onChange={(e) => updateItemCarton(item.product.id, e.target.value)}
+                                  />
+                                </td>
+                                <td style={{ textAlign: 'center', padding: '0.35rem 0.25rem', verticalAlign: 'middle' }}>
+                                  <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.2rem' }}>
+                                    <button
+                                      type="button"
+                                      className="btn btn-secondary btn-sm"
+                                      style={{ width: '22px', height: '26px', padding: 0, minWidth: 'unset', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700 }}
+                                      onClick={() => updateQty(item.product.id, -1)}
+                                      title="Decrease"
+                                    >
+                                      -
+                                    </button>
+                                    <input
+                                      type="number"
+                                      className="input-control"
+                                      min="1"
+                                      step="any"
+                                      max={!isFactory ? item.stockLimit : undefined}
+                                      style={{ width: '45px', textAlign: 'center', padding: '0.2rem 0.2rem', height: '26px', minHeight: '26px', fontSize: '0.82rem', fontWeight: 600 }}
+                                      value={item.quantity}
+                                      onChange={(e) => handleCustomQtyChange(item.product.id, e.target.value)}
+                                      onBlur={() => handleQtyBlur(item.product.id)}
+                                      title={`Available: ${item.stockLimit}`}
+                                    />
+                                    <button
+                                      type="button"
+                                      className="btn btn-secondary btn-sm"
+                                      style={{ width: '22px', height: '26px', padding: 0, minWidth: 'unset', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700 }}
+                                      onClick={() => updateQty(item.product.id, 1)}
+                                      title="Increase"
+                                    >
+                                      +
+                                    </button>
+                                  </div>
+                                </td>
+                                <td style={{ textAlign: 'right', padding: '0.35rem 0.25rem', verticalAlign: 'middle' }}>
+                                  <input
+                                    type="number"
+                                    className="input-control"
+                                    min="0"
+                                    step="any"
+                                    style={{ width: '100%', minWidth: '70px', textAlign: 'right', padding: '0.25rem 0.4rem', fontSize: '0.82rem', height: '28px', minHeight: '28px' }}
+                                    value={unitPrice}
+                                    onChange={(e) => handleCustomPriceChange(item.product.id, e.target.value)}
+                                    onBlur={() => handlePriceBlur(item.product.id)}
+                                    title="Unit Sale Price"
+                                  />
+                                </td>
+                                <td style={{ textAlign: 'right', padding: '0.45rem 0.5rem', fontWeight: 700, fontFamily: 'Outfit, sans-serif', color: 'var(--text-primary)', verticalAlign: 'middle' }}>
+                                  ৳{formatAmount(lineTotal)}
+                                </td>
+                                <td style={{ textAlign: 'center', padding: '0.35rem 0.25rem', verticalAlign: 'middle' }}>
+                                  <button
+                                    type="button"
+                                    style={{ background: 'none', border: 'none', color: 'var(--danger, #ef4444)', cursor: 'pointer', padding: '0.25rem', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
+                                    onClick={() => removeFromCart(item.product.id)}
+                                    title="Remove item"
+                                  >
+                                    <Trash2 size={15} />
+                                  </button>
+                                </td>
+                              </tr>
+                            );
+                          })
+                        )}
+                      </tbody>
+                    </table>
                   </div>
 
                   {/* Totals Summary */}
@@ -2028,7 +2399,7 @@ export default function Sales({ userProfile, branches, addToast }) {
                     <div className="cart-totals-summary">
                       <div className="totals-row">
                         <span>Subtotal</span>
-                        <span>৳{getSubtotal().toFixed(2)}</span>
+                        <span>৳{formatAmount(getSubtotal())}</span>
                       </div>
                       <div className="totals-row">
                         <span>Discount</span>
@@ -2054,17 +2425,24 @@ export default function Sales({ userProfile, branches, addToast }) {
                       </div>
                       <div className="totals-row grand-total">
                         <span>Grand Total</span>
-                        <span>৳{getGrandTotal().toFixed(2)}</span>
+                        <span>৳{formatAmount(getGrandTotal())}</span>
                       </div>
                       <button
                         className="btn btn-primary"
                         style={{ marginTop: '0.5rem', padding: '0.8rem', fontWeight: 700 }}
                         onClick={() => {
-                          if (!selectedCustomerId) {
-                            showMessage('Please select a customer before checkout.', 'error');
-                            return;
+                          if (customerType === 'new') {
+                            if (!newCustName.trim()) {
+                              showMessage('Please enter the customer name.', 'error');
+                              return;
+                            }
+                          } else {
+                            if (!selectedCustomerId) {
+                              showMessage('Please select a customer before checkout.', 'error');
+                              return;
+                            }
                           }
-                          setPaidAmount(getGrandTotal().toFixed(2));
+                          setPaidAmount(formatPlainNumber(getGrandTotal()));
                           setPaymentMethod('cash');
                           setCustomerGivenCash('');
                           setShowCheckoutModal(true);
@@ -2108,7 +2486,7 @@ export default function Sales({ userProfile, branches, addToast }) {
                 }}>
                   <div style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', textTransform: 'uppercase', fontWeight: 600 }}>Total Amount</div>
                   <div style={{ fontFamily: 'Outfit, sans-serif', fontSize: '2rem', fontWeight: 800, color: 'var(--primary-color, #2563eb)' }}>
-                    ৳{getGrandTotal().toFixed(2)}
+                    ৳{formatAmount(getGrandTotal())}
                   </div>
                 </div>
 
@@ -2117,7 +2495,7 @@ export default function Sales({ userProfile, branches, addToast }) {
                   <button
                     type="button"
                     onClick={() => {
-                      setPaidAmount(getGrandTotal().toFixed(2));
+                      setPaidAmount(formatPlainNumber(getGrandTotal()));
                       setPaymentMethod('cash');
                     }}
                     style={{
@@ -2156,7 +2534,7 @@ export default function Sales({ userProfile, branches, addToast }) {
                   <button
                     type="button"
                     onClick={() => {
-                      setPaidAmount((getGrandTotal() / 2).toFixed(2));
+                      setPaidAmount(formatPlainNumber(getGrandTotal() / 2));
                     }}
                     style={{
                       padding: '0.55rem',
@@ -2230,7 +2608,7 @@ export default function Sales({ userProfile, branches, addToast }) {
                           Due:
                         </span>
                         <span style={{ color: '#dc2626', fontFamily: 'Outfit, sans-serif', fontWeight: 800, fontSize: '1.1rem' }}>
-                          ৳{due.toFixed(2)}
+                          ৳{formatAmount(due)}
                         </span>
                       </div>
                     );
@@ -2249,7 +2627,7 @@ export default function Sales({ userProfile, branches, addToast }) {
                           Change:
                         </span>
                         <span style={{ color: '#2563eb', fontFamily: 'Outfit, sans-serif', fontWeight: 800, fontSize: '1.1rem' }}>
-                          ৳{overpaid.toFixed(2)}
+                          ৳{formatAmount(overpaid)}
                         </span>
                       </div>
                     );
@@ -2497,12 +2875,13 @@ export default function Sales({ userProfile, branches, addToast }) {
                 >
                   <thead>
                     <tr style={{ borderBottom: '1.5px solid #000', backgroundColor: '#f1f5f9' }}>
-                      <th style={{ width: '45px', borderRight: '1px solid #000', padding: '0.45rem 0.35rem', textAlign: 'center', fontWeight: 800 }}>Sl. No.</th>
+                      <th style={{ width: '35px', borderRight: '1px solid #000', padding: '0.45rem 0.25rem', textAlign: 'center', fontWeight: 800 }}>Sl.</th>
                       <th style={{ borderRight: '1px solid #000', padding: '0.45rem 0.5rem', textAlign: 'left', fontWeight: 800 }}>Description of Goods</th>
-                      <th style={{ width: '100px', borderRight: '1px solid #000', padding: '0.45rem 0.5rem', textAlign: 'center', fontWeight: 800 }}>Size / Code</th>
-                      <th style={{ width: '85px', borderRight: '1px solid #000', padding: '0.45rem 0.5rem', textAlign: 'center', fontWeight: 800 }}>Quantity</th>
-                      <th style={{ width: '95px', borderRight: '1px solid #000', padding: '0.45rem 0.5rem', textAlign: 'right', fontWeight: 800 }}>Price (৳)</th>
-                      <th style={{ width: '110px', padding: '0.45rem 0.5rem', textAlign: 'right', fontWeight: 800 }}>Total (৳)</th>
+                      <th style={{ width: '80px', borderRight: '1px solid #000', padding: '0.45rem 0.35rem', textAlign: 'center', fontWeight: 800 }}>Size</th>
+                      <th style={{ width: '65px', borderRight: '1px solid #000', padding: '0.45rem 0.35rem', textAlign: 'center', fontWeight: 800 }}>Cartons</th>
+                      <th style={{ width: '75px', borderRight: '1px solid #000', padding: '0.45rem 0.5rem', textAlign: 'center', fontWeight: 800 }}>Quantity</th>
+                      <th style={{ width: '90px', borderRight: '1px solid #000', padding: '0.45rem 0.5rem', textAlign: 'right', fontWeight: 800 }}>Price (৳)</th>
+                      <th style={{ width: '100px', padding: '0.45rem 0.5rem', textAlign: 'right', fontWeight: 800 }}>Total (৳)</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -2510,9 +2889,11 @@ export default function Sales({ userProfile, branches, addToast }) {
                       const qty = parseFloat(item.quantity) || 1;
                       const price = parseFloat(item.unit_price || item.product?.sale_price || 0);
                       const total = parseFloat(item.total_price || (qty * price));
+                      const itemSize = item.size || item.products?.category || item.product?.category || '—';
+                      const itemCartons = item.number_of_carton !== undefined && item.number_of_carton !== null ? item.number_of_carton : '0';
                       return (
                         <tr key={item.id || index} style={{ borderBottom: '1px solid #cbd5e1' }}>
-                          <td style={{ textAlign: 'center', borderRight: '1px solid #000', padding: '0.45rem 0.35rem', fontWeight: 600 }}>
+                          <td style={{ textAlign: 'center', borderRight: '1px solid #000', padding: '0.45rem 0.25rem', fontWeight: 600 }}>
                             {index + 1}
                           </td>
                           <td style={{ borderRight: '1px solid #000', padding: '0.45rem 0.5rem' }}>
@@ -2521,17 +2902,20 @@ export default function Sales({ userProfile, branches, addToast }) {
                               Code: {item.products?.product_code || item.products?.sku || item.product?.sku || 'N/A'}
                             </div>
                           </td>
-                          <td style={{ textAlign: 'center', borderRight: '1px solid #000', padding: '0.45rem 0.5rem', fontSize: '0.78rem', fontWeight: 600 }}>
-                            {item.products?.category || item.product?.category || item.products?.sku || '120/2'}
+                          <td style={{ textAlign: 'center', borderRight: '1px solid #000', padding: '0.45rem 0.35rem', fontSize: '0.78rem', fontWeight: 600 }}>
+                            {itemSize}
+                          </td>
+                          <td style={{ textAlign: 'center', borderRight: '1px solid #000', padding: '0.45rem 0.35rem', fontSize: '0.8rem', fontWeight: 700 }}>
+                            {itemCartons}
                           </td>
                           <td style={{ textAlign: 'center', borderRight: '1px solid #000', padding: '0.45rem 0.5rem', fontWeight: 800 }}>
                             {qty}
                           </td>
                           <td style={{ textAlign: 'right', borderRight: '1px solid #000', padding: '0.45rem 0.5rem' }}>
-                            ৳{price.toFixed(2)}
+                            ৳{formatAmount(price)}
                           </td>
                           <td style={{ textAlign: 'right', padding: '0.45rem 0.5rem', fontWeight: 700 }}>
-                            ৳{total.toFixed(2)}
+                            ৳{formatAmount(total)}
                           </td>
                         </tr>
                       );
@@ -2544,31 +2928,31 @@ export default function Sales({ userProfile, branches, addToast }) {
                   <div style={{ width: '260px', display: 'flex', flexDirection: 'column', gap: '0.25rem', fontSize: '0.85rem', border: '1px solid #000', padding: '0.65rem 0.85rem', borderRadius: '4px', backgroundColor: '#fdfdfd' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                       <span style={{ fontWeight: 600 }}>Subtotal:</span>
-                      <span>৳{(activeInvoice.total_amount || 0).toFixed(2)}</span>
+                      <span>৳{formatAmount(activeInvoice.total_amount)}</span>
                     </div>
                     {activeInvoice.discount > 0 && (
                       <div style={{ display: 'flex', justifyContent: 'space-between', color: '#dc2626' }}>
                         <span>Discount:</span>
-                        <span>-৳{activeInvoice.discount.toFixed(2)}</span>
+                        <span>-৳{formatAmount(activeInvoice.discount)}</span>
                       </div>
                     )}
                     {activeInvoice.tax > 0 && (
                       <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                         <span>Tax / VAT:</span>
-                        <span>৳{activeInvoice.tax.toFixed(2)}</span>
+                        <span>৳{formatAmount(activeInvoice.tax)}</span>
                       </div>
                     )}
                     <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 900, borderTop: '1.5px solid #000', paddingTop: '0.35rem', fontSize: '0.98rem' }}>
                       <span>Total Bill:</span>
-                      <span>৳{(activeInvoice.net_amount || 0).toFixed(2)}</span>
+                      <span>৳{formatAmount(activeInvoice.net_amount)}</span>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', color: '#059669', fontWeight: 700 }}>
                       <span>Paid Amount:</span>
-                      <span>৳{(activeInvoice.paid_amount || 0).toFixed(2)}</span>
+                      <span>৳{formatAmount(activeInvoice.paid_amount)}</span>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', color: (activeInvoice.net_amount - activeInvoice.paid_amount) > 0 ? '#dc2626' : '#000', fontWeight: 800 }}>
                       <span>Due Balance:</span>
-                      <span>৳{Math.max(0, (activeInvoice.net_amount || 0) - (activeInvoice.paid_amount || 0)).toFixed(2)}</span>
+                      <span>৳{formatAmount(Math.max(0, (activeInvoice.net_amount || 0) - (activeInvoice.paid_amount || 0)))}</span>
                     </div>
                   </div>
                 </div>
@@ -2665,16 +3049,16 @@ export default function Sales({ userProfile, branches, addToast }) {
                   </div>
                   <div>
                     <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem', textTransform: 'uppercase', fontWeight: 600 }}>Total Bill</div>
-                    <div style={{ fontWeight: 700 }}>৳{(selectedSaleForReturn.net_amount || 0).toFixed(2)}</div>
+                    <div style={{ fontWeight: 700 }}>৳{formatAmount(selectedSaleForReturn.net_amount)}</div>
                   </div>
                   <div>
                     <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem', textTransform: 'uppercase', fontWeight: 600 }}>Paid</div>
-                    <div style={{ fontWeight: 700, color: 'var(--success-text)' }}>৳{(selectedSaleForReturn.paid_amount || 0).toFixed(2)}</div>
+                    <div style={{ fontWeight: 700, color: 'var(--success-text)' }}>৳{formatAmount(selectedSaleForReturn.paid_amount)}</div>
                   </div>
                   <div>
                     <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem', textTransform: 'uppercase', fontWeight: 600 }}>Due</div>
                     <div style={{ fontWeight: 700, color: (selectedSaleForReturn.net_amount - selectedSaleForReturn.paid_amount) > 0 ? 'var(--danger-text)' : 'inherit' }}>
-                      ৳{Math.max(0, (selectedSaleForReturn.net_amount || 0) - (selectedSaleForReturn.paid_amount || 0)).toFixed(2)}
+                      ৳{formatAmount(Math.max(0, (selectedSaleForReturn.net_amount || 0) - (selectedSaleForReturn.paid_amount || 0)))}
                     </div>
                   </div>
                 </div>
@@ -2719,7 +3103,7 @@ export default function Sales({ userProfile, branches, addToast }) {
                                   {item.quantity}
                                 </td>
                                 <td style={{ textAlign: 'right' }}>
-                                  ৳{unitP.toFixed(2)}
+                                  ৳{formatAmount(unitP)}
                                 </td>
                                 <td style={{ textAlign: 'center' }}>
                                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', justifyContent: 'center' }}>
@@ -2762,7 +3146,7 @@ export default function Sales({ userProfile, branches, addToast }) {
                                   </div>
                                 </td>
                                 <td style={{ textAlign: 'right', fontWeight: 700, color: lineTotal > 0 ? 'var(--warning-text, #d97706)' : 'inherit' }}>
-                                  ৳{lineTotal.toFixed(2)}
+                                  ৳{formatAmount(lineTotal)}
                                 </td>
                               </tr>
                             );
@@ -2791,11 +3175,11 @@ export default function Sales({ userProfile, branches, addToast }) {
                       gap: '0.75rem'
                     }}>
                       <div style={{ fontWeight: 700, fontSize: '1rem' }}>
-                        Total Refund: <span style={{ color: 'var(--warning-text, #d97706)' }}>৳{totalRefund.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                        Total Refund: <span style={{ color: 'var(--warning-text, #d97706)' }}>৳{formatAmount(totalRefund)}</span>
                       </div>
                       {due > 0 && totalRefund > 0 && (
                         <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-                          Remaining Due: <strong>৳{Math.max(0, due - totalRefund).toFixed(2)}</strong>
+                          Remaining Due: <strong>৳{formatAmount(Math.max(0, due - totalRefund))}</strong>
                         </div>
                       )}
                     </div>
@@ -2915,7 +3299,7 @@ export default function Sales({ userProfile, branches, addToast }) {
                               {item.products?.name}
                             </div>
                             <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '0.25rem', color: 'var(--text-muted)', fontSize: '0.75rem' }}>
-                              <span>৳{(item.products?.sale_price || 0).toFixed(2)}</span>
+                              <span>৳{formatAmount(item.products?.sale_price)}</span>
                               <span>Stock: {isFactory ? '∞' : item.quantity}</span>
                             </div>
                           </div>
@@ -2986,7 +3370,7 @@ export default function Sales({ userProfile, branches, addToast }) {
                                     </div>
                                   </td>
                                   <td style={{ textAlign: 'right', fontWeight: 700 }}>
-                                    ৳{((parseFloat(it.quantity) || 0) * (parseFloat(it.unit_price) || 0)).toFixed(2)}
+                                    ৳{formatAmount((parseFloat(it.quantity) || 0) * (parseFloat(it.unit_price) || 0))}
                                   </td>
                                   <td>
                                     <button
@@ -3029,7 +3413,7 @@ export default function Sales({ userProfile, branches, addToast }) {
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
                         <div style={{ fontWeight: 600, fontSize: '0.9rem' }}>Returned Goods Total:</div>
                         <div style={{ fontWeight: 700, fontSize: '1rem', color: 'var(--warning-text, #d97706)' }}>
-                          ৳{totalReturn.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          ৳{formatAmount(totalReturn)}
                         </div>
                       </div>
 
@@ -3038,14 +3422,14 @@ export default function Sales({ userProfile, branches, addToast }) {
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
                             <div style={{ fontWeight: 600, fontSize: '0.9rem' }}>Replacement Goods Total:</div>
                             <div style={{ fontWeight: 700, fontSize: '1rem', color: 'var(--primary-color)' }}>
-                              ৳{totalExchange.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              ৳{formatAmount(totalExchange)}
                             </div>
                           </div>
 
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px dashed var(--border-color)', paddingTop: '0.4rem', marginTop: '0.2rem' }}>
                             <div style={{ fontWeight: 700, fontSize: '0.95rem' }}>Settlement:</div>
                             <div style={{ fontWeight: 800, fontSize: '1.05rem', color: diff > 0 ? 'var(--danger-text)' : (diff < 0 ? 'var(--success-text)' : 'inherit') }}>
-                              {diff > 0 ? `Customer to Pay: +৳${diff.toFixed(2)}` : (diff < 0 ? `Store to Refund: -৳${Math.abs(diff).toFixed(2)}` : 'Even Exchange (৳0.00)')}
+                              {diff > 0 ? `Customer to Pay: +৳${formatAmount(diff)}` : (diff < 0 ? `Store to Refund: -৳${formatAmount(Math.abs(diff))}` : 'Even Exchange (৳0)')}
                             </div>
                           </div>
                         </>
@@ -3053,7 +3437,7 @@ export default function Sales({ userProfile, branches, addToast }) {
 
                       {returnType === 'cash' && due > 0 && totalReturn > 0 && (
                         <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-                          Remaining Due: <strong>৳{Math.max(0, due - totalReturn).toFixed(2)}</strong>
+                          Remaining Due: <strong>৳{formatAmount(Math.max(0, due - totalReturn))}</strong>
                         </div>
                       )}
                     </div>
@@ -3087,7 +3471,7 @@ export default function Sales({ userProfile, branches, addToast }) {
                       if (diff > 0) {
                         return (
                           <div className="form-group" style={{ marginBottom: 0 }}>
-                            <label style={{ display: 'block', fontWeight: 600, marginBottom: '0.35rem', fontSize: '0.85rem' }}>Payment Method (+৳{diff.toFixed(2)})</label>
+                            <label style={{ display: 'block', fontWeight: 600, marginBottom: '0.35rem', fontSize: '0.85rem' }}>Payment Method (+৳{formatAmount(diff)})</label>
                             <select
                               className="input-control"
                               value={exchangePaymentMethod}
@@ -3102,7 +3486,7 @@ export default function Sales({ userProfile, branches, addToast }) {
                       } else if (diff < 0) {
                         return (
                           <div className="form-group" style={{ marginBottom: 0 }}>
-                            <label style={{ display: 'block', fontWeight: 600, marginBottom: '0.35rem', fontSize: '0.85rem' }}>Refund Difference (-৳{Math.abs(diff).toFixed(2)})</label>
+                            <label style={{ display: 'block', fontWeight: 600, marginBottom: '0.35rem', fontSize: '0.85rem' }}>Refund Difference (-৳{formatAmount(Math.abs(diff))})</label>
                             <select
                               className="input-control"
                               value={refundMethod}
@@ -3122,7 +3506,7 @@ export default function Sales({ userProfile, branches, addToast }) {
                           <div className="form-group" style={{ marginBottom: 0 }}>
                             <label style={{ display: 'block', fontWeight: 600, marginBottom: '0.35rem', fontSize: '0.85rem' }}>Settlement</label>
                             <div className="input-control" style={{ background: 'var(--bg-secondary)', fontWeight: 600, color: 'var(--success-text)' }}>
-                              ✓ Even Exchange (৳0.00)
+                              ✓ Even Exchange (৳0)
                             </div>
                           </div>
                         );
@@ -3265,8 +3649,8 @@ export default function Sales({ userProfile, branches, addToast }) {
                             </div>
                           </td>
                           <td style={{ textAlign: 'center', fontWeight: 700 }}>{retQty}</td>
-                          <td style={{ textAlign: 'right' }}>৳{unitP.toFixed(2)}</td>
-                          <td style={{ textAlign: 'right', fontWeight: 700 }}>৳{lineTotal.toFixed(2)}</td>
+                          <td style={{ textAlign: 'right' }}>৳{formatAmount(unitP)}</td>
+                          <td style={{ textAlign: 'right', fontWeight: 700 }}>৳{formatAmount(lineTotal)}</td>
                         </tr>
                       );
                     })}
@@ -3302,8 +3686,8 @@ export default function Sales({ userProfile, branches, addToast }) {
                                 <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>SKU: {item.product?.sku || 'N/A'}</div>
                               </td>
                               <td style={{ textAlign: 'center', fontWeight: 700 }}>{qty}</td>
-                              <td style={{ textAlign: 'right' }}>৳{unitP.toFixed(2)}</td>
-                              <td style={{ textAlign: 'right', fontWeight: 700 }}>৳{lineTotal.toFixed(2)}</td>
+                              <td style={{ textAlign: 'right' }}>৳{formatAmount(unitP)}</td>
+                              <td style={{ textAlign: 'right', fontWeight: 700 }}>৳{formatAmount(lineTotal)}</td>
                             </tr>
                           );
                         })}
@@ -3315,30 +3699,30 @@ export default function Sales({ userProfile, branches, addToast }) {
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', width: '320px', alignSelf: 'flex-end', marginTop: '1.25rem' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.9rem', color: 'var(--text-secondary)' }}>
                     <span>Returned Items Value:</span>
-                    <span>৳{(activeCreditNote.totalRefundValue || 0).toFixed(2)}</span>
+                    <span>৳{formatAmount(activeCreditNote.totalRefundValue)}</span>
                   </div>
 
                   {activeCreditNote.type === 'exchange' ? (
                     <>
                       <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.9rem', color: 'var(--text-secondary)' }}>
                         <span>Replacement Items Value:</span>
-                        <span>৳{(activeCreditNote.totalExchangeValue || 0).toFixed(2)}</span>
+                        <span>৳{formatAmount(activeCreditNote.totalExchangeValue)}</span>
                       </div>
                       <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 800, borderTop: '2px solid var(--text-primary)', paddingTop: '0.5rem', fontSize: '1.1rem' }}>
                         <span>Net Settlement:</span>
                         <span style={{ color: activeCreditNote.exchangeDifference > 0 ? '#dc2626' : (activeCreditNote.exchangeDifference < 0 ? '#10b981' : '#2563eb') }}>
                           {activeCreditNote.exchangeDifference > 0
-                            ? `Customer Paid: +৳${activeCreditNote.exchangeDifference.toFixed(2)}`
+                            ? `Customer Paid: +৳${formatAmount(activeCreditNote.exchangeDifference)}`
                             : (activeCreditNote.exchangeDifference < 0
-                              ? `Refunded: -৳${Math.abs(activeCreditNote.exchangeDifference).toFixed(2)}`
-                              : 'Even Exchange (৳0.00)')}
+                              ? `Refunded: -৳${formatAmount(Math.abs(activeCreditNote.exchangeDifference))}`
+                              : 'Even Exchange (৳0)')}
                         </span>
                       </div>
                     </>
                   ) : (
                     <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 800, borderTop: '2px solid var(--text-primary)', paddingTop: '0.5rem', fontSize: '1.15rem' }}>
                       <span>Total Credit Amount:</span>
-                      <span style={{ color: '#b45309' }}>৳{(activeCreditNote.totalRefundValue || 0).toFixed(2)}</span>
+                      <span style={{ color: '#b45309' }}>৳{formatAmount(activeCreditNote.totalRefundValue)}</span>
                     </div>
                   )}
                 </div>
@@ -3456,21 +3840,23 @@ export default function Sales({ userProfile, branches, addToast }) {
                   <table>
                     <thead>
                       <tr>
-                        <th style={{ width: '40px', textAlign: 'center' }}>#</th>
+                        <th style={{ width: '35px', textAlign: 'center' }}>#</th>
                         <th>Product</th>
-                        <th style={{ width: '120px' }}>SKU / Code</th>
-                        <th style={{ textAlign: 'center', width: '90px' }}>Initial Qty</th>
-                        <th style={{ textAlign: 'center', width: '90px', color: '#c2410c' }}>Returned</th>
-                        <th style={{ textAlign: 'right', width: '100px' }}>Price</th>
-                        <th style={{ textAlign: 'right', width: '110px' }}>Total</th>
+                        <th style={{ width: '80px', textAlign: 'center' }}>Size</th>
+                        <th style={{ width: '70px', textAlign: 'center' }}>Cartons</th>
+                        <th style={{ width: '110px' }}>SKU / Code</th>
+                        <th style={{ textAlign: 'center', width: '80px' }}>Initial Qty</th>
+                        <th style={{ textAlign: 'center', width: '80px', color: '#c2410c' }}>Returned</th>
+                        <th style={{ textAlign: 'right', width: '90px' }}>Price</th>
+                        <th style={{ textAlign: 'right', width: '100px' }}>Total</th>
                       </tr>
                     </thead>
                     <tbody>
                       {loadingSaleDetails ? (
-                        <TableLoading colSpan={7} message="Loading items..." />
+                        <TableLoading colSpan={9} message="Loading items..." />
                       ) : saleDetailItems.length === 0 ? (
                         <tr>
-                          <td colSpan={7} style={{ textAlign: 'center', padding: '1rem', color: 'var(--text-muted)' }}>
+                          <td colSpan={9} style={{ textAlign: 'center', padding: '1rem', color: 'var(--text-muted)' }}>
                             No items recorded.
                           </td>
                         </tr>
@@ -3479,6 +3865,8 @@ export default function Sales({ userProfile, branches, addToast }) {
                           const initialQty = parseFloat(item.quantity) || 1;
                           const price = parseFloat(item.unit_price) || 0;
                           const initialTotal = initialQty * price;
+                          const itemSize = item.size || '—';
+                          const itemCarton = item.number_of_carton !== undefined && item.number_of_carton !== null ? item.number_of_carton : 0;
                           
                           // Calculate returned quantity for this specific product
                           const returnedQty = saleDetailReturns
@@ -3489,6 +3877,8 @@ export default function Sales({ userProfile, branches, addToast }) {
                             <tr key={item.id || idx}>
                               <td style={{ textAlign: 'center', color: 'var(--text-muted)' }}>{idx + 1}</td>
                               <td style={{ fontWeight: 600 }}>{item.products?.name || 'Product'}</td>
+                              <td style={{ textAlign: 'center', fontSize: '0.82rem' }}>{itemSize}</td>
+                              <td style={{ textAlign: 'center', fontWeight: 600 }}>{itemCarton}</td>
                               <td style={{ fontFamily: 'monospace', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
                                 {item.products?.sku || item.products?.product_code || '—'}
                               </td>
@@ -3496,8 +3886,8 @@ export default function Sales({ userProfile, branches, addToast }) {
                               <td style={{ textAlign: 'center', fontWeight: 700, color: returnedQty > 0 ? '#c2410c' : 'var(--text-muted)' }}>
                                 {returnedQty > 0 ? `${returnedQty}` : '0'}
                               </td>
-                              <td style={{ textAlign: 'right' }}>৳{price.toFixed(2)}</td>
-                              <td style={{ textAlign: 'right', fontWeight: 700 }}>৳{initialTotal.toFixed(2)}</td>
+                              <td style={{ textAlign: 'right' }}>৳{formatAmount(price)}</td>
+                              <td style={{ textAlign: 'right', fontWeight: 700 }}>৳{formatAmount(initialTotal)}</td>
                             </tr>
                           );
                         })
@@ -3522,6 +3912,8 @@ export default function Sales({ userProfile, branches, addToast }) {
                       key: `orig-${item.id || item.product_id}`,
                       name: item.products?.name || 'Product',
                       sku: item.products?.sku || item.products?.product_code || '—',
+                      size: item.size || '—',
+                      cartons: item.number_of_carton !== undefined && item.number_of_carton !== null ? item.number_of_carton : 0,
                       quantity: currentQty,
                       price: price,
                       total: currentQty * price,
@@ -3538,6 +3930,8 @@ export default function Sales({ userProfile, branches, addToast }) {
                     key: `rep-${rep.id || idx}`,
                     name: `${rep.product?.name || 'Replacement Item'} (Replacement)`,
                     sku: rep.product?.sku || rep.product?.product_code || '—',
+                    size: rep.size || '—',
+                    cartons: rep.number_of_carton !== undefined && rep.number_of_carton !== null ? rep.number_of_carton : 0,
                     quantity: repQty,
                     price: repPrice,
                     total: repQty * repPrice,
@@ -3571,20 +3965,22 @@ export default function Sales({ userProfile, branches, addToast }) {
                         <table>
                           <thead>
                             <tr style={{ backgroundColor: '#f0f9ff' }}>
-                              <th style={{ width: '40px', textAlign: 'center' }}>#</th>
+                              <th style={{ width: '35px', textAlign: 'center' }}>#</th>
                               <th>Product</th>
-                              <th style={{ width: '120px' }}>SKU / Code</th>
-                              <th style={{ textAlign: 'center', width: '90px' }}>Current Qty</th>
-                              <th style={{ textAlign: 'right', width: '100px' }}>Price</th>
-                              <th style={{ textAlign: 'right', width: '110px' }}>Total</th>
+                              <th style={{ width: '80px', textAlign: 'center' }}>Size</th>
+                              <th style={{ width: '70px', textAlign: 'center' }}>Cartons</th>
+                              <th style={{ width: '110px' }}>SKU / Code</th>
+                              <th style={{ textAlign: 'center', width: '80px' }}>Current Qty</th>
+                              <th style={{ textAlign: 'right', width: '90px' }}>Price</th>
+                              <th style={{ textAlign: 'right', width: '100px' }}>Total</th>
                             </tr>
                           </thead>
                           <tbody>
                             {loadingSaleDetails ? (
-                              <TableLoading colSpan={6} message="Loading current items..." />
+                              <TableLoading colSpan={8} message="Loading current items..." />
                             ) : currentItems.length === 0 ? (
                               <tr>
-                                <td colSpan={6} style={{ textAlign: 'center', padding: '0.85rem', color: 'var(--text-muted)', fontSize: '0.82rem' }}>
+                                <td colSpan={8} style={{ textAlign: 'center', padding: '0.85rem', color: 'var(--text-muted)', fontSize: '0.82rem' }}>
                                   No active products on this invoice.
                                 </td>
                               </tr>
@@ -3595,14 +3991,16 @@ export default function Sales({ userProfile, branches, addToast }) {
                                   <td style={{ fontWeight: 600, color: it.isExchange ? '#0369a1' : 'var(--text-primary)' }}>
                                     {it.name}
                                   </td>
+                                  <td style={{ textAlign: 'center', fontSize: '0.82rem' }}>{it.size}</td>
+                                  <td style={{ textAlign: 'center', fontWeight: 600 }}>{it.cartons}</td>
                                   <td style={{ fontFamily: 'monospace', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
                                     {it.sku}
                                   </td>
                                   <td style={{ textAlign: 'center', fontWeight: 800, color: '#0284c7' }}>
                                     {it.quantity}
                                   </td>
-                                  <td style={{ textAlign: 'right' }}>৳{it.price.toFixed(2)}</td>
-                                  <td style={{ textAlign: 'right', fontWeight: 700 }}>৳{it.total.toFixed(2)}</td>
+                                  <td style={{ textAlign: 'right' }}>৳{formatAmount(it.price)}</td>
+                                  <td style={{ textAlign: 'right', fontWeight: 700 }}>৳{formatAmount(it.total)}</td>
                                 </tr>
                               ))
                             )}
@@ -3634,32 +4032,32 @@ export default function Sales({ userProfile, branches, addToast }) {
                         {hasModifications && (
                           <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-secondary)', fontSize: '0.8rem' }}>
                             <span>Initial Total:</span>
-                            <span>৳{initialSubtotal.toFixed(2)}</span>
+                            <span>৳{formatAmount(initialSubtotal)}</span>
                           </div>
                         )}
                         <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                           <span style={{ color: 'var(--text-secondary)' }}>{hasModifications ? 'Current Subtotal:' : 'Subtotal:'}</span>
-                          <span style={{ fontWeight: 600 }}>৳{currentSubtotal.toFixed(2)}</span>
+                          <span style={{ fontWeight: 600 }}>৳{formatAmount(currentSubtotal)}</span>
                         </div>
                         {discount > 0 && (
                           <div style={{ display: 'flex', justifyContent: 'space-between', color: '#dc2626' }}>
                             <span>Discount:</span>
-                            <span>-৳{discount.toFixed(2)}</span>
+                            <span>-৳{formatAmount(discount)}</span>
                           </div>
                         )}
                         {tax > 0 && (
                           <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                             <span>Tax:</span>
-                            <span>+৳{tax.toFixed(2)}</span>
+                            <span>+৳{formatAmount(tax)}</span>
                           </div>
                         )}
                         <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 800, borderTop: '1px solid var(--border-color)', paddingTop: '0.35rem', marginTop: '0.15rem' }}>
                           <span>{hasModifications ? 'Current Total Bill:' : 'Total Bill:'}</span>
-                          <span style={{ color: '#0284c7' }}>৳{currentNet.toFixed(2)}</span>
+                          <span style={{ color: '#0284c7' }}>৳{formatAmount(currentNet)}</span>
                         </div>
                         <div style={{ display: 'flex', justifyContent: 'space-between', color: '#059669', fontWeight: 700 }}>
                           <span>Paid:</span>
-                          <span>৳{paidAmount.toFixed(2)}</span>
+                          <span>৳{formatAmount(paidAmount)}</span>
                         </div>
                         <div style={{
                           display: 'flex',
@@ -3668,10 +4066,55 @@ export default function Sales({ userProfile, branches, addToast }) {
                           color: currentDue > 0.01 ? '#dc2626' : '#059669'
                         }}>
                           <span>{hasModifications ? 'Current Due:' : 'Due:'}</span>
-                          <span>৳{currentDue.toFixed(2)}</span>
+                          <span>৳{formatAmount(currentDue)}</span>
                         </div>
                       </div>
                     </div>
+                    {/* SECTION 3: PAYMENT HISTORY & COLLECTIONS */}
+                    {saleDetailPayments.length > 0 && (
+                      <div style={{ marginTop: '0.5rem' }}>
+                        <div style={{ fontWeight: 700, fontSize: '0.88rem', marginBottom: '0.4rem', color: '#059669', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                          <span>Payment History & Receipts</span>
+                          <span style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>
+                            {saleDetailPayments.length} {saleDetailPayments.length === 1 ? 'transaction' : 'transactions'}
+                          </span>
+                        </div>
+                        <div className="table-container">
+                          <table>
+                            <thead>
+                              <tr style={{ backgroundColor: '#f0fdf4' }}>
+                                <th style={{ width: '40px', textAlign: 'center' }}>#</th>
+                                <th style={{ width: '130px' }}>Receipt / Trx ID</th>
+                                <th style={{ width: '110px' }}>Date</th>
+                                <th style={{ width: '120px' }}>Method</th>
+                                <th>Notes / Reference</th>
+                                <th style={{ textAlign: 'right', width: '120px' }}>Amount Collected</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {saleDetailPayments.map((pay, idx) => (
+                                <tr key={pay.id || idx}>
+                                  <td style={{ textAlign: 'center', color: 'var(--text-muted)' }}>{idx + 1}</td>
+                                  <td style={{ fontFamily: 'monospace', fontWeight: 700, fontSize: '0.82rem' }}>
+                                    {pay.payment_number || `PM#${pay.id.substring(0, 8).toUpperCase()}`}
+                                  </td>
+                                  <td>{new Date(pay.payment_date).toLocaleDateString()}</td>
+                                  <td style={{ textTransform: 'capitalize', fontWeight: 600 }}>
+                                    {pay.payment_method?.replace('_', ' ') || 'Cash'}
+                                  </td>
+                                  <td style={{ color: 'var(--text-secondary)', fontSize: '0.82rem' }}>
+                                    {pay.notes || (idx === 0 ? 'POS Initial Sale Collection' : 'Due Clearance Collection')}
+                                  </td>
+                                  <td style={{ textAlign: 'right', fontWeight: 700, color: '#059669' }}>
+                                    ৳{formatAmount(pay.amount)}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    )}
                   </>
                 );
               })()}
@@ -3704,6 +4147,17 @@ export default function Sales({ userProfile, branches, addToast }) {
                 >
                   <RotateCcw size={13} />
                   <span>Return</span>
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => {
+                    handleDeleteSale(selectedSaleForDetails);
+                  }}
+                  style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', color: 'var(--danger, #ef4444)' }}
+                >
+                  <Trash2 size={13} />
+                  <span>Delete Invoice</span>
                 </button>
               </div>
 
@@ -3770,7 +4224,7 @@ export default function Sales({ userProfile, branches, addToast }) {
               </button>
             </div>
 
-            <form onSubmit={handleSaveEditedSale} style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
+            <form onSubmit={handlePromptSaveEditedSale} style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
               <div className="modal-body" style={{ overflowY: 'auto', padding: '1.25rem', display: 'flex', flexDirection: 'column', gap: '1.15rem' }}>
                 
                 {/* Customer & Date Selection */}
@@ -3882,7 +4336,7 @@ export default function Sales({ userProfile, branches, addToast }) {
                             </div>
                             <div style={{ textAlign: 'right' }}>
                               <div style={{ fontWeight: 700, color: '#0284c7', fontSize: '0.85rem' }}>
-                                ৳{(invItem.products?.sale_price || 0).toFixed(2)}
+                                ৳{formatAmount(invItem.products?.sale_price)}
                               </div>
                               <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
                                 Stock: {isFactory ? '∞' : invItem.quantity}
@@ -3903,20 +4357,22 @@ export default function Sales({ userProfile, branches, addToast }) {
                     <table>
                       <thead>
                         <tr>
-                          <th style={{ width: '40px', textAlign: 'center' }}>SL</th>
+                          <th style={{ width: '35px', textAlign: 'center' }}>SL</th>
                           <th>Product Name</th>
-                          <th style={{ width: '100px', textAlign: 'center' }}>Quantity</th>
-                          <th style={{ width: '120px', textAlign: 'right' }}>Unit Price (৳)</th>
-                          <th style={{ width: '120px', textAlign: 'right' }}>Total (৳)</th>
-                          <th style={{ width: '45px', textAlign: 'center' }}></th>
+                          <th style={{ width: '90px', textAlign: 'center' }}>Size</th>
+                          <th style={{ width: '75px', textAlign: 'center' }}>Cartons</th>
+                          <th style={{ width: '85px', textAlign: 'center' }}>Quantity</th>
+                          <th style={{ width: '105px', textAlign: 'right' }}>Unit Price (৳)</th>
+                          <th style={{ width: '105px', textAlign: 'right' }}>Total (৳)</th>
+                          <th style={{ width: '40px', textAlign: 'center' }}></th>
                         </tr>
                       </thead>
                       <tbody>
                         {loadingEditItems ? (
-                          <TableLoading colSpan={6} message="Loading invoice items..." />
+                          <TableLoading colSpan={8} message="Loading invoice items..." />
                         ) : editCart.length === 0 ? (
                           <tr>
-                            <td colSpan={6} style={{ textAlign: 'center', padding: '1.5rem', color: '#dc2626' }}>
+                            <td colSpan={8} style={{ textAlign: 'center', padding: '1.5rem', color: '#dc2626' }}>
                               Please add at least one product to this invoice.
                             </td>
                           </tr>
@@ -3931,6 +4387,42 @@ export default function Sales({ userProfile, branches, addToast }) {
                                   <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
                                     {item.product?.sku || item.product?.product_code || ''}
                                   </div>
+                                </td>
+                                <td style={{ textAlign: 'center' }}>
+                                  <input
+                                    type="text"
+                                    placeholder="Size"
+                                    className="input-control"
+                                    style={{ width: '80px', textAlign: 'center', padding: '0.25rem 0.35rem', margin: '0 auto', fontSize: '0.8rem' }}
+                                    value={item.size || ''}
+                                    onChange={(e) => {
+                                      const val = e.target.value;
+                                      setEditCart(
+                                        editCart.map((c, i) =>
+                                          i === index ? { ...c, size: val } : c
+                                        )
+                                      );
+                                    }}
+                                  />
+                                </td>
+                                <td style={{ textAlign: 'center' }}>
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    step="1"
+                                    placeholder="0"
+                                    className="input-control"
+                                    style={{ width: '65px', textAlign: 'center', padding: '0.25rem 0.35rem', margin: '0 auto', fontSize: '0.8rem' }}
+                                    value={item.number_of_carton ?? 0}
+                                    onChange={(e) => {
+                                      const val = e.target.value;
+                                      setEditCart(
+                                        editCart.map((c, i) =>
+                                          i === index ? { ...c, number_of_carton: val } : c
+                                        )
+                                      );
+                                    }}
+                                  />
                                 </td>
                                 <td style={{ textAlign: 'center' }}>
                                   <input
@@ -3956,7 +4448,7 @@ export default function Sales({ userProfile, branches, addToast }) {
                                     min="0"
                                     step="any"
                                     className="input-control"
-                                    style={{ width: '95px', textAlign: 'right', padding: '0.25rem 0.45rem', marginLeft: 'auto' }}
+                                    style={{ width: '90px', textAlign: 'right', padding: '0.25rem 0.45rem', marginLeft: 'auto' }}
                                     value={item.unit_price}
                                     onChange={(e) => {
                                       const val = e.target.value;
@@ -3969,7 +4461,7 @@ export default function Sales({ userProfile, branches, addToast }) {
                                   />
                                 </td>
                                 <td style={{ textAlign: 'right', fontWeight: 700, fontFamily: 'Outfit, sans-serif' }}>
-                                  ৳{lineTotal.toFixed(2)}
+                                  ৳{formatAmount(lineTotal)}
                                 </td>
                                 <td style={{ textAlign: 'center' }}>
                                   <button
@@ -4058,27 +4550,27 @@ export default function Sales({ userProfile, branches, addToast }) {
                   }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem' }}>
                       <span>Subtotal:</span>
-                      <span style={{ fontWeight: 600 }}>৳{getEditSubtotal().toFixed(2)}</span>
+                      <span style={{ fontWeight: 600 }}>৳{formatAmount(getEditSubtotal())}</span>
                     </div>
                     {editDiscount > 0 && (
                       <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', color: '#dc2626' }}>
                         <span>Discount:</span>
-                        <span>-৳{parseFloat(editDiscount).toFixed(2)}</span>
+                        <span>-৳{formatAmount(editDiscount)}</span>
                       </div>
                     )}
                     {editTaxRate > 0 && (
                       <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem' }}>
                         <span>Tax ({editTaxRate}%):</span>
-                        <span>+৳{getEditTaxAmount().toFixed(2)}</span>
+                        <span>+৳{formatAmount(getEditTaxAmount())}</span>
                       </div>
                     )}
                     <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 800, fontSize: '1.1rem', borderTop: '1.5px solid var(--border-color)', paddingTop: '0.4rem', marginTop: '0.2rem' }}>
                       <span>New Grand Total:</span>
-                      <span style={{ color: '#4f46e5' }}>৳{getEditGrandTotal().toFixed(2)}</span>
+                      <span style={{ color: '#4f46e5' }}>৳{formatAmount(getEditGrandTotal())}</span>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', color: '#059669', fontWeight: 700 }}>
                       <span>Already Paid:</span>
-                      <span>৳{(editingSale.paid_amount || 0).toFixed(2)}</span>
+                      <span>৳{formatAmount(editingSale.paid_amount)}</span>
                     </div>
                     <div style={{
                       display: 'flex',
@@ -4088,7 +4580,7 @@ export default function Sales({ userProfile, branches, addToast }) {
                       color: (getEditGrandTotal() - (editingSale.paid_amount || 0)) > 0.01 ? '#dc2626' : '#059669'
                     }}>
                       <span>Updated Due:</span>
-                      <span>৳{Math.max(0, getEditGrandTotal() - (editingSale.paid_amount || 0)).toFixed(2)}</span>
+                      <span>৳{formatAmount(Math.max(0, getEditGrandTotal() - (editingSale.paid_amount || 0)))}</span>
                     </div>
                   </div>
                 </div>
@@ -4114,6 +4606,83 @@ export default function Sales({ userProfile, branches, addToast }) {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* CONFIRM EDIT SAVE MODAL */}
+      {showEditConfirmModal && editingSale && (
+        <div className="modal-overlay" style={{ zIndex: 1200 }}>
+          <div className="modal-content" style={{ maxWidth: '440px', width: '95%', padding: 0 }}>
+            <div className="modal-header" style={{ padding: '1rem 1.25rem' }}>
+              <h3 className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', fontSize: '1.05rem', margin: 0 }}>
+                <AlertCircle size={18} style={{ color: '#4f46e5' }} />
+                Save Invoice Changes?
+              </h3>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => setShowEditConfirmModal(false)}
+                disabled={isSubmittingEdit}
+                style={{ borderRadius: '50%', padding: '0.35rem', border: 'none' }}
+              >
+                <X size={15} />
+              </button>
+            </div>
+
+            <div className="modal-body" style={{ padding: '1.25rem', display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+              <p style={{ margin: 0, fontSize: '0.88rem', color: 'var(--text-secondary)' }}>
+                Are you sure you want to update this sales invoice? Physical stock quantities and invoice totals will be recalculated automatically.
+              </p>
+
+              <div style={{
+                backgroundColor: '#f8fafc',
+                border: '1px solid var(--border-color)',
+                borderRadius: '6px',
+                padding: '0.75rem 1rem',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '0.35rem',
+                fontSize: '0.84rem'
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ color: 'var(--text-muted)' }}>Invoice:</span>
+                  <strong style={{ fontFamily: 'monospace' }}>{editingSale.invoice_number || `INV#${editingSale.id.substring(0, 8).toUpperCase()}`}</strong>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ color: 'var(--text-muted)' }}>Customer:</span>
+                  <strong>{customers.find((c) => c.id === editCustomerId)?.name || 'Selected Customer'}</strong>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ color: 'var(--text-muted)' }}>Total Items:</span>
+                  <strong>{editCart.length} item(s)</strong>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid var(--border-color)', paddingTop: '0.35rem', marginTop: '0.2rem' }}>
+                  <span style={{ fontWeight: 700 }}>New Total Bill:</span>
+                  <strong style={{ color: '#4f46e5', fontSize: '0.95rem' }}>৳{formatAmount(getEditGrandTotal())}</strong>
+                </div>
+              </div>
+            </div>
+
+            <div className="modal-footer" style={{ padding: '0.75rem 1.25rem', display: 'flex', justifyContent: 'flex-end', gap: '0.5rem' }}>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => setShowEditConfirmModal(false)}
+                disabled={isSubmittingEdit}
+              >
+                No, Keep Editing
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={handleConfirmSaveEditedSale}
+                disabled={isSubmittingEdit}
+                style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontWeight: 700 }}
+              >
+                {isSubmittingEdit ? 'Saving...' : 'Yes, Save Changes'}
+              </button>
+            </div>
           </div>
         </div>
       )}

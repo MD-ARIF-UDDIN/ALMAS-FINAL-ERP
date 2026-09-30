@@ -4,6 +4,7 @@ import { supabase } from '../supabaseClient';
 import { Plus, Search, Trash2, Receipt, CreditCard } from 'lucide-react';
 import { TableLoading } from '../components/TableLoading';
 import Pagination from '../components/Pagination';
+import { formatAmount } from '../utils/format';
 
 export default function Expenses({ userProfile, branches, addToast }) {
   const location = useLocation();
@@ -316,7 +317,7 @@ export default function Expenses({ userProfile, branches, addToast }) {
                         </td>
                         <td style={{ fontSize: '0.85rem' }}>{exp.description || 'N/A'}</td>
                         <td style={{ fontWeight: 700, fontFamily: 'Outfit, sans-serif', color: 'var(--danger-text)' }}>
-                          -৳{exp.amount.toFixed(2)}
+                          -৳{formatAmount(exp.amount)}
                         </td>
                         <td style={{ textTransform: 'capitalize', fontSize: '0.8rem' }}>
                           {exp.payment_method.replace('_', ' ')}

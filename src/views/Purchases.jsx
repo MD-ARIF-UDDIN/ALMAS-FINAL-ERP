@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useLocation } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
-import { Download, Plus, Search, Trash2, UserPlus, CreditCard } from 'lucide-react';
+import { Download, Plus, Search, Trash2, UserPlus, CreditCard, Eye } from 'lucide-react';
 import { TableLoading } from '../components/TableLoading';
 import Pagination from '../components/Pagination';
+import { formatAmount } from '../utils/format';
 
 export default function Purchases({ userProfile, branches, addToast }) {
   const location = useLocation();
@@ -38,7 +39,7 @@ export default function Purchases({ userProfile, branches, addToast }) {
   const [supplierType, setSupplierType] = useState('existing'); // 'existing' or 'new'
   const [selectedSupplierId, setSelectedSupplierId] = useState('');
   const [purchaseDate, setPurchaseDate] = useState(new Date().toISOString().split('T')[0]);
-  const [purchaseItems, setPurchaseItems] = useState([{ productId: '', quantity: 1, costPrice: 0.00 }]); // { product, quantity, costPrice }
+  const [purchaseItems, setPurchaseItems] = useState([{ productId: '', name: '', quantity: 1, costPrice: 0.00 }]); // { productId, name, quantity, costPrice }
   const [discount, setDiscount] = useState(0);
   const [paidAmount, setPaidAmount] = useState('');
   const [paymentMethod, setPaymentMethod] = useState('cash');
@@ -111,7 +112,19 @@ export default function Purchases({ userProfile, branches, addToast }) {
       }
 
       if (purchaseSearchQuery.trim()) {
-        query = query.ilike('invoice_number', `%${purchaseSearchQuery.trim()}%`);
+        const clean = purchaseSearchQuery.trim();
+        const { data: matchedContacts } = await supabase
+          .from('contacts')
+          .select('id')
+          .or(`name.ilike.%${clean}%,phone.ilike.%${clean}%`)
+          .limit(30);
+
+        if (matchedContacts && matchedContacts.length > 0) {
+          const contactIds = matchedContacts.map((c) => c.id).join(',');
+          query = query.or(`invoice_number.ilike.%${clean}%,notes.ilike.%${clean}%,supplier_id.in.(${contactIds})`);
+        } else {
+          query = query.or(`invoice_number.ilike.%${clean}%,notes.ilike.%${clean}%`);
+        }
       }
 
       const { data, count, error } = await query;
@@ -156,7 +169,28 @@ export default function Purchases({ userProfile, branches, addToast }) {
         .order('name', { ascending: true });
 
       if (error) throw error;
-      setCatalogProducts(data || []);
+      const prods = data || [];
+      if (prods.length > 0) {
+        const prodIds = prods.map((p) => p.id);
+        const { data: invPrices } = await supabase
+          .from('inventory')
+          .select('product_id, branch_id, purchase_price, sale_price')
+          .in('product_id', prodIds);
+
+        const priceMap = {};
+        (invPrices || []).forEach((inv) => {
+          if (!priceMap[inv.product_id]) priceMap[inv.product_id] = {};
+          priceMap[inv.product_id][inv.branch_id] = inv;
+        });
+
+        const enriched = prods.map((p) => ({
+          ...p,
+          branch_prices: priceMap[p.id] || {},
+        }));
+        setCatalogProducts(enriched);
+      } else {
+        setCatalogProducts([]);
+      }
     } catch (err) {
       console.error(err);
     }
@@ -171,11 +205,17 @@ export default function Purchases({ userProfile, branches, addToast }) {
       const { data: items, error: itemsError } = await supabase
         .from('purchase_items')
         .select(`
-          *,
+          id,
+          purchase_id,
+          product_id,
+          item_name,
+          quantity,
+          unit_price,
+          total_price,
           products (
+            id,
             name,
-            sku,
-            unit
+            sku
           )
         `)
         .eq('purchase_id', purchase.id);
@@ -186,12 +226,12 @@ export default function Purchases({ userProfile, branches, addToast }) {
       const { data: payHistory, error: payError } = await supabase
         .from('payments')
         .select('*')
-        .eq('purchase_id', purchase.id)
+        .eq('reference_invoice_id', purchase.id)
         .order('payment_date', { ascending: true });
       if (payError) throw payError;
       setSelectedPurchasePayments(payHistory || []);
     } catch (err) {
-      console.error(err);
+      console.error('Error fetching purchase details:', err);
       showMessage('Failed to load purchase details and payment history.', 'error');
     } finally {
       setLoadingDetails(false);
@@ -201,21 +241,23 @@ export default function Purchases({ userProfile, branches, addToast }) {
 
 
   const addItemToPurchase = () => {
-    setPurchaseItems([...purchaseItems, { productId: '', quantity: 1, costPrice: 0.00 }]);
+    setPurchaseItems([...purchaseItems, { productId: '', name: '', quantity: 1, costPrice: 0.00 }]);
   };
 
   const updateItemField = (index, field, value) => {
     const updated = purchaseItems.map((item, idx) => {
       if (idx === index) {
-        const updatedItem = { ...item, [field]: value };
-        // Auto-populate default cost price if product is selected
-        if (field === 'productId') {
-          const matchedProd = catalogProducts.find((p) => p.id === value);
-          if (matchedProd) {
-            updatedItem.costPrice = matchedProd.purchase_price;
-          }
-        }
-        return updatedItem;
+        return { ...item, [field]: value };
+      }
+      return item;
+    });
+    setPurchaseItems(updated);
+  };
+
+  const updateItemRow = (index, fields) => {
+    const updated = purchaseItems.map((item, idx) => {
+      if (idx === index) {
+        return { ...item, ...fields };
       }
       return item;
     });
@@ -261,8 +303,8 @@ export default function Purchases({ userProfile, branches, addToast }) {
       }
     }
 
-    if (purchaseItems.length === 0 || purchaseItems.some((item) => !item.productId)) {
-      showMessage('Please add valid products to purchase.', 'error');
+    if (purchaseItems.length === 0 || purchaseItems.some((item) => !item.productId && !item.name?.trim())) {
+      showMessage('Please specify a product or item name for all purchase rows.', 'error');
       return;
     }
 
@@ -297,7 +339,7 @@ export default function Purchases({ userProfile, branches, addToast }) {
       return;
     }
     if (initialPaid > grandTotal + 0.01) {
-      showMessage(`Initial payment cannot exceed the grand total of ৳${grandTotal.toFixed(2)}.`, 'error');
+      showMessage(`Initial payment cannot exceed the grand total of ৳${formatAmount(grandTotal)}.`, 'error');
       return;
     }
 
@@ -386,10 +428,11 @@ export default function Purchases({ userProfile, branches, addToast }) {
       if (purError) throw purError;
       const purchaseId = purData[0].id;
 
-      // 2. Insert Purchase Items (Triggers stock increases automatically)
+      // 2. Insert Purchase Items (Catalog items link to product_id; custom items store item_name)
       const purchaseItemsData = purchaseItems.map((item) => ({
         purchase_id: purchaseId,
-        product_id: item.productId,
+        product_id: item.productId || null,
+        item_name: item.productId ? null : (item.name?.trim() || 'Custom Item'),
         quantity: parseInt(item.quantity),
         unit_price: parseFloat(item.costPrice),
         total_price: parseFloat(item.costPrice) * parseInt(item.quantity),
@@ -433,7 +476,7 @@ export default function Purchases({ userProfile, branches, addToast }) {
       // Reset forms
       setSupplierType('existing');
       setSelectedSupplierId('');
-      setPurchaseItems([{ productId: '', quantity: 1, costPrice: 0.00 }]);
+      setPurchaseItems([{ productId: '', name: '', quantity: 1, costPrice: 0.00 }]);
       setDiscount(0);
       setPaidAmount('');
       setReferenceNumber('');
@@ -504,13 +547,13 @@ export default function Purchases({ userProfile, branches, addToast }) {
       <div className="no-print card" style={{ padding: 0, overflow: 'hidden' }}>
           <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem', padding: '1rem 1.25rem' }}>
             <h3 className="card-title" style={{ margin: 0 }}>Purchase History</h3>
-            <div style={{ position: 'relative', width: '260px' }}>
+            <div style={{ position: 'relative', width: '320px' }}>
               <Search size={14} style={{ position: 'absolute', left: '0.75rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
               <input
                 type="text"
                 className="input-control"
                 style={{ paddingLeft: '2.25rem', padding: '0.35rem 0.6rem 0.35rem 2.25rem', fontSize: '0.82rem' }}
-                placeholder="Search purchase ID..."
+                placeholder="Search by invoice #, supplier, phone..."
                 value={purchaseSearchQuery}
                 onChange={(e) => {
                   setPurchaseSearchQuery(e.target.value);
@@ -540,7 +583,7 @@ export default function Purchases({ userProfile, branches, addToast }) {
                 ) : purchases.length === 0 ? (
                   <tr>
                     <td colSpan={userProfile?.role === 'owner' ? 9 : 8} style={{ textAlign: 'center', padding: '2rem' }}>
-                      No purchases logged. Click "New Purchase" to add items to stock.
+                      {purchaseSearchQuery.trim() ? `No purchases found matching "${purchaseSearchQuery}".` : 'No purchases logged. Click "New Purchase" to add items to stock.'}
                     </td>
                   </tr>
                 ) : (
@@ -557,22 +600,26 @@ export default function Purchases({ userProfile, branches, addToast }) {
                         )}
                         <td>{new Date(p.purchase_date).toLocaleDateString()}</td>
                         <td style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
-                          {p.contacts?.name || 'Unknown Supplier'}
+                          <div>{p.contacts?.name || 'Unknown Supplier'}</div>
+                          {p.contacts?.phone && (
+                            <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>{p.contacts.phone}</div>
+                          )}
                         </td>
-                        <td style={{ fontFamily: 'Outfit, sans-serif' }}>৳{p.net_amount.toFixed(2)}</td>
+                        <td style={{ fontFamily: 'Outfit, sans-serif' }}>৳{formatAmount(p.net_amount)}</td>
                         <td style={{ fontFamily: 'Outfit, sans-serif', color: 'var(--success-text)' }}>
-                          ৳{p.paid_amount.toFixed(2)}
+                          ৳{formatAmount(p.paid_amount)}
                         </td>
                         <td>
                           <span className={`badge badge-${p.payment_status}`}>{p.payment_status}</span>
                         </td>
                         <td style={{ textAlign: 'center' }}>
                           <button
-                            className="btn btn-secondary btn-sm"
+                            className="btn btn-secondary btn-sm btn-icon"
                             onClick={() => handleViewPurchaseDetails(p)}
-                            title="View Details"
+                            title="View Purchase Breakdown"
+                            style={{ color: '#0284c7', padding: '0.35rem 0.45rem' }}
                           >
-                            View
+                            <Eye size={15} />
                           </button>
                         </td>
                       </tr>
@@ -591,385 +638,449 @@ export default function Purchases({ userProfile, branches, addToast }) {
           />
         </div>
 
-      {/* RECORD NEW PURCHASE MODAL */}
+      {/* RECORD NEW PURCHASE MODAL (COMPACT & SLEEK) */}
       {showPurchaseModal && (
         <div className="modal-overlay">
-          <div className="modal-content modal-xl">
-            <div className="modal-header">
-              <h3 className="modal-title">New Purchase</h3>
-              <button className="btn btn-secondary btn-sm" onClick={() => setShowPurchaseModal(false)} style={{ borderRadius: '50%', padding: '0.4rem', border: 'none' }}>✕</button>
+          <div className="modal-content modal-lg" style={{ maxWidth: '1020px', maxHeight: '92vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+            <div className="modal-header" style={{ padding: '0.65rem 1.15rem' }}>
+              <h3 className="modal-title" style={{ fontSize: '1.05rem', margin: 0 }}>New Purchase</h3>
+              <button
+                className="btn btn-secondary btn-sm"
+                onClick={() => setShowPurchaseModal(false)}
+                style={{ borderRadius: '50%', padding: '0.3rem 0.45rem', border: 'none' }}
+              >
+                ✕
+              </button>
             </div>
+
             <form onSubmit={handleSavePurchase} style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
-              <div className="modal-body purchase-form-grid">
-          {/* Purchase Items Editor */}
-          <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-
-            <div className="form-row">
-              <div className="form-group">
-                <label style={{ display: 'block', marginBottom: '0.35rem', fontWeight: 600 }}>Supplier Type</label>
-                <select
-                  className="input-control"
-                  value={supplierType}
-                  onChange={(e) => setSupplierType(e.target.value)}
-                >
-                  <option value="existing">Existing</option>
-                  <option value="new">New</option>
-                </select>
-              </div>
-
-              <div className="form-group">
-                <label>Purchase Date *</label>
-                <input
-                  type="date"
-                  className="input-control"
-                  value={purchaseDate}
-                  onChange={(e) => setPurchaseDate(e.target.value)}
-                  required
-                />
-              </div>
-            </div>
-
-            {supplierType === 'existing' ? (
-              <div className="form-row" style={{ marginTop: '0.5rem' }}>
-                <div className="form-group">
-                  <label>Supplier *</label>
-                  <select
-                    className="input-control"
-                    value={selectedSupplierId}
-                    onChange={(e) => setSelectedSupplierId(e.target.value)}
-                    required={supplierType === 'existing'}
-                  >
-                    <option value="">-- Select Supplier --</option>
-                    {suppliers.map((s) => (
-                      <option key={s.id} value={s.id}>
-                        {s.name} {s.phone ? `(${s.phone})` : ''}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-            ) : (
-              <div style={{ border: '1px solid var(--border-color)', borderRadius: 'var(--border-radius-sm)', padding: '0.75rem', backgroundColor: '#f8fafc', display: 'flex', flexDirection: 'column', gap: '0.5rem', marginBottom: '0.5rem', marginTop: '0.5rem' }}>
-                <div style={{ fontWeight: 700, fontSize: '0.8rem', color: 'var(--primary)' }}>New Supplier Details</div>
-                <div className="form-row">
-                  <div className="form-group">
-                    <label>Supplier Name *</label>
-                    <input
-                      type="text"
-                      className="input-control"
-                      placeholder="Enter supplier name"
-                      value={newSupName}
-                      onChange={(e) => setNewSupName(e.target.value)}
-                      required={supplierType === 'new'}
-                    />
-                  </div>
-                  <div className="form-group">
-                    <label>Phone *</label>
-                    <input
-                      type="text"
-                      className="input-control"
-                      placeholder="Enter phone number"
-                      value={newSupPhone}
-                      onChange={(e) => setNewSupPhone(e.target.value)}
-                      required={supplierType === 'new'}
-                    />
-                  </div>
-                </div>
-                <div className="form-row">
-                  <div className="form-group" style={{ gridColumn: '1 / -1' }}>
-                    <label>Address</label>
-                    <input
-                      type="text"
-                      className="input-control"
-                      placeholder="Enter address (optional)"
-                      value={newSupAddress}
-                      onChange={(e) => setNewSupAddress(e.target.value)}
-                    />
-                  </div>
-                </div>
-              </div>
-            )}
-                    {/* Dynamic Items Table */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', marginTop: '0.5rem' }}>
-              
-              {/* Quick Search & Add Product Bar */}
-              <div style={{ position: 'relative' }}>
-                <label style={{ display: 'block', marginBottom: '0.35rem', fontWeight: 600, fontSize: '0.82rem' }}>Search & Add Product</label>
-                <div style={{ display: 'flex', gap: '0.5rem' }}>
-                  <input
-                    type="text"
-                    className="input-control"
-                    placeholder="Search product by name or SKU..."
-                    value={productSearchQuery}
-                    onChange={(e) => {
-                      setProductSearchQuery(e.target.value);
-                      setShowSearchSuggestions(true);
-                    }}
-                    onFocus={() => setShowSearchSuggestions(true)}
-                    onBlur={() => setTimeout(() => setShowSearchSuggestions(false), 250)}
-                    style={{ fontSize: '0.85rem' }}
-                  />
-                  {productSearchQuery && (
-                    <button
-                      type="button"
-                      className="btn btn-secondary btn-sm"
-                      onClick={() => {
-                        setProductSearchQuery('');
-                        setShowSearchSuggestions(false);
-                      }}
-                      style={{ padding: '0.35rem 0.65rem' }}
-                    >
-                      Clear
-                    </button>
-                  )}
-                </div>
-                {showSearchSuggestions && (
-                  <div style={{
-                    position: 'absolute',
-                    top: '100%',
-                    left: 0,
-                    right: 0,
-                    backgroundColor: '#ffffff',
-                    border: '1px solid var(--border-color)',
-                    borderRadius: 'var(--border-radius-sm)',
-                    boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)',
-                    maxHeight: '200px',
-                    overflowY: 'auto',
-                    zIndex: 999,
-                    marginTop: '0.25rem'
-                  }}>
-                    {catalogProducts
-                      .filter(p => {
-                        if (!productSearchQuery.trim()) return true;
-                        return (
-                          p.name.toLowerCase().includes(productSearchQuery.toLowerCase()) ||
-                          p.sku.toLowerCase().includes(productSearchQuery.toLowerCase())
-                        );
-                      })
-                      .map((prod) => (
-                        <div
-                          key={prod.id}
-                          style={{
-                            padding: '0.5rem 0.75rem',
-                            cursor: 'pointer',
-                            borderBottom: '1px solid #f1f5f9',
-                            fontSize: '0.82rem',
-                            textAlign: 'left'
-                          }}
-                          onClick={() => {
-                            if (purchaseItems.length === 1 && !purchaseItems[0].productId) {
-                              updateItemField(0, 'productId', prod.id);
-                            } else {
-                              setPurchaseItems([...purchaseItems, { productId: prod.id, quantity: 1, costPrice: prod.purchase_price }]);
-                            }
-                            setProductSearchQuery('');
-                            setShowSearchSuggestions(false);
-                            showMessage(`${prod.name} added to list.`, 'success');
-                          }}
-                        >
-                          <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{prod.name}</div>
-                          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                            SKU: {prod.sku} | Cost: ৳{prod.purchase_price.toFixed(2)}
-                          </div>
-                        </div>
-                      ))}
-                    {catalogProducts.filter(p => {
-                      if (!productSearchQuery.trim()) return true;
-                      return (
-                        p.name.toLowerCase().includes(productSearchQuery.toLowerCase()) ||
-                        p.sku.toLowerCase().includes(productSearchQuery.toLowerCase())
-                      );
-                    }).length === 0 && (
-                      <div style={{ padding: '0.75rem', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.82rem' }}>
-                        No matching products found.
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '0.25rem' }}>
-                <label style={{ fontWeight: 600 }}>Products *</label>
-                <button
-                  type="button"
-                  className="btn btn-secondary btn-sm"
-                  onClick={addItemToPurchase}
-                >
-                  + Add Row
-                </button>
-              </div>
-
-              <div className="table-container" style={{ border: '1px solid var(--border-color)', borderRadius: 'var(--border-radius-sm)', overflow: 'visible' }}>
-                <table style={{ minWidth: '600px' }}>
-                  <thead>
-                    <tr>
-                      <th style={{ width: '50px' }}>SL</th>
-                      <th>Product *</th>
-                      <th style={{ width: '100px', textAlign: 'right' }}>Qty *</th>
-                      <th style={{ width: '130px', textAlign: 'right' }}>Cost Price *</th>
-                      <th style={{ width: '120px', textAlign: 'right' }}>Total</th>
-                      <th style={{ width: '60px', textAlign: 'center' }}>Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {purchaseItems.map((item, idx) => (
-                      <tr key={idx}>
-                        <td style={{ verticalAlign: 'middle', fontWeight: 600 }}>{idx + 1}</td>
-                        <td style={{ verticalAlign: 'middle' }}>
+              <div className="modal-body" style={{ flex: 1, overflowY: 'auto', padding: '0.85rem 1.15rem', display: 'grid', gridTemplateColumns: '1.6fr 1fr', gap: '0.85rem' }}>
+                {/* Left Column: Supplier & Items */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                  
+                  {/* Supplier & Date Bar */}
+                  <div style={{ backgroundColor: '#f8fafc', padding: '0.75rem 0.9rem', borderRadius: '6px', border: '1px solid var(--border-color)' }}>
+                    {supplierType === 'existing' ? (
+                      <div style={{ display: 'grid', gridTemplateColumns: '130px 1fr 145px', gap: '0.75rem', alignItems: 'start' }}>
+                        <div className="form-group" style={{ marginBottom: 0 }}>
+                          <label style={{ fontSize: '0.78rem' }}>Supplier Type</label>
                           <select
                             className="input-control"
-                            value={item.productId}
-                            onChange={(e) => updateItemField(idx, 'productId', e.target.value)}
-                            required
-                            style={{ padding: '0.35rem 0.5rem', fontSize: '0.85rem' }}
+                            value={supplierType}
+                            onChange={(e) => setSupplierType(e.target.value)}
+                            style={{ height: '36px', minHeight: '36px', fontSize: '0.85rem' }}
                           >
-                            <option value="">-- Select Product --</option>
-                            {catalogProducts.map((p) => (
-                              <option key={p.id} value={p.id}>
-                                {p.name} ({p.sku})
+                            <option value="existing">Existing</option>
+                            <option value="new">New</option>
+                          </select>
+                        </div>
+
+                        <div className="form-group" style={{ marginBottom: 0 }}>
+                          <label style={{ fontSize: '0.78rem' }}>Supplier *</label>
+                          <select
+                            className="input-control"
+                            value={selectedSupplierId}
+                            onChange={(e) => setSelectedSupplierId(e.target.value)}
+                            required={supplierType === 'existing'}
+                            style={{ height: '36px', minHeight: '36px', fontSize: '0.85rem' }}
+                          >
+                            <option value="">-- Select Supplier --</option>
+                            {suppliers.map((s) => (
+                              <option key={s.id} value={s.id}>
+                                {s.name} {s.phone ? `(${s.phone})` : ''}
                               </option>
                             ))}
                           </select>
-                        </td>
-                        <td style={{ verticalAlign: 'middle', textAlign: 'right' }}>
+                        </div>
+
+                        <div className="form-group" style={{ marginBottom: 0 }}>
+                          <label style={{ fontSize: '0.78rem' }}>Purchase Date *</label>
                           <input
-                            type="number"
-                            min="1"
-                            placeholder="Qty"
+                            type="date"
                             className="input-control"
-                            value={item.quantity}
-                            onChange={(e) => updateItemField(idx, 'quantity', parseInt(e.target.value) || 1)}
+                            value={purchaseDate}
+                            onChange={(e) => setPurchaseDate(e.target.value)}
                             required
-                            style={{ padding: '0.35rem 0.5rem', fontSize: '0.85rem', textAlign: 'right', width: '90px', marginLeft: 'auto' }}
+                            style={{ height: '36px', minHeight: '36px', fontSize: '0.85rem' }}
                           />
-                        </td>
-                        <td style={{ verticalAlign: 'middle', textAlign: 'right' }}>
+                        </div>
+                      </div>
+                    ) : (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
+                        {/* Top row: Type and Date */}
+                        <div style={{ display: 'grid', gridTemplateColumns: '130px 145px', gap: '0.75rem', alignItems: 'start' }}>
+                          <div className="form-group" style={{ marginBottom: 0 }}>
+                            <label style={{ fontSize: '0.78rem' }}>Supplier Type</label>
+                            <select
+                              className="input-control"
+                              value={supplierType}
+                              onChange={(e) => setSupplierType(e.target.value)}
+                              style={{ height: '36px', minHeight: '36px', fontSize: '0.85rem' }}
+                            >
+                              <option value="existing">Existing</option>
+                              <option value="new">New</option>
+                            </select>
+                          </div>
+
+                          <div className="form-group" style={{ marginBottom: 0 }}>
+                            <label style={{ fontSize: '0.78rem' }}>Purchase Date *</label>
+                            <input
+                              type="date"
+                              className="input-control"
+                              value={purchaseDate}
+                              onChange={(e) => setPurchaseDate(e.target.value)}
+                              required
+                              style={{ height: '36px', minHeight: '36px', fontSize: '0.85rem' }}
+                            />
+                          </div>
+                        </div>
+
+                        {/* Large Name and Phone row */}
+                        <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr', gap: '0.75rem', alignItems: 'start' }}>
+                          <div className="form-group" style={{ marginBottom: 0 }}>
+                            <label style={{ fontSize: '0.78rem', fontWeight: 700 }}>Supplier Name *</label>
+                            <input
+                              type="text"
+                              className="input-control"
+                              placeholder="Enter supplier full name"
+                              value={newSupName}
+                              onChange={(e) => setNewSupName(e.target.value)}
+                              required={supplierType === 'new'}
+                              style={{ height: '38px', minHeight: '38px', fontSize: '0.88rem', padding: '0.35rem 0.65rem' }}
+                            />
+                          </div>
+
+                          <div className="form-group" style={{ marginBottom: 0 }}>
+                            <label style={{ fontSize: '0.78rem', fontWeight: 700 }}>Phone Number *</label>
+                            <input
+                              type="text"
+                              className="input-control"
+                              placeholder="Enter phone number"
+                              value={newSupPhone}
+                              onChange={(e) => setNewSupPhone(e.target.value)}
+                              required={supplierType === 'new'}
+                              style={{ height: '38px', minHeight: '38px', fontSize: '0.88rem', padding: '0.35rem 0.65rem' }}
+                            />
+                          </div>
+                        </div>
+
+                        {/* Address row */}
+                        <div className="form-group" style={{ marginBottom: 0 }}>
+                          <label style={{ fontSize: '0.78rem' }}>Address</label>
                           <input
-                            type="number"
-                            step="0.01"
-                            min="0"
-                            placeholder="Cost"
+                            type="text"
                             className="input-control"
-                            value={item.costPrice}
-                            onChange={(e) => updateItemField(idx, 'costPrice', parseFloat(e.target.value) || 0.00)}
-                            required
-                            style={{ padding: '0.35rem 0.5rem', fontSize: '0.85rem', textAlign: 'right', width: '120px', marginLeft: 'auto' }}
+                            placeholder="Enter supplier address (optional)"
+                            value={newSupAddress}
+                            onChange={(e) => setNewSupAddress(e.target.value)}
+                            style={{ height: '34px', minHeight: '34px', fontSize: '0.84rem' }}
                           />
-                        </td>
-                        <td style={{ verticalAlign: 'middle', textAlign: 'right', fontWeight: 600 }}>
-                          ৳{((parseFloat(item.costPrice) || 0) * (parseInt(item.quantity) || 0)).toFixed(2)}
-                        </td>
-                        <td style={{ verticalAlign: 'middle', textAlign: 'center' }}>
-                          <button
-                            type="button"
-                            className="btn btn-danger btn-sm btn-icon"
-                            style={{ border: 'none', background: 'none', color: 'var(--danger)', display: 'inline-flex', padding: '0.25rem' }}
-                            onClick={() => removeItemFromPurchase(idx)}
-                          >
-                            <Trash2 size={15} />
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
 
-          {/* Checkout & Bill Summary */}
-          <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+                  {/* Search & Add Product Bar */}
+                  <div style={{ position: 'relative' }}>
+                    <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
+                      <input
+                        type="text"
+                        className="input-control"
+                        placeholder="Search product by name or SKU..."
+                        value={productSearchQuery}
+                        onChange={(e) => {
+                          setProductSearchQuery(e.target.value);
+                          setShowSearchSuggestions(true);
+                        }}
+                        onFocus={() => setShowSearchSuggestions(true)}
+                        onBlur={() => setTimeout(() => setShowSearchSuggestions(false), 250)}
+                        style={{ height: '32px', minHeight: '32px', fontSize: '0.82rem', padding: '0.25rem 0.6rem' }}
+                      />
+                      {productSearchQuery && (
+                        <button
+                          type="button"
+                          className="btn btn-secondary btn-sm"
+                          onClick={() => {
+                            setProductSearchQuery('');
+                            setShowSearchSuggestions(false);
+                          }}
+                          style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem', height: '32px' }}
+                        >
+                          Clear
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm"
+                        onClick={addItemToPurchase}
+                        style={{ whiteSpace: 'nowrap', padding: '0.25rem 0.6rem', fontSize: '0.78rem', height: '32px', fontWeight: 600 }}
+                      >
+                        + Add Row
+                      </button>
+                    </div>
 
-            <div className="cart-totals-summary" style={{ background: 'none', padding: 0, border: 'none' }}>
-              <div className="totals-row">
-                <span>Subtotal</span>
-                <span>৳{getSubtotal().toFixed(2)}</span>
-              </div>
-              <div className="totals-row">
-                <span>Discount</span>
-                <input
-                  type="number"
-                  min="0"
-                  className="input-control"
-                  style={{ width: '120px', padding: '0.25rem 0.5rem', textAlign: 'right' }}
-                  value={discount}
-                  onChange={(e) => setDiscount(Math.max(0, parseFloat(e.target.value) || 0))}
-                />
-              </div>
-              <div className="totals-row grand-total" style={{ borderBottom: '1px solid var(--border-color)', paddingBottom: '0.75rem', marginBottom: '0.75rem' }}>
-                <span>Net Total</span>
-                <span>৳{getGrandTotal().toFixed(2)}</span>
-              </div>
+                    {showSearchSuggestions && (
+                      <div style={{
+                        position: 'absolute',
+                        top: '100%',
+                        left: 0,
+                        right: 0,
+                        backgroundColor: '#ffffff',
+                        border: '1px solid var(--border-color)',
+                        borderRadius: 'var(--border-radius-sm)',
+                        boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)',
+                        maxHeight: '180px',
+                        overflowY: 'auto',
+                        zIndex: 999,
+                        marginTop: '0.2rem'
+                      }}>
+                        {catalogProducts
+                          .filter(p => {
+                            if (!productSearchQuery.trim()) return true;
+                            return (
+                              p.name.toLowerCase().includes(productSearchQuery.toLowerCase()) ||
+                              p.sku.toLowerCase().includes(productSearchQuery.toLowerCase())
+                            );
+                          })
+                          .map((prod) => (
+                            <div
+                              key={prod.id}
+                              style={{
+                                padding: '0.4rem 0.65rem',
+                                cursor: 'pointer',
+                                borderBottom: '1px solid #f1f5f9',
+                                fontSize: '0.8rem',
+                                textAlign: 'left'
+                              }}
+                              onClick={() => {
+                                if (purchaseItems.length === 1 && !purchaseItems[0].productId && !purchaseItems[0].name) {
+                                  updateItemRow(0, { productId: prod.id, name: prod.name, quantity: 1, costPrice: prod.purchase_price });
+                                } else {
+                                  setPurchaseItems([...purchaseItems, { productId: prod.id, name: prod.name, quantity: 1, costPrice: prod.purchase_price }]);
+                                }
+                                setProductSearchQuery('');
+                                setShowSearchSuggestions(false);
+                                showMessage(`${prod.name} added to list.`, 'success');
+                              }}
+                            >
+                              <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{prod.name}</div>
+                              <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                                SKU: {prod.sku} | Cost: ৳{formatAmount(prod.purchase_price)}
+                              </div>
+                            </div>
+                          ))}
+                        {catalogProducts.filter(p => {
+                          if (!productSearchQuery.trim()) return true;
+                          return (
+                            p.name.toLowerCase().includes(productSearchQuery.toLowerCase()) ||
+                            p.sku.toLowerCase().includes(productSearchQuery.toLowerCase())
+                          );
+                        }).length === 0 && (
+                          <div style={{ padding: '0.5rem', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.8rem' }}>
+                            No matching products found.
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
 
-              <div className="form-group">
-                <label>Paid Amount</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  max={getGrandTotal()}
-                  className="input-control"
-                  placeholder="0.00"
-                  value={paidAmount}
-                  onChange={(e) => setPaidAmount(e.target.value)}
-                />
-              </div>
-
-              {parseFloat(paidAmount) > 0 && (
-                <div className="form-group">
-                  <label>Payment Method</label>
-                  <select
-                    className="input-control"
-                    value={paymentMethod}
-                    onChange={(e) => setPaymentMethod(e.target.value)}
-                  >
-                    <option value="cash">Cash</option>
-                    <option value="bank">Bank</option>
-                    <option value="mobile_banking">Mobile Banking (bKash/Nagad)</option>
-                  </select>
+                  {/* Compact Items Table */}
+                  <div className="table-container" style={{ border: '1px solid var(--border-color)', borderRadius: '6px', maxHeight: '310px', overflowY: 'auto' }}>
+                    <table style={{ minWidth: '520px', fontSize: '0.82rem' }}>
+                      <thead>
+                        <tr>
+                          <th style={{ width: '38px', padding: '0.35rem 0.5rem' }}>SL</th>
+                          <th style={{ padding: '0.35rem 0.5rem' }}>Product *</th>
+                          <th style={{ width: '85px', textAlign: 'right', padding: '0.35rem 0.5rem' }}>Qty *</th>
+                          <th style={{ width: '105px', textAlign: 'right', padding: '0.35rem 0.5rem' }}>Cost *</th>
+                          <th style={{ width: '95px', textAlign: 'right', padding: '0.35rem 0.5rem' }}>Total</th>
+                          <th style={{ width: '45px', textAlign: 'center', padding: '0.35rem 0.5rem' }}>Del</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {purchaseItems.map((item, idx) => (
+                          <tr key={idx}>
+                            <td style={{ verticalAlign: 'middle', fontWeight: 600, padding: '0.3rem 0.5rem' }}>{idx + 1}</td>
+                            <td style={{ verticalAlign: 'middle', padding: '0.3rem 0.5rem' }}>
+                              <input
+                                type="text"
+                                className="input-control"
+                                placeholder="Type or select product..."
+                                value={item.name || ''}
+                                onChange={(e) => {
+                                  const val = e.target.value;
+                                  const matched = catalogProducts.find(
+                                    (p) => p.name.toLowerCase() === val.toLowerCase() || p.sku.toLowerCase() === val.toLowerCase()
+                                  );
+                                  if (matched) {
+                                    const bPrice = matched.branch_prices?.[selectedBranchId]?.purchase_price;
+                                    const effectiveCost = (bPrice !== null && bPrice !== undefined) ? bPrice : matched.purchase_price;
+                                    updateItemRow(idx, { productId: matched.id, name: matched.name, costPrice: effectiveCost });
+                                  } else {
+                                    updateItemRow(idx, { productId: '', name: val });
+                                  }
+                                }}
+                                list={`catalog-prods-${idx}`}
+                                required
+                                style={{ height: '30px', minHeight: '30px', padding: '0.15rem 0.4rem', fontSize: '0.8rem' }}
+                              />
+                              <datalist id={`catalog-prods-${idx}`}>
+                                {catalogProducts.map((p) => {
+                                  const bPrice = p.branch_prices?.[selectedBranchId]?.purchase_price;
+                                  const effectiveCost = (bPrice !== null && bPrice !== undefined) ? bPrice : p.purchase_price;
+                                  return (
+                                    <option key={p.id} value={p.name}>
+                                      {p.sku} (Cost: ৳{formatAmount(effectiveCost)})
+                                    </option>
+                                  );
+                                })}
+                              </datalist>
+                            </td>
+                            <td style={{ verticalAlign: 'middle', textAlign: 'right', padding: '0.3rem 0.5rem' }}>
+                              <input
+                                type="number"
+                                min="1"
+                                placeholder="Qty"
+                                className="input-control"
+                                value={item.quantity}
+                                onChange={(e) => updateItemField(idx, 'quantity', parseInt(e.target.value) || 1)}
+                                required
+                                style={{ height: '30px', minHeight: '30px', padding: '0.15rem 0.4rem', fontSize: '0.8rem', textAlign: 'right', width: '75px', marginLeft: 'auto' }}
+                              />
+                            </td>
+                            <td style={{ verticalAlign: 'middle', textAlign: 'right', padding: '0.3rem 0.5rem' }}>
+                              <input
+                                type="number"
+                                step="0.01"
+                                min="0"
+                                placeholder="Cost"
+                                className="input-control"
+                                value={item.costPrice}
+                                onChange={(e) => updateItemField(idx, 'costPrice', parseFloat(e.target.value) || 0.00)}
+                                required
+                                style={{ height: '30px', minHeight: '30px', padding: '0.15rem 0.4rem', fontSize: '0.8rem', textAlign: 'right', width: '95px', marginLeft: 'auto' }}
+                              />
+                            </td>
+                            <td style={{ verticalAlign: 'middle', textAlign: 'right', fontWeight: 700, padding: '0.3rem 0.5rem' }}>
+                              ৳{formatAmount((parseFloat(item.costPrice) || 0) * (parseInt(item.quantity) || 0))}
+                            </td>
+                            <td style={{ verticalAlign: 'middle', textAlign: 'center', padding: '0.3rem 0.5rem' }}>
+                              <button
+                                type="button"
+                                className="btn btn-danger btn-sm btn-icon"
+                                style={{ border: 'none', background: 'none', color: 'var(--danger)', display: 'inline-flex', padding: '0.2rem' }}
+                                onClick={() => removeItemFromPurchase(idx)}
+                              >
+                                <Trash2 size={14} />
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
-              )}
 
-              <div className="form-group">
-                <label>Reference No</label>
-                <input
-                  type="text"
-                  className="input-control"
-                  placeholder="e.g. Check # or Trx ID"
-                  value={referenceNumber}
-                  onChange={(e) => setReferenceNumber(e.target.value)}
-                />
+                {/* Right Column: Bill Summary & Payment Settlement */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem', backgroundColor: '#f8fafc', padding: '0.75rem 0.85rem', borderRadius: '6px', border: '1px solid var(--border-color)' }}>
+                  <div style={{ fontWeight: 700, fontSize: '0.84rem', color: 'var(--text-primary)', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.35rem' }}>
+                    Payment Summary
+                  </div>
+
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.82rem' }}>
+                    <span style={{ color: 'var(--text-secondary)' }}>Subtotal:</span>
+                    <strong>৳{formatAmount(getSubtotal())}</strong>
+                  </div>
+
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.82rem' }}>
+                    <span style={{ color: 'var(--text-secondary)' }}>Discount:</span>
+                    <input
+                      type="number"
+                      min="0"
+                      className="input-control"
+                      style={{ width: '95px', height: '28px', minHeight: '28px', padding: '0.15rem 0.4rem', textAlign: 'right', fontSize: '0.8rem' }}
+                      value={discount}
+                      onChange={(e) => setDiscount(Math.max(0, parseFloat(e.target.value) || 0))}
+                    />
+                  </div>
+
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontWeight: 800, fontSize: '0.95rem', borderTop: '1px solid var(--border-color)', paddingTop: '0.4rem', color: 'var(--primary)' }}>
+                    <span>Net Total:</span>
+                    <span>৳{formatAmount(getGrandTotal())}</span>
+                  </div>
+
+                  <div className="form-group" style={{ marginBottom: 0, marginTop: '0.2rem' }}>
+                    <label style={{ fontSize: '0.75rem' }}>Paid Amount</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      max={getGrandTotal()}
+                      className="input-control"
+                      placeholder="0.00"
+                      value={paidAmount}
+                      onChange={(e) => setPaidAmount(e.target.value)}
+                      style={{ height: '30px', minHeight: '30px', fontSize: '0.82rem', padding: '0.2rem 0.5rem' }}
+                    />
+                  </div>
+
+                  {parseFloat(paidAmount) > 0 && (
+                    <div className="form-group" style={{ marginBottom: 0 }}>
+                      <label style={{ fontSize: '0.75rem' }}>Payment Method</label>
+                      <select
+                        className="input-control"
+                        value={paymentMethod}
+                        onChange={(e) => setPaymentMethod(e.target.value)}
+                        style={{ height: '30px', minHeight: '30px', fontSize: '0.82rem', padding: '0.2rem 0.5rem' }}
+                      >
+                        <option value="cash">Cash</option>
+                        <option value="bank">Bank</option>
+                        <option value="mobile_banking">Mobile Banking (bKash/Nagad)</option>
+                      </select>
+                    </div>
+                  )}
+
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label style={{ fontSize: '0.75rem' }}>Reference No</label>
+                    <input
+                      type="text"
+                      className="input-control"
+                      placeholder="Check # or Trx ID (optional)"
+                      value={referenceNumber}
+                      onChange={(e) => setReferenceNumber(e.target.value)}
+                      style={{ height: '30px', minHeight: '30px', fontSize: '0.82rem', padding: '0.2rem 0.5rem' }}
+                    />
+                  </div>
+
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label style={{ fontSize: '0.75rem' }}>Notes / Challan No</label>
+                    <input
+                      type="text"
+                      className="input-control"
+                      placeholder="Notes or challan (optional)"
+                      value={notes}
+                      onChange={(e) => setNotes(e.target.value)}
+                      style={{ height: '30px', minHeight: '30px', fontSize: '0.82rem', padding: '0.2rem 0.5rem' }}
+                    />
+                  </div>
+                </div>
               </div>
 
-              <div className="form-group">
-                <label>Notes / Challan No</label>
-                <input
-                  type="text"
-                  className="input-control"
-                  placeholder="Enter notes or challan info (optional)..."
-                  value={notes}
-                  onChange={(e) => setNotes(e.target.value)}
-                />
+              <div className="modal-footer" style={{ borderTop: '1px solid var(--border-color)', padding: '0.65rem 1.15rem', display: 'flex', justifyContent: 'flex-end', gap: '0.5rem', background: '#f8fafc' }}>
+                <button type="button" className="btn btn-secondary btn-sm" onClick={() => setShowPurchaseModal(false)}>Cancel</button>
+                <button
+                  type="submit"
+                  className="btn btn-primary btn-sm"
+                  disabled={loading}
+                  style={{ fontWeight: 700 }}
+                >
+                  {loading ? 'Saving...' : 'Save Purchase'}
+                </button>
               </div>
-
-            </div>
+            </form>
           </div>
         </div>
-        <div className="modal-footer" style={{ borderTop: '1px solid var(--border-color)', padding: '1rem 1.5rem', display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', background: '#f8fafc' }}>
-          <button type="button" className="btn btn-secondary" onClick={() => setShowPurchaseModal(false)}>Cancel</button>
-          <button
-            type="submit"
-            className="btn btn-primary"
-            disabled={loading}
-          >
-            {loading ? 'Saving...' : 'Save Purchase'}
-          </button>
-        </div>
-      </form>
-    </div>
-  </div>
-)}
-
+      )}
 
       {/* PURCHASE DETAILS & PAYMENT HISTORY MODAL */}
       {showDetailModal && selectedPurchase && (() => {
@@ -1025,7 +1136,7 @@ export default function Purchases({ userProfile, branches, addToast }) {
                         <div>
                           <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem', display: 'block', textTransform: 'uppercase', fontWeight: 700, marginBottom: '0.25rem' }}>Due Amount</span>
                           <strong style={{ fontSize: '1rem', color: selectedPurchase.net_amount - selectedPurchase.paid_amount > 0 ? 'var(--danger-text)' : 'inherit' }}>
-                            ৳{(selectedPurchase.net_amount - selectedPurchase.paid_amount).toFixed(2)}
+                            ৳{formatAmount(selectedPurchase.net_amount - selectedPurchase.paid_amount)}
                           </strong>
                         </div>
                       </div>
@@ -1053,19 +1164,19 @@ export default function Purchases({ userProfile, branches, addToast }) {
                               <tr key={item.id || idx}>
                                 <td>{idx + 1}</td>
                                 <td>
-                                  <span style={{ fontWeight: 600 }}>{item.products?.name}</span>
+                                  <span style={{ fontWeight: 600 }}>{item.products?.name || item.item_name || 'Custom Item'}</span>
                                 </td>
                                 <td>
-                                  <span style={{ fontFamily: 'monospace', fontSize: '0.82rem' }}>{item.products?.sku}</span>
+                                  <span style={{ fontFamily: 'monospace', fontSize: '0.82rem' }}>{item.products?.sku || '—'}</span>
                                 </td>
                                 <td style={{ textAlign: 'right' }}>
                                   {item.quantity} {item.products?.unit || 'pcs'}
                                 </td>
                                 <td style={{ textAlign: 'right' }}>
-                                  ৳{item.unit_price.toFixed(2)}
+                                  ৳{formatAmount(item.unit_price)}
                                 </td>
                                 <td style={{ textAlign: 'right', fontWeight: 600 }}>
-                                  ৳{item.total_price.toFixed(2)}
+                                  ৳{formatAmount(item.total_price)}
                                 </td>
                               </tr>
                             ))}
@@ -1090,25 +1201,25 @@ export default function Purchases({ userProfile, branches, addToast }) {
                         <div className="card" style={{ padding: '1rem', background: '#f8fafc', display: 'flex', flexDirection: 'column', gap: '0.5rem', border: '1px solid var(--border-color)' }}>
                           <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.9rem' }}>
                             <span>Subtotal:</span>
-                            <span>৳{selectedPurchase.total_amount.toFixed(2)}</span>
+                            <span>৳{formatAmount(selectedPurchase.total_amount)}</span>
                           </div>
                           {selectedPurchase.discount > 0 && (
                             <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--danger-text)', fontSize: '0.9rem' }}>
                               <span>Discount:</span>
-                              <span>-৳{selectedPurchase.discount.toFixed(2)}</span>
+                              <span>-৳{formatAmount(selectedPurchase.discount)}</span>
                             </div>
                           )}
                           <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 800, fontSize: '1.05rem', borderTop: '1px solid var(--border-color)', paddingTop: '0.5rem', marginTop: '0.25rem' }}>
                             <span>Net Total:</span>
-                            <span>৳{selectedPurchase.net_amount.toFixed(2)}</span>
+                            <span>৳{formatAmount(selectedPurchase.net_amount)}</span>
                           </div>
                           <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--success-text)', fontSize: '0.9rem' }}>
                             <span>Paid Amount:</span>
-                            <span>৳{selectedPurchase.paid_amount.toFixed(2)}</span>
+                            <span>৳{formatAmount(selectedPurchase.paid_amount)}</span>
                           </div>
                           <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 700, color: selectedPurchase.net_amount - selectedPurchase.paid_amount > 0 ? 'var(--danger-text)' : 'inherit', fontSize: '0.9rem' }}>
                             <span>Due Amount:</span>
-                            <span>৳{(selectedPurchase.net_amount - selectedPurchase.paid_amount).toFixed(2)}</span>
+                            <span>৳{formatAmount(selectedPurchase.net_amount - selectedPurchase.paid_amount)}</span>
                           </div>
                         </div>
                       </div>
@@ -1144,7 +1255,7 @@ export default function Purchases({ userProfile, branches, addToast }) {
                                   <td style={{ textTransform: 'capitalize' }}>{pay.payment_method.replace('_', ' ')}</td>
                                   <td style={{ fontFamily: 'monospace' }}>{pay.reference_number || '-'}</td>
                                   <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--success-text)' }}>
-                                    ৳{pay.amount.toFixed(2)}
+                                    ৳{formatAmount(pay.amount)}
                                   </td>
                                   <td style={{ fontSize: '0.82rem' }}>{pay.notes || '-'}</td>
                                 </tr>

@@ -12,6 +12,7 @@ import {
 import { TableLoading } from '../components/TableLoading';
 import Pagination from '../components/Pagination';
 import { hasPermission } from '../utils/permissions';
+import { formatAmount } from '../utils/format';
 
 export default function Inventory({ userProfile, branches, addToast }) {
   const [stockItems, setStockItems] = useState([]);
@@ -127,15 +128,24 @@ export default function Inventory({ userProfile, branches, addToast }) {
         return;
       }
 
-      // Fetch inventory quantities for these products in selected branch
+      // Fetch inventory quantities and branch prices for these products in selected branch
       const prodIds = prods.map((p) => p.id);
-      const { data: invData, error: invError } = await supabase
+      let { data: invData, error: invError } = await supabase
         .from('inventory')
-        .select('id, product_id, quantity, min_stock_level')
+        .select('id, product_id, quantity, min_stock_level, purchase_price, sale_price')
         .eq('branch_id', selectedBranchId)
         .in('product_id', prodIds);
 
-      if (invError) throw invError;
+      if (invError) {
+        const fallbackRes = await supabase
+          .from('inventory')
+          .select('id, product_id, quantity, min_stock_level')
+          .eq('branch_id', selectedBranchId)
+          .in('product_id', prodIds);
+
+        if (fallbackRes.error) throw fallbackRes.error;
+        invData = fallbackRes.data;
+      }
 
       const invMap = {};
       (invData || []).forEach((inv) => {
@@ -149,6 +159,16 @@ export default function Inventory({ userProfile, branches, addToast }) {
         const isOutOfStock = qty <= 0;
         const isLowStock = !isOutOfStock && qty <= minStock;
 
+        const effectiveBuyPrice = (inv?.purchase_price !== null && inv?.purchase_price !== undefined) 
+          ? inv.purchase_price 
+          : p.purchase_price;
+        const hasCustomBuy = (inv?.purchase_price !== null && inv?.purchase_price !== undefined);
+
+        const effectiveSalePrice = (inv?.sale_price !== null && inv?.sale_price !== undefined)
+          ? inv.sale_price 
+          : p.sale_price;
+        const hasCustomSale = (inv?.sale_price !== null && inv?.sale_price !== undefined);
+
         return {
           ...p,
           inventoryId: inv?.id,
@@ -156,6 +176,10 @@ export default function Inventory({ userProfile, branches, addToast }) {
           minStock,
           isOutOfStock,
           isLowStock,
+          effectiveBuyPrice,
+          hasCustomBuy,
+          effectiveSalePrice,
+          hasCustomSale,
         };
       });
 
@@ -414,19 +438,21 @@ export default function Inventory({ userProfile, branches, addToast }) {
                 <thead>
                   <tr>
                     <th style={{ width: '45px', textAlign: 'center' }}>SL</th>
-                    <th style={{ width: '150px' }}>Product Code</th>
+                    <th style={{ width: '140px' }}>Product Code</th>
                     <th>Product Name</th>
-                    <th style={{ width: '140px' }}>Category</th>
-                    <th style={{ width: '130px', textAlign: 'center' }}>Stock In Hand</th>
-                    <th style={{ width: '130px', textAlign: 'center' }}>Status</th>
+                    <th style={{ width: '130px' }}>Category</th>
+                    <th style={{ width: '110px', textAlign: 'right' }}>Buy Price</th>
+                    <th style={{ width: '110px', textAlign: 'right' }}>Sell Price</th>
+                    <th style={{ width: '110px', textAlign: 'center' }}>Stock In Hand</th>
+                    <th style={{ width: '110px', textAlign: 'center' }}>Status</th>
                   </tr>
                 </thead>
                 <tbody>
                   {loadingStock ? (
-                    <TableLoading colSpan={6} message={`Fetching stock for ${selectedBranchObj?.name || 'branch'}...`} />
+                    <TableLoading colSpan={8} message={`Fetching stock for ${selectedBranchObj?.name || 'branch'}...`} />
                   ) : stockItems.length === 0 ? (
                     <tr>
-                      <td colSpan={6} style={{ textAlign: 'center', padding: '2.5rem', color: 'var(--text-muted)' }}>
+                      <td colSpan={8} style={{ textAlign: 'center', padding: '2.5rem', color: 'var(--text-muted)' }}>
                         No product stock records found.
                       </td>
                     </tr>
@@ -451,6 +477,22 @@ export default function Inventory({ userProfile, branches, addToast }) {
                             </span>
                           ) : (
                             <span style={{ color: 'var(--text-muted)' }}>—</span>
+                          )}
+                        </td>
+                        <td style={{ textAlign: 'right', fontWeight: 600 }}>
+                          <div>৳{formatAmount(item.effectiveBuyPrice)}</div>
+                          {item.hasCustomBuy && (
+                            <span style={{ fontSize: '0.65rem', color: 'var(--primary)', fontWeight: 700, textTransform: 'uppercase' }}>
+                              Branch Custom
+                            </span>
+                          )}
+                        </td>
+                        <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--success-text)' }}>
+                          <div>৳{formatAmount(item.effectiveSalePrice)}</div>
+                          {item.hasCustomSale && (
+                            <span style={{ fontSize: '0.65rem', color: 'var(--primary)', fontWeight: 700, textTransform: 'uppercase' }}>
+                              Branch Custom
+                            </span>
                           )}
                         </td>
                         <td style={{ textAlign: 'center', fontWeight: 800, fontSize: '1rem', color: item.isOutOfStock ? 'var(--text-muted)' : item.isLowStock ? 'var(--danger-text)' : 'var(--text-primary)' }}>

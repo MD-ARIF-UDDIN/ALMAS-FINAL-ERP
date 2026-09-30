@@ -1,22 +1,24 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, lazy, Suspense } from 'react';
 import { Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import { supabase } from './supabaseClient';
 import Auth from './views/Auth';
 import Sidebar from './components/Sidebar';
-import Dashboard from './views/Dashboard';
-import Users from './views/Users';
-import Product from './views/Product';
-import Inventory from './views/Inventory';
-import Sales from './views/Sales';
-import Purchases from './views/Purchases';
-import Payments from './views/Payments';
-import Expenses from './views/Expenses';
-import Reports from './views/Reports';
-import Contacts from './views/Contacts';
-import BranchChallans from './views/BranchChallans';
-import Returns from './views/Returns';
 import { Menu } from 'lucide-react';
 import logo from './assets/almas_logo.jpg';
+
+// Code-split route components for lightning-fast initial load & page transitions
+const Dashboard = lazy(() => import('./views/Dashboard'));
+const Users = lazy(() => import('./views/Users'));
+const Product = lazy(() => import('./views/Product'));
+const Inventory = lazy(() => import('./views/Inventory'));
+const Sales = lazy(() => import('./views/Sales'));
+const Purchases = lazy(() => import('./views/Purchases'));
+const Payments = lazy(() => import('./views/Payments'));
+const Expenses = lazy(() => import('./views/Expenses'));
+const Reports = lazy(() => import('./views/Reports'));
+const Contacts = lazy(() => import('./views/Contacts'));
+const BranchChallans = lazy(() => import('./views/BranchChallans'));
+const Returns = lazy(() => import('./views/Returns'));
 
 function App() {
   const navigate = useNavigate();
@@ -33,8 +35,18 @@ function App() {
   const [toasts, setToasts] = useState([]);
 
   const addToast = (text, type = 'info') => {
+    let message = '';
+    if (typeof text === 'string') {
+      message = text;
+    } else if (text instanceof Error) {
+      message = text.message || 'An error occurred';
+    } else if (typeof text === 'object' && text !== null) {
+      message = text.message || text.error_description || text.msg || JSON.stringify(text);
+    } else {
+      message = String(text ?? '');
+    }
     const id = Date.now() + Math.random();
-    setToasts((prev) => [...prev, { id, text, type }]);
+    setToasts((prev) => [...prev, { id, text: message, type }]);
     setTimeout(() => {
       setToasts((prev) => prev.filter((t) => t.id !== id));
     }, 4000);
@@ -188,22 +200,39 @@ function App() {
         }}
       />
       <main className="main-content">
-        <Routes>
-          <Route path="/" element={<Dashboard userProfile={userProfile} branches={branches} addToast={addToast} />} />
-          <Route path="/dashboard" element={<Navigate to="/" replace />} />
-          <Route path="/users" element={<Users branches={branches} fetchBranches={fetchBranches} addToast={addToast} />} />
-          <Route path="/products" element={<Product userProfile={userProfile} branches={branches} addToast={addToast} />} />
-          <Route path="/inventory" element={<Inventory userProfile={userProfile} branches={branches} addToast={addToast} />} />
-          <Route path="/challans" element={<BranchChallans userProfile={userProfile} branches={branches} addToast={addToast} />} />
-          <Route path="/sales" element={<Sales userProfile={userProfile} branches={branches} addToast={addToast} />} />
-          <Route path="/returns" element={<Returns userProfile={userProfile} branches={branches} addToast={addToast} />} />
-          <Route path="/purchases" element={<Purchases userProfile={userProfile} branches={branches} addToast={addToast} />} />
-          <Route path="/payments" element={<Payments userProfile={userProfile} branches={branches} addToast={addToast} />} />
-          <Route path="/expenses" element={<Expenses userProfile={userProfile} branches={branches} addToast={addToast} />} />
-          <Route path="/reports" element={<Reports userProfile={userProfile} branches={branches} addToast={addToast} />} />
-          <Route path="/contacts" element={<Contacts userProfile={userProfile} branches={branches} addToast={addToast} />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
+        <Suspense
+          fallback={
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '50vh', gap: '0.6rem', color: 'var(--text-secondary)' }}>
+              <div className="table-loading-spinner" style={{ width: '22px', height: '22px' }}></div>
+              <span style={{ fontSize: '0.9rem', fontWeight: 600 }}>Loading view...</span>
+            </div>
+          }
+        >
+          <Routes>
+            <Route path="/" element={<Dashboard userProfile={userProfile} branches={branches} addToast={addToast} />} />
+            <Route 
+              path="/users" 
+              element={
+                userProfile?.role === 'owner' ? (
+                  <Users userProfile={userProfile} branches={branches} fetchBranches={fetchBranches} addToast={addToast} />
+                ) : (
+                  <Navigate to="/" replace />
+                )
+              } 
+            />
+            <Route path="/products" element={<Product userProfile={userProfile} branches={branches} addToast={addToast} />} />
+            <Route path="/inventory" element={<Inventory userProfile={userProfile} branches={branches} addToast={addToast} />} />
+            <Route path="/challans" element={<BranchChallans userProfile={userProfile} branches={branches} addToast={addToast} />} />
+            <Route path="/sales" element={<Sales userProfile={userProfile} branches={branches} addToast={addToast} />} />
+            <Route path="/returns" element={<Returns userProfile={userProfile} branches={branches} addToast={addToast} />} />
+            <Route path="/purchases" element={<Purchases userProfile={userProfile} branches={branches} addToast={addToast} />} />
+            <Route path="/payments" element={<Payments userProfile={userProfile} branches={branches} addToast={addToast} />} />
+            <Route path="/expenses" element={<Expenses userProfile={userProfile} branches={branches} addToast={addToast} />} />
+            <Route path="/reports" element={<Reports userProfile={userProfile} branches={branches} addToast={addToast} />} />
+            <Route path="/contacts" element={<Contacts userProfile={userProfile} branches={branches} addToast={addToast} />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </Suspense>
       </main>
 
       {/* Toast Notification Container */}

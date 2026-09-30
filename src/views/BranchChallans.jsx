@@ -30,6 +30,7 @@ import {
 } from 'lucide-react';
 import { TableLoading } from '../components/TableLoading';
 import Pagination from '../components/Pagination';
+import { formatAmount, formatPlainNumber } from '../utils/format';
 
 export default function BranchChallans({ userProfile, branches = [], addToast }) {
   const role = userProfile?.role || 'staff';
@@ -410,7 +411,7 @@ export default function BranchChallans({ userProfile, branches = [], addToast })
   // Open Payment / Submission Modal
   const handleOpenPaymentModal = (challan) => {
     setActiveChallan(challan);
-    setPayAmount((parseFloat(challan.due_amount) || 0).toFixed(2));
+    setPayAmount(formatPlainNumber(parseFloat(challan.due_amount) || 0));
     setPayMethod('cash');
     setPayDate(new Date().toISOString().split('T')[0]);
     setPayReference('');
@@ -438,7 +439,7 @@ export default function BranchChallans({ userProfile, branches = [], addToast })
       return;
     }
     if (amountNum > currentDue + 0.01) {
-      showMessage(`Payment amount cannot exceed the remaining due of ৳${currentDue.toFixed(2)}.`, 'error');
+      showMessage(`Payment amount cannot exceed the remaining due of ৳${formatAmount(currentDue)}.`, 'error');
       return;
     }
 
@@ -470,10 +471,10 @@ export default function BranchChallans({ userProfile, branches = [], addToast })
       if (isOwner) {
         // If Owner entered it, credit Factory cash ledger & deduct challan due immediately
         await applyApprovedPayment(activeChallan, amountNum, payMethod, payDate);
-        showMessage(`Payment of ৳${amountNum.toLocaleString()} recorded & settled directly!`, 'success');
+        showMessage(`Payment of ৳${formatAmount(amountNum)} recorded & settled directly!`, 'success');
       } else {
         // If Branch submitted it, it stays pending until Owner approves
-        showMessage(`Payment request of ৳${amountNum.toLocaleString()} submitted! Awaiting Owner verification.`, 'success');
+        showMessage(`Payment request of ৳${formatAmount(amountNum)} submitted! Awaiting Owner verification.`, 'success');
       }
 
       setShowPaymentModal(false);
@@ -556,7 +557,7 @@ export default function BranchChallans({ userProfile, branches = [], addToast })
 
       if (payUpdateErr) throw payUpdateErr;
 
-      showMessage(`Payment #${payment.payment_no} (৳${parseFloat(payment.amount).toLocaleString()}) approved & credited to Factory!`, 'success');
+      showMessage(`Payment #${payment.payment_no} (৳${formatAmount(payment.amount)}) approved & credited to Factory!`, 'success');
       fetchChallans();
       fetchBranchPayments();
     } catch (err) {
@@ -698,7 +699,7 @@ export default function BranchChallans({ userProfile, branches = [], addToast })
                 {pendingPayments.length} Payment {pendingPayments.length === 1 ? 'Request' : 'Requests'} Pending Approval
               </div>
               <div style={{ fontSize: '0.78rem', color: '#b45309' }}>
-                Total ৳{pendingPayments.reduce((s, p) => s + parseFloat(p.amount), 0).toLocaleString()} submitted by branches.
+                Total ৳{formatAmount(pendingPayments.reduce((s, p) => s + parseFloat(p.amount), 0))} submitted by branches.
               </div>
             </div>
           </div>
@@ -737,7 +738,7 @@ export default function BranchChallans({ userProfile, branches = [], addToast })
             </span>
           </div>
           <div style={{ fontSize: '1.05rem', fontWeight: 800, color: '#1e293b', fontFamily: 'Outfit, sans-serif', marginTop: '0.15rem' }}>
-            ৳{totalDispatchedValue.toLocaleString(undefined, { minimumFractionDigits: 0 })}
+            ৳{formatAmount(totalDispatchedValue)}
           </div>
         </div>
 
@@ -752,7 +753,7 @@ export default function BranchChallans({ userProfile, branches = [], addToast })
             </span>
           </div>
           <div style={{ fontSize: '1.05rem', fontWeight: 800, color: '#16a34a', fontFamily: 'Outfit, sans-serif', marginTop: '0.15rem' }}>
-            {totalSoldQty.toLocaleString()} <span style={{ fontSize: '0.72rem', fontWeight: 600, color: 'var(--text-muted)' }}>/ {totalDispatchedQty.toLocaleString()}</span>
+            {formatAmount(totalSoldQty)} <span style={{ fontSize: '0.72rem', fontWeight: 600, color: 'var(--text-muted)' }}>/ {formatAmount(totalDispatchedQty)}</span>
           </div>
         </div>
 
@@ -767,7 +768,7 @@ export default function BranchChallans({ userProfile, branches = [], addToast })
             </span>
           </div>
           <div style={{ fontSize: '1.05rem', fontWeight: 800, color: '#059669', fontFamily: 'Outfit, sans-serif', marginTop: '0.15rem' }}>
-            ৳{totalPaidValue.toLocaleString(undefined, { minimumFractionDigits: 0 })}
+            ৳{formatAmount(totalPaidValue)}
           </div>
         </div>
 
@@ -782,7 +783,7 @@ export default function BranchChallans({ userProfile, branches = [], addToast })
             </span>
           </div>
           <div style={{ fontSize: '1.05rem', fontWeight: 800, color: totalDueValue > 0 ? '#dc2626' : '#059669', fontFamily: 'Outfit, sans-serif', marginTop: '0.15rem' }}>
-            ৳{totalDueValue.toLocaleString(undefined, { minimumFractionDigits: 0 })}
+            ৳{formatAmount(totalDueValue)}
           </div>
         </div>
       </div>
@@ -933,13 +934,13 @@ export default function BranchChallans({ userProfile, branches = [], addToast })
                         </div>
                       </td>
                       <td style={{ textAlign: 'right', fontWeight: 700, fontFamily: 'Outfit, sans-serif' }}>
-                        ৳{totalBill.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                        ৳{formatAmount(totalBill)}
                       </td>
                       <td style={{ textAlign: 'right', color: '#059669', fontWeight: 700, fontFamily: 'Outfit, sans-serif' }}>
-                        ৳{paid.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                        ৳{formatAmount(paid)}
                       </td>
                       <td style={{ textAlign: 'right', color: due > 0 ? '#dc2626' : 'var(--text-muted)', fontWeight: 700, fontFamily: 'Outfit, sans-serif' }}>
-                        ৳{due.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                        ৳{formatAmount(due)}
                       </td>
                       <td style={{ textAlign: 'center' }}>
                         {isPaid ? (
@@ -967,54 +968,56 @@ export default function BranchChallans({ userProfile, branches = [], addToast })
                                 border: '1px solid #fde68a',
                               }}
                             >
-                              ⏳ ৳{pendingAmount.toLocaleString()} Pending
+                              ⏳ ৳{formatAmount(pendingAmount)} Pending
                             </span>
                           </div>
                         )}
                       </td>
                       <td style={{ textAlign: 'center' }}>
-                        <div style={{ display: 'flex', gap: '0.35rem', justifyContent: 'center', alignItems: 'center' }}>
+                        <div style={{ display: 'inline-flex', gap: '0.35rem', justifyContent: 'center', alignItems: 'center' }}>
                           {/* Payment Button */}
                           {!isPaid && (
                             <button
                               type="button"
-                              className="btn btn-primary btn-sm"
+                              className="btn btn-primary btn-sm btn-icon"
                               onClick={() => handleOpenPaymentModal(ch)}
-                              title={isFactoryPerspective ? 'Receive / Record payment from branch' : 'Submit payment to factory'}
-                              style={{ padding: '0.25rem 0.55rem', fontSize: '0.75rem' }}
+                              title={isFactoryPerspective ? 'Record Payment Settlement' : 'Submit Payment to Factory'}
+                              style={{ padding: '0.35rem 0.45rem' }}
                             >
-                              <CreditCard size={13} />
-                              <span>{isFactoryPerspective ? 'Receive' : 'Pay'}</span>
+                              <CreditCard size={15} />
                             </button>
                           )}
 
                           {/* Payment History & Approve Action */}
                           <button
                             type="button"
-                            className="btn btn-secondary btn-sm"
+                            className="btn btn-secondary btn-sm btn-icon"
                             onClick={() => handleOpenPaymentHistory(ch)}
-                            title="View payments and approve"
+                            title="Payment History & Approvals"
                             style={{
-                              padding: '0.25rem 0.55rem',
-                              fontSize: '0.75rem',
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              gap: '0.25rem',
+                              padding: '0.35rem 0.45rem',
+                              position: 'relative',
                               borderColor: pendingForChallan.length > 0 ? '#f59e0b' : 'var(--border-color)',
                               backgroundColor: pendingForChallan.length > 0 ? '#fffbeb' : undefined,
                             }}
                           >
-                            <History size={13} style={{ color: pendingForChallan.length > 0 ? '#d97706' : undefined }} />
-                            <span>Payments</span>
+                            <History size={15} style={{ color: pendingForChallan.length > 0 ? '#d97706' : '#0284c7' }} />
                             {pendingForChallan.length > 0 && (
                               <span
                                 style={{
+                                  position: 'absolute',
+                                  top: '-4px',
+                                  right: '-4px',
                                   backgroundColor: '#dc2626',
                                   color: '#ffffff',
-                                  borderRadius: '8px',
-                                  fontSize: '0.65rem',
+                                  borderRadius: '50%',
+                                  width: '14px',
+                                  height: '14px',
+                                  fontSize: '0.62rem',
                                   fontWeight: 700,
-                                  padding: '0.05rem 0.35rem',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
                                 }}
                               >
                                 {pendingForChallan.length}
@@ -1025,12 +1028,12 @@ export default function BranchChallans({ userProfile, branches = [], addToast })
                           {/* Print Challan */}
                           <button
                             type="button"
-                            className="btn btn-secondary btn-sm"
+                            className="btn btn-secondary btn-sm btn-icon"
                             onClick={() => handlePrint(ch)}
                             title="Print Delivery Challan"
-                            style={{ padding: '0.25rem 0.55rem', fontSize: '0.75rem' }}
+                            style={{ color: '#334155', padding: '0.35rem 0.45rem' }}
                           >
-                            <Printer size={13} />
+                            <Printer size={15} />
                           </button>
                         </div>
                       </td>
@@ -1100,13 +1103,13 @@ export default function BranchChallans({ userProfile, branches = [], addToast })
                   <div>
                     <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Total Bill</div>
                     <div style={{ fontWeight: 800, fontSize: '1rem', fontFamily: 'Outfit, sans-serif' }}>
-                      ৳{totalBill.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                      ৳{formatAmount(totalBill)}
                     </div>
                   </div>
                   <div>
                     <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Paid to Factory</div>
                     <div style={{ fontWeight: 800, fontSize: '1rem', color: '#059669', fontFamily: 'Outfit, sans-serif' }}>
-                      ৳{paid.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                      ৳{formatAmount(paid)}
                     </div>
                   </div>
                   <div>
@@ -1119,7 +1122,7 @@ export default function BranchChallans({ userProfile, branches = [], addToast })
                         fontFamily: 'Outfit, sans-serif',
                       }}
                     >
-                      ৳{due.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                      ৳{formatAmount(due)}
                     </div>
                   </div>
                 </div>
@@ -1164,7 +1167,7 @@ export default function BranchChallans({ userProfile, branches = [], addToast })
                               </td>
                               <td style={{ fontFamily: 'monospace', fontSize: '0.8rem' }}>{p.reference_number || '-'}</td>
                               <td style={{ textAlign: 'right', fontWeight: 800, fontFamily: 'Outfit, sans-serif', fontSize: '0.92rem' }}>
-                                ৳{parseFloat(p.amount).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                                ৳{formatAmount(p.amount)}
                               </td>
                               <td style={{ textAlign: 'center' }}>
                                 {st === 'approved' ? (
@@ -1402,7 +1405,7 @@ export default function BranchChallans({ userProfile, branches = [], addToast })
                               />
                             </td>
                             <td style={{ textAlign: 'right', fontWeight: 700, fontFamily: 'Outfit, sans-serif' }}>
-                              ৳{(item.totalPrice || 0).toFixed(2)}
+                              ৳{formatAmount(item.totalPrice)}
                             </td>
                             <td style={{ textAlign: 'center' }}>
                               {challanItems.length > 1 && (
@@ -1438,7 +1441,7 @@ export default function BranchChallans({ userProfile, branches = [], addToast })
                   >
                     <span style={{ fontWeight: 600, fontSize: '0.88rem' }}>Total Amount:</span>
                     <span style={{ fontSize: '1.2rem', fontWeight: 800, color: 'var(--primary)', fontFamily: 'Outfit, sans-serif' }}>
-                      ৳{getNewChallanGrandTotal().toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                      ৳{formatAmount(getNewChallanGrandTotal())}
                     </span>
                   </div>
                 </div>
@@ -1503,7 +1506,7 @@ export default function BranchChallans({ userProfile, branches = [], addToast })
                       Due Amount:
                     </span>
                     <span style={{ fontSize: '1.05rem', fontWeight: 800, color: '#dc2626', fontFamily: 'Outfit, sans-serif' }}>
-                      ৳{parseFloat(activeChallan.due_amount).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                      ৳{formatAmount(activeChallan.due_amount)}
                     </span>
                   </div>
                 </div>
@@ -1594,7 +1597,7 @@ export default function BranchChallans({ userProfile, branches = [], addToast })
             <form onSubmit={handleConfirmRejection}>
               <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
                 <p style={{ margin: 0, fontSize: '0.85rem' }}>
-                  Are you sure you want to reject payment <strong>#{selectedPaymentForAction.payment_no}</strong> (৳{parseFloat(selectedPaymentForAction.amount).toLocaleString()}) from <strong>{selectedPaymentForAction.branch?.name}</strong>?
+                  Are you sure you want to reject payment <strong>#{selectedPaymentForAction.payment_no}</strong> (৳{formatAmount(selectedPaymentForAction.amount)}) from <strong>{selectedPaymentForAction.branch?.name}</strong>?
                 </p>
 
                 <div className="form-group" style={{ margin: 0 }}>
@@ -1661,8 +1664,8 @@ export default function BranchChallans({ userProfile, branches = [], addToast })
                         <td style={{ textAlign: 'right', fontWeight: 600 }}>{it.dispatched_qty}</td>
                         <td style={{ textAlign: 'right', color: '#16a34a', fontWeight: 600 }}>{it.sold_qty || 0}</td>
                         <td style={{ textAlign: 'right', color: 'var(--text-muted)' }}>{it.remaining_qty || 0}</td>
-                        <td style={{ textAlign: 'right' }}>৳{parseFloat(it.unit_transfer_price).toFixed(2)}</td>
-                        <td style={{ textAlign: 'right', fontWeight: 700 }}>৳{parseFloat(it.total_price).toFixed(2)}</td>
+                        <td style={{ textAlign: 'right' }}>৳{formatAmount(it.unit_transfer_price)}</td>
+                        <td style={{ textAlign: 'right', fontWeight: 700 }}>৳{formatAmount(it.total_price)}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -1795,10 +1798,10 @@ export default function BranchChallans({ userProfile, branches = [], addToast })
                           {it.dispatched_qty} {it.product?.unit || 'pcs'}
                         </td>
                         <td style={{ borderRight: '1px solid #000', padding: '0.45rem 0.5rem', textAlign: 'right' }}>
-                          ৳{parseFloat(it.unit_transfer_price).toFixed(2)}
+                          ৳{formatAmount(it.unit_transfer_price)}
                         </td>
                         <td style={{ padding: '0.45rem 0.5rem', textAlign: 'right', fontWeight: 800 }}>
-                          ৳{parseFloat(it.total_price).toFixed(2)}
+                          ৳{formatAmount(it.total_price)}
                         </td>
                       </tr>
                     ))}
@@ -1807,7 +1810,7 @@ export default function BranchChallans({ userProfile, branches = [], addToast })
                     <tr style={{ backgroundColor: '#f8fafc', borderTop: '1.5px solid #000' }}>
                       <td colSpan={4} style={{ borderRight: '1px solid #000', padding: '0.65rem 0.5rem', textAlign: 'right', fontWeight: 800 }}>Grand Consignment Bill Total:</td>
                       <td style={{ padding: '0.65rem 0.5rem', textAlign: 'right', fontWeight: 900, fontSize: '0.98rem', color: '#000' }}>
-                        ৳{parseFloat(activeChallan.total_bill_amount).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                        ৳{formatAmount(activeChallan.total_bill_amount)}
                       </td>
                     </tr>
                   </tfoot>

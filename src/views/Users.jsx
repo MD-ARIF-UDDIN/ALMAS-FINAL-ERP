@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { Navigate } from 'react-router-dom';
 import { createClient } from '@supabase/supabase-js';
 import { supabase } from '../supabaseClient';
 import { 
@@ -54,7 +55,11 @@ const authCreatorClient = createClient(supabaseUrl, supabaseAnonKey, {
   },
 });
 
-export default function Users({ branches, fetchBranches, addToast }) {
+export default function Users({ userProfile, branches, fetchBranches, addToast }) {
+  if (userProfile && userProfile.role !== 'owner') {
+    return <Navigate to="/" replace />;
+  }
+
   const [profiles, setProfiles] = useState([]);
   const [activeTab, setActiveTab] = useState('users'); // 'users', 'branches', 'permissions'
   const [loading, setLoading] = useState(true);
@@ -79,6 +84,8 @@ export default function Users({ branches, fetchBranches, addToast }) {
 
   // Edit user state
   const [editingProfile, setEditingProfile] = useState(null);
+  const [editFullName, setEditFullName] = useState('');
+  const [editPassword, setEditPassword] = useState('');
   const [editRole, setEditRole] = useState('staff');
   const [editBranch, setEditBranch] = useState('');
 
@@ -206,8 +213,10 @@ export default function Users({ branches, fetchBranches, addToast }) {
 
   const handleOpenEditUser = (profile) => {
     setEditingProfile(profile);
+    setEditFullName(profile.full_name || '');
     setEditRole(profile.role || 'staff');
     setEditBranch(profile.branch_id || '');
+    setEditPassword('');
     setShowEditUserModal(true);
   };
 
@@ -215,21 +224,57 @@ export default function Users({ branches, fetchBranches, addToast }) {
     e.preventDefault();
     if (!editingProfile) return;
 
+    const trimmedName = editFullName.trim();
+    if (!trimmedName) {
+      showMessage('Please enter a valid full name.', 'error');
+      return;
+    }
+
+    const trimmedPassword = editPassword.trim();
+    if (trimmedPassword && trimmedPassword.length < 6) {
+      showMessage('New password must be at least 6 characters long.', 'error');
+      return;
+    }
+
     setLoading(true);
     try {
-      const { error } = await supabase
+      // 1. Update Profile Information
+      const { error: profError } = await supabase
         .from('profiles')
         .update({
+          full_name: trimmedName,
           role: editRole,
           branch_id: editRole === 'owner' ? null : editBranch || null,
         })
         .eq('id', editingProfile.id);
 
-      if (error) throw error;
+      if (profError) throw profError;
 
-      showMessage(`Updated profile settings for ${editingProfile.full_name || editingProfile.email}.`, 'success');
+      // 2. Update Password if provided
+      if (trimmedPassword) {
+        const { data: sessionData } = await supabase.auth.getSession();
+        const isSelf = sessionData?.session?.user?.id === editingProfile.id;
+
+        if (isSelf) {
+          const { error: authErr } = await supabase.auth.updateUser({ password: trimmedPassword });
+          if (authErr) throw authErr;
+        } else {
+          // Admin procedure to reset staff password
+          const { error: rpcError } = await supabase.rpc('update_user_password_by_admin', {
+            target_user_id: editingProfile.id,
+            new_password: trimmedPassword,
+          });
+          if (rpcError) {
+            console.warn('RPC update_user_password_by_admin error:', rpcError);
+            throw new Error('Could not update password. Please ensure database procedure is installed.');
+          }
+        }
+      }
+
+      showMessage(`Profile ${trimmedPassword ? 'and password ' : ''}for "${trimmedName}" updated successfully!`, 'success');
       setShowEditUserModal(false);
       setEditingProfile(null);
+      setEditPassword('');
       fetchProfiles();
     } catch (err) {
       console.error('Error updating user profile:', err);
@@ -251,6 +296,55 @@ export default function Users({ branches, fetchBranches, addToast }) {
       setIsCustomOverride(false);
     }
     setShowUserPermsModal(true);
+  };
+
+  const handleDeleteUser = async (profile) => {
+    // 1. Prevent self-deletion if logged in
+    const currentSession = await supabase.auth.getSession();
+    const currentUserId = currentSession?.data?.session?.user?.id;
+    if (currentUserId && currentUserId === profile.id) {
+      showMessage('You cannot delete your own active logged-in account.', 'error');
+      return;
+    }
+
+    // 2. Prevent deleting the only remaining owner
+    if (profile.role === 'owner') {
+      const ownerCount = profiles.filter((p) => p.role === 'owner').length;
+      if (ownerCount <= 1) {
+        showMessage('Cannot delete the primary owner account. At least one owner account must remain.', 'error');
+        return;
+      }
+    }
+
+    const confirm = window.confirm(
+      `Are you sure you want to delete user "${profile.full_name || profile.email}" (${profile.role.replace('_', ' ')})?\nThis will permanently revoke their access.`
+    );
+    if (!confirm) return;
+
+    setLoading(true);
+    try {
+      // Try RPC first (which deletes from auth.users cascading to profiles)
+      const { error: rpcError } = await supabase.rpc('delete_user_by_admin', { target_user_id: profile.id });
+      
+      if (rpcError) {
+        // Fallback: Delete from profiles table directly
+        const { error: profileError } = await supabase.from('profiles').delete().eq('id', profile.id);
+        if (profileError) throw profileError;
+      }
+
+      showMessage(`User "${profile.full_name || profile.email}" deleted successfully.`, 'success');
+      fetchProfiles();
+    } catch (err) {
+      console.error('Error deleting user:', err);
+      showMessage(
+        err.message?.includes('foreign key') 
+          ? 'Cannot delete user because they are linked to recorded transaction history. Edit or reassign their role instead.'
+          : (err.message || 'Failed to delete user account.'),
+        'error'
+      );
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleSaveUserCustomPerms = () => {
@@ -565,26 +659,32 @@ export default function Users({ branches, fetchBranches, addToast }) {
                             )}
                           </td>
                           <td style={{ textAlign: 'center' }}>
-                            <div style={{ display: 'flex', gap: '0.4rem', justifyContent: 'center' }}>
+                            <div style={{ display: 'inline-flex', gap: '0.35rem', justifyContent: 'center', alignItems: 'center' }}>
                               {!isOwner && (
                                 <button
-                                  className="btn btn-secondary btn-sm"
+                                  className="btn btn-secondary btn-sm btn-icon"
                                   onClick={() => handleOpenUserPerms(p)}
-                                  title="Manage granular permissions for this staff member"
-                                  style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem', display: 'inline-flex', alignItems: 'center', gap: '0.3rem' }}
+                                  title="Manage Staff Permissions"
+                                  style={{ color: '#4f46e5', padding: '0.35rem 0.45rem' }}
                                 >
-                                  <Sliders size={13} />
-                                  <span>Permissions</span>
+                                  <Sliders size={15} />
                                 </button>
                               )}
                               <button
-                                className="btn btn-secondary btn-sm"
+                                className="btn btn-secondary btn-sm btn-icon"
                                 onClick={() => handleOpenEditUser(p)}
-                                title="Edit employee role and branch"
-                                style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem', display: 'inline-flex', alignItems: 'center', gap: '0.3rem' }}
+                                title="Edit Role & Branch"
+                                style={{ color: '#0284c7', padding: '0.35rem 0.45rem' }}
                               >
-                                <Edit size={13} />
-                                <span>Edit</span>
+                                <Edit size={15} />
+                              </button>
+                              <button
+                                className="btn btn-secondary btn-sm btn-icon"
+                                onClick={() => handleDeleteUser(p)}
+                                title="Delete User Account"
+                                style={{ color: 'var(--danger)', padding: '0.35rem 0.45rem' }}
+                              >
+                                <Trash2 size={15} />
                               </button>
                             </div>
                           </td>
@@ -1055,59 +1155,94 @@ export default function Users({ branches, fetchBranches, addToast }) {
             <form onSubmit={handleUpdateUserProfile}>
               <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
                 <div className="form-group">
-                  <label>Full Name</label>
-                  <input
-                    type="text"
-                    className="input-control"
-                    value={editingProfile.full_name || ''}
-                    disabled
-                    style={{ backgroundColor: '#f8fafc', color: 'var(--text-muted)' }}
-                  />
+                  <label>Full Name *</label>
+                  <div style={{ position: 'relative' }}>
+                    <User size={14} style={{ position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+                    <input
+                      type="text"
+                      className="input-control"
+                      style={{ paddingLeft: '2.5rem' }}
+                      value={editFullName}
+                      onChange={(e) => setEditFullName(e.target.value)}
+                      placeholder="Enter full name"
+                      required
+                    />
+                  </div>
                 </div>
 
                 <div className="form-group">
                   <label>Email</label>
-                  <input
-                    type="text"
-                    className="input-control"
-                    value={editingProfile.email || ''}
-                    disabled
-                    style={{ backgroundColor: '#f8fafc', color: 'var(--text-muted)' }}
-                  />
+                  <div style={{ position: 'relative' }}>
+                    <Mail size={14} style={{ position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+                    <input
+                      type="text"
+                      className="input-control"
+                      style={{ paddingLeft: '2.5rem', backgroundColor: '#f8fafc', color: 'var(--text-muted)' }}
+                      value={editingProfile.email || ''}
+                      disabled
+                    />
+                  </div>
                 </div>
 
                 <div className="form-group">
                   <label>Role *</label>
-                  <select
-                    className="input-control"
-                    value={editRole}
-                    onChange={(e) => setEditRole(e.target.value)}
-                    required
-                  >
-                    <option value="staff">Staff</option>
-                    <option value="branch_manager">Branch Manager</option>
-                    <option value="owner">Owner</option>
-                  </select>
+                  <div style={{ position: 'relative' }}>
+                    <Shield size={14} style={{ position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+                    <select
+                      className="input-control"
+                      style={{ paddingLeft: '2.5rem' }}
+                      value={editRole}
+                      onChange={(e) => setEditRole(e.target.value)}
+                      required
+                    >
+                      <option value="staff">Staff</option>
+                      <option value="branch_manager">Branch Manager</option>
+                      <option value="owner">Owner</option>
+                    </select>
+                  </div>
                 </div>
 
                 {editRole !== 'owner' && (
                   <div className="form-group">
                     <label>Branch *</label>
-                    <select
-                      className="input-control"
-                      value={editBranch}
-                      onChange={(e) => setEditBranch(e.target.value)}
-                      required
-                    >
-                      <option value="">-- Select Branch --</option>
-                      {branches.map((b) => (
-                        <option key={b.id} value={b.id}>
-                          {b.name}
-                        </option>
-                      ))}
-                    </select>
+                    <div style={{ position: 'relative' }}>
+                      <Building size={14} style={{ position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+                      <select
+                        className="input-control"
+                        style={{ paddingLeft: '2.5rem' }}
+                        value={editBranch}
+                        onChange={(e) => setEditBranch(e.target.value)}
+                        required
+                      >
+                        <option value="">-- Select Branch --</option>
+                        {branches.map((b) => (
+                          <option key={b.id} value={b.id}>
+                            {b.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
                   </div>
                 )}
+
+                <div className="form-group">
+                  <label>Change Password (optional)</label>
+                  <div style={{ position: 'relative' }}>
+                    <Lock size={14} style={{ position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+                    <input
+                      type="password"
+                      className="input-control"
+                      style={{ paddingLeft: '2.5rem' }}
+                      placeholder="Leave blank to keep current password"
+                      value={editPassword}
+                      onChange={(e) => setEditPassword(e.target.value)}
+                      minLength={6}
+                    />
+                  </div>
+                  <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '0.2rem', display: 'block' }}>
+                    Enter at least 6 characters to change this user's login password.
+                  </span>
+                </div>
               </div>
               <div className="modal-footer">
                 <button 

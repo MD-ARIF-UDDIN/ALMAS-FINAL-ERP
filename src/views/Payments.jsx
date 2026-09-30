@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../supabaseClient';
-import { CreditCard, TrendingUp, TrendingDown, Plus, Search, HelpCircle, DollarSign } from 'lucide-react';
+import { CreditCard, TrendingUp, TrendingDown, Plus, Search, HelpCircle, DollarSign, History, X, Receipt } from 'lucide-react';
 import { TableLoading } from '../components/TableLoading';
 import Pagination from '../components/Pagination';
+import { formatAmount, formatPlainNumber } from '../utils/format';
 
 export default function Payments({ userProfile, branches, addToast }) {
   const [activeSubTab, setActiveSubTab] = useState('invoices'); // 'invoices' or 'ledger'
@@ -36,6 +37,12 @@ export default function Payments({ userProfile, branches, addToast }) {
   const [referenceNumber, setReferenceNumber] = useState('');
   const [paymentDate, setPaymentDate] = useState(new Date().toISOString().split('T')[0]);
   const [paymentNotes, setPaymentNotes] = useState('');
+
+  // Payment History Modal States
+  const [showHistoryModal, setShowHistoryModal] = useState(false);
+  const [historyInvoice, setHistoryInvoice] = useState(null);
+  const [invoicePaymentHistory, setInvoicePaymentHistory] = useState([]);
+  const [loadingHistory, setLoadingHistory] = useState(false);
 
   const [selectedBranchId, setSelectedBranchId] = useState(() => {
     if (userProfile?.role === 'owner') {
@@ -80,7 +87,9 @@ export default function Payments({ userProfile, branches, addToast }) {
             payment_status,
             branch_id,
             contacts (
-              name
+              id,
+              name,
+              phone
             )
           `, { count: 'exact' });
       } else {
@@ -95,7 +104,9 @@ export default function Payments({ userProfile, branches, addToast }) {
             payment_status,
             branch_id,
             contacts (
-              name
+              id,
+              name,
+              phone
             )
           `, { count: 'exact' });
       }
@@ -197,8 +208,41 @@ export default function Payments({ userProfile, branches, addToast }) {
   const handleOpenPaymentModal = (invoice) => {
     setSelectedInvoice(invoice);
     const due = invoice.net_amount - invoice.paid_amount;
-    setPaymentAmount(due.toFixed(2));
+    setPaymentAmount(formatPlainNumber(due));
     setShowPaymentModal(true);
+  };
+
+  const handleOpenHistoryModal = async (invoice) => {
+    setHistoryInvoice(invoice);
+    setShowHistoryModal(true);
+    setLoadingHistory(true);
+    try {
+      const { data, error } = await supabase
+        .from('payments')
+        .select(`
+          id,
+          payment_number,
+          transaction_type,
+          payment_date,
+          amount,
+          payment_method,
+          notes,
+          created_by,
+          profiles (
+            full_name
+          )
+        `)
+        .eq('reference_invoice_id', invoice.id)
+        .order('payment_date', { ascending: false });
+
+      if (error) throw error;
+      setInvoicePaymentHistory(data || []);
+    } catch (err) {
+      console.error('Error fetching invoice payment history:', err);
+      showMessage('Failed to load payment history for this bill.', 'error');
+    } finally {
+      setLoadingHistory(false);
+    }
   };
 
   const handleRecordPayment = async (e) => {
@@ -213,7 +257,7 @@ export default function Payments({ userProfile, branches, addToast }) {
       return;
     }
     if (amountNum > due + 0.01) { // allowance for decimal precision
-      showMessage(`Payment amount cannot exceed the remaining due of ৳${due.toFixed(2)}.`, 'error');
+      showMessage(`Payment amount cannot exceed the remaining due of ৳${formatAmount(due)}.`, 'error');
       return;
     }
 
@@ -261,6 +305,14 @@ export default function Payments({ userProfile, branches, addToast }) {
       // Refresh views
       fetchInvoices();
       fetchPaymentsLog();
+      
+      // If history modal was open for this invoice, refresh its history too
+      if (historyInvoice && historyInvoice.id === selectedInvoice.id) {
+        handleOpenHistoryModal({
+          ...selectedInvoice,
+          paid_amount: selectedInvoice.paid_amount + amountNum,
+        });
+      }
     } catch (err) {
       console.error(err);
       showMessage('Failed to process payment transaction.', 'error');
@@ -420,27 +472,41 @@ export default function Payments({ userProfile, branches, addToast }) {
                         <td style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
                           {inv.contacts?.name || 'Unknown'}
                         </td>
-                        <td style={{ fontFamily: 'Outfit, sans-serif' }}>৳{inv.net_amount.toFixed(2)}</td>
+                        <td style={{ fontFamily: 'Outfit, sans-serif' }}>৳{formatAmount(inv.net_amount)}</td>
                         <td style={{ fontFamily: 'Outfit, sans-serif', color: 'var(--success-text)' }}>
-                          ৳{inv.paid_amount.toFixed(2)}
+                          ৳{formatAmount(inv.paid_amount)}
                         </td>
                         <td style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 700, color: due > 0 ? 'var(--danger-text)' : 'var(--text-primary)' }}>
-                          ৳{due.toFixed(2)}
+                          ৳{formatAmount(due)}
                         </td>
                         <td>
                           <span className={`badge badge-${inv.payment_status}`}>{inv.payment_status}</span>
                         </td>
                         <td>
-                          {due > 0 ? (
+                          <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
                             <button
-                              className="btn btn-primary btn-sm"
-                              onClick={() => handleOpenPaymentModal(inv)}
+                              className="btn btn-secondary btn-sm"
+                              title="View Payment History"
+                              onClick={() => handleOpenHistoryModal(inv)}
+                              style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem', padding: '0.35rem 0.6rem' }}
                             >
-                              {invoiceType === 'sales' ? 'Collect' : 'Pay'}
+                              <History size={14} />
+                              <span>History</span>
                             </button>
-                          ) : (
-                            <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', fontWeight: 500 }}>Cleared</span>
-                          )}
+                            {due > 0 ? (
+                              <button
+                                className="btn btn-primary btn-sm"
+                                onClick={() => handleOpenPaymentModal(inv)}
+                                style={{ padding: '0.35rem 0.65rem' }}
+                              >
+                                {invoiceType === 'sales' ? 'Collect' : 'Pay'}
+                              </button>
+                            ) : (
+                              <span style={{ fontSize: '0.75rem', color: 'var(--success-text)', fontWeight: 600, padding: '0 0.35rem' }}>
+                                ✓ Paid
+                              </span>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     );
@@ -516,7 +582,7 @@ export default function Payments({ userProfile, branches, addToast }) {
                           {log.contacts?.name || (log.reference_invoice_id ? `REF#${log.reference_invoice_id.substring(0, 8).toUpperCase()}` : 'N/A')}
                         </td>
                         <td style={{ fontWeight: 700, fontFamily: 'Outfit, sans-serif', color: isRec ? 'var(--success-text)' : 'var(--danger-text)' }}>
-                          ৳{log.amount.toFixed(2)}
+                          ৳{formatAmount(log.amount)}
                         </td>
                         <td style={{ textTransform: 'capitalize' }}>{log.payment_method?.replace('_', ' ')}</td>
                         <td>{log.notes || 'N/A'}</td>
@@ -559,15 +625,15 @@ export default function Payments({ userProfile, branches, addToast }) {
                 <div style={{ background: '#f8fafc', padding: '1rem', borderRadius: 'var(--border-radius-sm)', border: '1px solid var(--border-color)' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.35rem' }}>
                     <span style={{ color: 'var(--text-secondary)' }}>Net Total:</span>
-                    <span style={{ fontWeight: 600 }}>৳{selectedInvoice.net_amount.toFixed(2)}</span>
+                    <span style={{ fontWeight: 600 }}>৳{formatAmount(selectedInvoice.net_amount)}</span>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.35rem', color: 'var(--success-text)' }}>
                     <span>Paid Amount:</span>
-                    <span>৳{selectedInvoice.paid_amount.toFixed(2)}</span>
+                    <span>৳{formatAmount(selectedInvoice.paid_amount)}</span>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 700, borderTop: '1px dashed var(--border-color)', paddingTop: '0.35rem', color: 'var(--danger-text)' }}>
                     <span>Due Amount:</span>
-                    <span>৳{(selectedInvoice.net_amount - selectedInvoice.paid_amount).toFixed(2)}</span>
+                    <span>৳{formatAmount(selectedInvoice.net_amount - selectedInvoice.paid_amount)}</span>
                   </div>
                 </div>
 
@@ -578,7 +644,7 @@ export default function Payments({ userProfile, branches, addToast }) {
                       type="number"
                       step="0.01"
                       min="0.01"
-                      max={(selectedInvoice.net_amount - selectedInvoice.paid_amount).toFixed(2)}
+                      max={formatPlainNumber(selectedInvoice.net_amount - selectedInvoice.paid_amount)}
                       className="input-control"
                       value={paymentAmount}
                       onChange={(e) => setPaymentAmount(e.target.value)}
@@ -651,6 +717,179 @@ export default function Payments({ userProfile, branches, addToast }) {
           </div>
         </div>
       )}
+
+      {/* PAYMENT HISTORY MODAL FOR INDIVIDUAL BILL */}
+      {showHistoryModal && historyInvoice && (() => {
+        const historyDue = historyInvoice.net_amount - historyInvoice.paid_amount;
+        const invCode = historyInvoice.invoice_number || (invoiceType === 'sales' ? 'INV' : 'PUR') + '#' + historyInvoice.id.substring(0, 8).toUpperCase();
+        return (
+          <div className="modal-overlay" onClick={() => setShowHistoryModal(false)}>
+            <div 
+              className="modal-content" 
+              style={{ maxWidth: '820px', width: '92%' }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="modal-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                  <div style={{ background: 'var(--primary-subtle, rgba(99, 102, 241, 0.1))', padding: '0.5rem', borderRadius: '8px', color: 'var(--primary-color)' }}>
+                    <History size={20} />
+                  </div>
+                  <div>
+                    <h3 className="modal-title" style={{ margin: 0, fontSize: '1.15rem' }}>
+                      Payment History
+                    </h3>
+                    <div style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', marginTop: '2px' }}>
+                      {invCode} • {invoiceType === 'sales' ? 'Customer' : 'Supplier'}: <strong style={{ color: 'var(--text-primary)' }}>{historyInvoice.contacts?.name || 'Walk-in'}</strong>
+                    </div>
+                  </div>
+                </div>
+                <button
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => setShowHistoryModal(false)}
+                  style={{ borderRadius: '50%', width: '32px', height: '32px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                >
+                  <X size={16} />
+                </button>
+              </div>
+
+              <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem', maxHeight: '70vh', overflowY: 'auto' }}>
+                {/* Financial Overview Banner */}
+                <div style={{ 
+                  display: 'grid', 
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', 
+                  gap: '0.75rem', 
+                  background: 'var(--bg-card, #f8fafc)', 
+                  padding: '0.9rem', 
+                  borderRadius: 'var(--border-radius-sm, 8px)', 
+                  border: '1px solid var(--border-color, #e2e8f0)' 
+                }}>
+                  <div>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted, #64748b)', textTransform: 'uppercase', fontWeight: 600 }}>Date</div>
+                    <div style={{ fontWeight: 600, fontSize: '0.9rem', marginTop: '2px' }}>
+                      {new Date(historyInvoice.sale_date || historyInvoice.purchase_date).toLocaleDateString()}
+                    </div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted, #64748b)', textTransform: 'uppercase', fontWeight: 600 }}>Total Bill</div>
+                    <div style={{ fontWeight: 700, fontSize: '0.95rem', marginTop: '2px', fontFamily: 'Outfit, sans-serif' }}>
+                      ৳{formatAmount(historyInvoice.net_amount)}
+                    </div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted, #64748b)', textTransform: 'uppercase', fontWeight: 600 }}>Total Paid</div>
+                    <div style={{ fontWeight: 700, fontSize: '0.95rem', marginTop: '2px', fontFamily: 'Outfit, sans-serif', color: 'var(--success-text, #16a34a)' }}>
+                      ৳{formatAmount(historyInvoice.paid_amount)}
+                    </div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted, #64748b)', textTransform: 'uppercase', fontWeight: 600 }}>Remaining Due</div>
+                    <div style={{ fontWeight: 700, fontSize: '0.95rem', marginTop: '2px', fontFamily: 'Outfit, sans-serif', color: historyDue > 0 ? 'var(--danger-text, #dc2626)' : 'var(--text-primary)' }}>
+                      ৳{formatAmount(historyDue)}
+                    </div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted, #64748b)', textTransform: 'uppercase', fontWeight: 600 }}>Status</div>
+                    <div style={{ marginTop: '2px' }}>
+                      <span className={`badge badge-${historyInvoice.payment_status}`}>{historyInvoice.payment_status}</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Payments Table */}
+                <div>
+                  <h4 style={{ fontSize: '0.92rem', fontWeight: 600, marginBottom: '0.6rem', color: 'var(--text-primary)' }}>
+                    Payment Installments ({invoicePaymentHistory.length})
+                  </h4>
+                  <div className="table-container" style={{ maxHeight: '280px', overflowY: 'auto' }}>
+                    <table>
+                      <thead>
+                        <tr>
+                          <th style={{ width: '40px' }}>#</th>
+                          <th>Date</th>
+                          <th>Receipt / Voucher</th>
+                          <th>Amount</th>
+                          <th>Method</th>
+                          <th>Notes / Ref</th>
+                          <th>Logged By</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {loadingHistory ? (
+                          <TableLoading colSpan={7} message="Loading payment history..." />
+                        ) : invoicePaymentHistory.length === 0 ? (
+                          <tr>
+                            <td colSpan={7} style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>
+                              No payment installments found for this invoice.
+                            </td>
+                          </tr>
+                        ) : (
+                          invoicePaymentHistory.map((p, idx) => (
+                            <tr key={p.id || idx}>
+                              <td>{idx + 1}</td>
+                              <td style={{ whiteSpace: 'nowrap' }}>
+                                {new Date(p.payment_date).toLocaleDateString()}
+                              </td>
+                              <td style={{ fontFamily: 'monospace', fontWeight: 600, fontSize: '0.8rem' }}>
+                                {p.payment_number || '—'}
+                              </td>
+                              <td style={{ fontWeight: 700, fontFamily: 'Outfit, sans-serif', color: 'var(--success-text, #16a34a)', whiteSpace: 'nowrap' }}>
+                                ৳{formatAmount(p.amount)}
+                              </td>
+                              <td style={{ textTransform: 'capitalize' }}>
+                                <span style={{ 
+                                  background: '#f1f5f9', 
+                                  padding: '2px 7px', 
+                                  borderRadius: '4px', 
+                                  fontSize: '0.78rem',
+                                  fontWeight: 500
+                                }}>
+                                  {p.payment_method?.replace('_', ' ')}
+                                </span>
+                              </td>
+                              <td style={{ fontSize: '0.82rem', color: p.notes ? 'var(--text-primary)' : 'var(--text-muted)' }}>
+                                {p.notes || '—'}
+                              </td>
+                              <td style={{ fontSize: '0.82rem', color: 'var(--text-secondary)' }}>
+                                {p.profiles?.full_name || 'System'}
+                              </td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+
+              <div className="modal-footer" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div>
+                  {historyDue > 0 && (
+                    <button
+                      type="button"
+                      className="btn btn-primary btn-sm"
+                      onClick={() => {
+                        setShowHistoryModal(false);
+                        handleOpenPaymentModal(historyInvoice);
+                      }}
+                      style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
+                    >
+                      <Plus size={14} />
+                      <span>{invoiceType === 'sales' ? 'Receive Payment' : 'Make Payment'}</span>
+                    </button>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => setShowHistoryModal(false)}
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }

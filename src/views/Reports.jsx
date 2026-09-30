@@ -15,6 +15,7 @@ import {
   X
 } from 'lucide-react';
 import { TableLoading } from '../components/TableLoading';
+import { formatAmount } from '../utils/format';
 
 export default function Reports({ userProfile, branches = [] }) {
   // 3 Major Report Tabs
@@ -614,7 +615,7 @@ export default function Reports({ userProfile, branches = [] }) {
             <div className="card" style={{ padding: '0.45rem 0.65rem', borderLeft: '3.5px solid #0284c7' }}>
               <div style={{ fontSize: '0.68rem', fontWeight: 600, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>Total Sales</div>
               <div style={{ fontSize: '1.05rem', fontWeight: 800, fontFamily: 'Outfit, sans-serif', color: 'var(--text-primary)', marginTop: '0.05rem' }}>
-                ৳{overallTotalRevenue.toLocaleString(undefined, { minimumFractionDigits: 0 })}
+                ৳{formatAmount(overallTotalRevenue)}
               </div>
             </div>
 
@@ -622,7 +623,7 @@ export default function Reports({ userProfile, branches = [] }) {
             <div className="card" style={{ padding: '0.45rem 0.65rem', borderLeft: '3.5px solid #10b981' }}>
               <div style={{ fontSize: '0.68rem', fontWeight: 600, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>Total Collected</div>
               <div style={{ fontSize: '1.05rem', fontWeight: 800, fontFamily: 'Outfit, sans-serif', color: '#059669', marginTop: '0.05rem' }}>
-                ৳{overallTotalPaid.toLocaleString(undefined, { minimumFractionDigits: 0 })}
+                ৳{formatAmount(overallTotalPaid)}
               </div>
             </div>
 
@@ -630,7 +631,7 @@ export default function Reports({ userProfile, branches = [] }) {
             <div className="card" style={{ padding: '0.45rem 0.65rem', borderLeft: '3.5px solid #f59e0b' }}>
               <div style={{ fontSize: '0.68rem', fontWeight: 600, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>Customer Due</div>
               <div style={{ fontSize: '1.05rem', fontWeight: 800, fontFamily: 'Outfit, sans-serif', color: '#d97706', marginTop: '0.05rem' }}>
-                ৳{overallTotalDue.toLocaleString(undefined, { minimumFractionDigits: 0 })}
+                ৳{formatAmount(overallTotalDue)}
               </div>
             </div>
 
@@ -638,7 +639,7 @@ export default function Reports({ userProfile, branches = [] }) {
             <div className="card" style={{ padding: '0.45rem 0.65rem', borderLeft: '3.5px solid #6366f1' }}>
               <div style={{ fontSize: '0.68rem', fontWeight: 600, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>Total Purchases</div>
               <div style={{ fontSize: '1.05rem', fontWeight: 800, fontFamily: 'Outfit, sans-serif', color: 'var(--text-primary)', marginTop: '0.05rem' }}>
-                ৳{overallPurchasesTotal.toLocaleString(undefined, { minimumFractionDigits: 0 })}
+                ৳{formatAmount(overallPurchasesTotal)}
               </div>
             </div>
 
@@ -646,7 +647,7 @@ export default function Reports({ userProfile, branches = [] }) {
             <div className="card" style={{ padding: '0.45rem 0.65rem', borderLeft: '3.5px solid #ef4444' }}>
               <div style={{ fontSize: '0.68rem', fontWeight: 600, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>Total Expenses</div>
               <div style={{ fontSize: '1.05rem', fontWeight: 800, fontFamily: 'Outfit, sans-serif', color: '#dc2626', marginTop: '0.05rem' }}>
-                ৳{overallExpensesTotal.toLocaleString(undefined, { minimumFractionDigits: 0 })}
+                ৳{formatAmount(overallExpensesTotal)}
               </div>
             </div>
 
@@ -654,7 +655,7 @@ export default function Reports({ userProfile, branches = [] }) {
             <div className="card" style={{ padding: '0.45rem 0.65rem', borderLeft: `3.5px solid ${overallNetProfit >= 0 ? '#10b981' : '#ef4444'}` }}>
               <div style={{ fontSize: '0.68rem', fontWeight: 600, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>Net Profit</div>
               <div style={{ fontSize: '1.05rem', fontWeight: 800, fontFamily: 'Outfit, sans-serif', color: overallNetProfit >= 0 ? '#059669' : '#dc2626', marginTop: '0.05rem' }}>
-                ৳{overallNetProfit.toLocaleString(undefined, { minimumFractionDigits: 0 })}
+                ৳{formatAmount(overallNetProfit)}
               </div>
             </div>
           </div>
@@ -700,10 +701,10 @@ export default function Reports({ userProfile, branches = [] }) {
                           <td>{new Date(s.sale_date).toLocaleDateString('en-GB')}</td>
                           <td style={{ fontWeight: 600 }}>{s.contacts?.name || 'Walk-in'}</td>
                           <td>{s.contacts?.phone || '-'}</td>
-                          <td style={{ textAlign: 'right', fontWeight: 700 }}>৳{net.toFixed(2)}</td>
-                          <td style={{ textAlign: 'right', color: '#059669' }}>৳{paid.toFixed(2)}</td>
+                          <td style={{ textAlign: 'right', fontWeight: 700 }}>৳{formatAmount(net)}</td>
+                          <td style={{ textAlign: 'right', color: '#059669' }}>৳{formatAmount(paid)}</td>
                           <td style={{ textAlign: 'right', color: due > 0 ? '#dc2626' : 'inherit', fontWeight: due > 0 ? 700 : 400 }}>
-                            ৳{due.toFixed(2)}
+                            ৳{formatAmount(due)}
                           </td>
                           <td style={{ textAlign: 'center' }}>
                             <span className={`badge badge-${s.payment_status}`}>{s.payment_status}</span>
@@ -913,7 +914,7 @@ export default function Reports({ userProfile, branches = [] }) {
                       Invoiced ({customerSales.length})
                     </div>
                     <div style={{ fontSize: '0.85rem', fontWeight: 800, color: '#0284c7', fontFamily: 'Outfit, sans-serif' }}>
-                      ৳{customerTotalBilled.toLocaleString(undefined, { minimumFractionDigits: 0 })}
+                      ৳{formatAmount(customerTotalBilled)}
                     </div>
                   </div>
 
@@ -922,7 +923,7 @@ export default function Reports({ userProfile, branches = [] }) {
                       Total Paid
                     </div>
                     <div style={{ fontSize: '0.85rem', fontWeight: 800, color: '#059669', fontFamily: 'Outfit, sans-serif' }}>
-                      ৳{customerTotalPaid.toLocaleString(undefined, { minimumFractionDigits: 0 })}
+                      ৳{formatAmount(customerTotalPaid)}
                     </div>
                   </div>
 
@@ -937,7 +938,7 @@ export default function Reports({ userProfile, branches = [] }) {
                       Due Balance
                     </div>
                     <div style={{ fontSize: '0.85rem', fontWeight: 800, color: customerTotalDue > 0 ? '#dc2626' : '#16a34a', fontFamily: 'Outfit, sans-serif' }}>
-                      ৳{customerTotalDue.toLocaleString(undefined, { minimumFractionDigits: 0 })}
+                      ৳{formatAmount(customerTotalDue)}
                     </div>
                   </div>
                 </div>
@@ -982,12 +983,12 @@ export default function Reports({ userProfile, branches = [] }) {
                                 {s.invoice_number || `INV#${s.id.substring(0, 8).toUpperCase()}`}
                               </td>
                               <td>{new Date(s.sale_date).toLocaleDateString('en-GB')}</td>
-                              <td style={{ textAlign: 'right' }}>৳{(parseFloat(s.total_amount) || 0).toFixed(2)}</td>
-                              <td style={{ textAlign: 'right', color: 'var(--text-muted)' }}>৳{(parseFloat(s.discount) || 0).toFixed(2)}</td>
-                              <td style={{ textAlign: 'right', fontWeight: 700 }}>৳{net.toFixed(2)}</td>
-                              <td style={{ textAlign: 'right', color: '#059669' }}>৳{paid.toFixed(2)}</td>
+                              <td style={{ textAlign: 'right' }}>৳{formatAmount(s.total_amount)}</td>
+                              <td style={{ textAlign: 'right', color: 'var(--text-muted)' }}>৳{formatAmount(s.discount)}</td>
+                              <td style={{ textAlign: 'right', fontWeight: 700 }}>৳{formatAmount(net)}</td>
+                              <td style={{ textAlign: 'right', color: '#059669' }}>৳{formatAmount(paid)}</td>
                               <td style={{ textAlign: 'right', color: due > 0 ? '#dc2626' : 'inherit', fontWeight: due > 0 ? 700 : 400 }}>
-                                ৳{due.toFixed(2)}
+                                ৳{formatAmount(due)}
                               </td>
                               <td style={{ textAlign: 'center' }}>
                                 <span className={`badge badge-${s.payment_status}`}>{s.payment_status}</span>
@@ -1210,7 +1211,7 @@ export default function Reports({ userProfile, branches = [] }) {
                   Total Collected ({customerPayments.length})
                 </div>
                 <div style={{ fontSize: '0.85rem', fontWeight: 800, color: '#059669', fontFamily: 'Outfit, sans-serif' }}>
-                  ৳{paymentsTotalAmount.toLocaleString(undefined, { minimumFractionDigits: 0 })}
+                  ৳{formatAmount(paymentsTotalAmount)}
                 </div>
               </div>
 
@@ -1219,7 +1220,7 @@ export default function Reports({ userProfile, branches = [] }) {
                   Cash Collections
                 </div>
                 <div style={{ fontSize: '0.85rem', fontWeight: 800, color: '#0284c7', fontFamily: 'Outfit, sans-serif' }}>
-                  ৳{paymentsCashAmount.toLocaleString(undefined, { minimumFractionDigits: 0 })}
+                  ৳{formatAmount(paymentsCashAmount)}
                 </div>
               </div>
 
@@ -1228,7 +1229,7 @@ export default function Reports({ userProfile, branches = [] }) {
                   Bank & Digital
                 </div>
                 <div style={{ fontSize: '0.85rem', fontWeight: 800, color: '#7c3aed', fontFamily: 'Outfit, sans-serif' }}>
-                  ৳{paymentsDigitalAmount.toLocaleString(undefined, { minimumFractionDigits: 0 })}
+                  ৳{formatAmount(paymentsDigitalAmount)}
                 </div>
               </div>
             </div>
@@ -1288,7 +1289,7 @@ export default function Reports({ userProfile, branches = [] }) {
                             {p.notes || '-'}
                           </td>
                           <td style={{ textAlign: 'right', fontWeight: 800, color: '#059669', fontSize: '0.92rem' }}>
-                            ৳{(parseFloat(p.amount) || 0).toFixed(2)}
+                            ৳{formatAmount(p.amount)}
                           </td>
                         </tr>
                       );
@@ -1536,13 +1537,13 @@ export default function Reports({ userProfile, branches = [] }) {
                                 {s.contacts?.name || 'Walk-in'}
                               </td>
                               <td style={{ textAlign: 'right', borderRight: '1px solid #000', padding: '0.4rem 0.5rem', fontWeight: 700 }}>
-                                ৳{net.toFixed(2)}
+                                ৳{formatAmount(net)}
                               </td>
                               <td style={{ textAlign: 'right', borderRight: '1px solid #000', padding: '0.4rem 0.5rem', color: '#059669', fontWeight: 600 }}>
-                                ৳{paid.toFixed(2)}
+                                ৳{formatAmount(paid)}
                               </td>
                               <td style={{ textAlign: 'right', padding: '0.4rem 0.5rem', fontWeight: due > 0 ? 800 : 600, color: due > 0 ? '#dc2626' : '#000' }}>
-                                ৳{due.toFixed(2)}
+                                ৳{formatAmount(due)}
                               </td>
                             </tr>
                           );
@@ -1592,19 +1593,19 @@ export default function Reports({ userProfile, branches = [] }) {
                                 {new Date(s.sale_date).toLocaleDateString('en-GB')}
                               </td>
                               <td style={{ textAlign: 'right', borderRight: '1px solid #000', padding: '0.4rem 0.5rem' }}>
-                                ৳{(parseFloat(s.total_amount) || 0).toFixed(2)}
+                                ৳{formatAmount(s.total_amount)}
                               </td>
                               <td style={{ textAlign: 'right', borderRight: '1px solid #000', padding: '0.4rem 0.5rem', color: '#475569' }}>
-                                ৳{(parseFloat(s.discount) || 0).toFixed(2)}
+                                ৳{formatAmount(s.discount)}
                               </td>
                               <td style={{ textAlign: 'right', borderRight: '1px solid #000', padding: '0.4rem 0.5rem', fontWeight: 700 }}>
-                                ৳{net.toFixed(2)}
+                                ৳{formatAmount(net)}
                               </td>
                               <td style={{ textAlign: 'right', borderRight: '1px solid #000', padding: '0.4rem 0.5rem', color: '#059669', fontWeight: 600 }}>
-                                ৳{paid.toFixed(2)}
+                                ৳{formatAmount(paid)}
                               </td>
                               <td style={{ textAlign: 'right', padding: '0.4rem 0.5rem', fontWeight: due > 0 ? 800 : 600, color: due > 0 ? '#dc2626' : '#000' }}>
-                                ৳{due.toFixed(2)}
+                                ৳{formatAmount(due)}
                               </td>
                             </tr>
                           );
@@ -1664,7 +1665,7 @@ export default function Reports({ userProfile, branches = [] }) {
                                 {p.payment_method || 'cash'}
                               </td>
                               <td style={{ textAlign: 'right', padding: '0.4rem 0.5rem', fontWeight: 800, color: '#059669' }}>
-                                ৳{(parseFloat(p.amount) || 0).toFixed(2)}
+                                ৳{formatAmount(p.amount)}
                               </td>
                             </tr>
                           );
@@ -1681,42 +1682,42 @@ export default function Reports({ userProfile, branches = [] }) {
                       <>
                         <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                           <span style={{ fontWeight: 600 }}>Total Sales:</span>
-                          <span style={{ fontWeight: 700 }}>৳{overallTotalRevenue.toFixed(2)}</span>
+                          <span style={{ fontWeight: 700 }}>৳{formatAmount(overallTotalRevenue)}</span>
                         </div>
                         <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                           <span style={{ fontWeight: 600 }}>Total Purchases:</span>
-                          <span>৳{overallPurchasesTotal.toFixed(2)}</span>
+                          <span>৳{formatAmount(overallPurchasesTotal)}</span>
                         </div>
                         <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                           <span style={{ fontWeight: 600 }}>Total Expenses:</span>
-                          <span>৳{overallExpensesTotal.toFixed(2)}</span>
+                          <span>৳{formatAmount(overallExpensesTotal)}</span>
                         </div>
                         <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 800, borderTop: '1px dashed #000', paddingTop: '0.25rem', color: overallNetProfit >= 0 ? '#059669' : '#dc2626' }}>
                           <span>Net Profit:</span>
-                          <span>৳{overallNetProfit.toFixed(2)}</span>
+                          <span>৳{formatAmount(overallNetProfit)}</span>
                         </div>
                         <div style={{ display: 'flex', justifyContent: 'space-between', color: '#059669', fontWeight: 700, borderTop: '1.5px solid #000', paddingTop: '0.35rem' }}>
                           <span>Total Collected:</span>
-                          <span>৳{overallTotalPaid.toFixed(2)}</span>
+                          <span>৳{formatAmount(overallTotalPaid)}</span>
                         </div>
                         <div style={{ display: 'flex', justifyContent: 'space-between', color: overallTotalDue > 0 ? '#dc2626' : '#000', fontWeight: 800 }}>
                           <span>Total Customer Due:</span>
-                          <span>৳{overallTotalDue.toFixed(2)}</span>
+                          <span>৳{formatAmount(overallTotalDue)}</span>
                         </div>
                       </>
                     ) : activeTab === 'customer' ? (
                       <>
                         <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 700 }}>
                           <span>Total Invoiced:</span>
-                          <span>৳{customerTotalBilled.toFixed(2)}</span>
+                          <span>৳{formatAmount(customerTotalBilled)}</span>
                         </div>
                         <div style={{ display: 'flex', justifyContent: 'space-between', color: '#059669', fontWeight: 700 }}>
                           <span>Total Paid:</span>
-                          <span>৳{customerTotalPaid.toFixed(2)}</span>
+                          <span>৳{formatAmount(customerTotalPaid)}</span>
                         </div>
                         <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 900, borderTop: '1.5px solid #000', paddingTop: '0.35rem', fontSize: '0.95rem', color: customerTotalDue > 0 ? '#dc2626' : '#059669' }}>
                           <span>Total Due Balance:</span>
-                          <span>৳{customerTotalDue.toFixed(2)}</span>
+                          <span>৳{formatAmount(customerTotalDue)}</span>
                         </div>
                       </>
                     ) : (
@@ -1727,15 +1728,15 @@ export default function Reports({ userProfile, branches = [] }) {
                         </div>
                         <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                           <span style={{ fontWeight: 600 }}>Cash Collections:</span>
-                          <span>৳{paymentsCashAmount.toFixed(2)}</span>
+                          <span>৳{formatAmount(paymentsCashAmount)}</span>
                         </div>
                         <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                           <span style={{ fontWeight: 600 }}>Bank / Digital:</span>
-                          <span>৳{paymentsDigitalAmount.toFixed(2)}</span>
+                          <span>৳{formatAmount(paymentsDigitalAmount)}</span>
                         </div>
                         <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 900, borderTop: '1.5px solid #000', paddingTop: '0.35rem', fontSize: '0.95rem', color: '#059669' }}>
                           <span>Total Received:</span>
-                          <span>৳{paymentsTotalAmount.toFixed(2)}</span>
+                          <span>৳{formatAmount(paymentsTotalAmount)}</span>
                         </div>
                       </>
                     )}
@@ -1963,13 +1964,13 @@ export default function Reports({ userProfile, branches = [] }) {
                           {s.contacts?.name || 'Walk-in'}
                         </td>
                         <td style={{ textAlign: 'right', borderRight: '1px solid #000', padding: '0.4rem 0.5rem', fontWeight: 700 }}>
-                          ৳{net.toFixed(2)}
+                          ৳{formatAmount(net)}
                         </td>
                         <td style={{ textAlign: 'right', borderRight: '1px solid #000', padding: '0.4rem 0.5rem', color: '#059669', fontWeight: 600 }}>
-                          ৳{paid.toFixed(2)}
+                          ৳{formatAmount(paid)}
                         </td>
                         <td style={{ textAlign: 'right', padding: '0.4rem 0.5rem', fontWeight: due > 0 ? 800 : 600, color: due > 0 ? '#dc2626' : '#000' }}>
-                          ৳{due.toFixed(2)}
+                          ৳{formatAmount(due)}
                         </td>
                       </tr>
                     );
@@ -2019,19 +2020,19 @@ export default function Reports({ userProfile, branches = [] }) {
                           {new Date(s.sale_date).toLocaleDateString('en-GB')}
                         </td>
                         <td style={{ textAlign: 'right', borderRight: '1px solid #000', padding: '0.4rem 0.5rem' }}>
-                          ৳{(parseFloat(s.total_amount) || 0).toFixed(2)}
+                          ৳{formatAmount(s.total_amount)}
                         </td>
                         <td style={{ textAlign: 'right', borderRight: '1px solid #000', padding: '0.4rem 0.5rem', color: '#475569' }}>
-                          ৳{(parseFloat(s.discount) || 0).toFixed(2)}
+                          ৳{formatAmount(s.discount)}
                         </td>
                         <td style={{ textAlign: 'right', borderRight: '1px solid #000', padding: '0.4rem 0.5rem', fontWeight: 700 }}>
-                          ৳{net.toFixed(2)}
+                          ৳{formatAmount(net)}
                         </td>
                         <td style={{ textAlign: 'right', borderRight: '1px solid #000', padding: '0.4rem 0.5rem', color: '#059669', fontWeight: 600 }}>
-                          ৳{paid.toFixed(2)}
+                          ৳{formatAmount(paid)}
                         </td>
                         <td style={{ textAlign: 'right', padding: '0.4rem 0.5rem', fontWeight: due > 0 ? 800 : 600, color: due > 0 ? '#dc2626' : '#000' }}>
-                          ৳{due.toFixed(2)}
+                          ৳{formatAmount(due)}
                         </td>
                       </tr>
                     );
@@ -2091,7 +2092,7 @@ export default function Reports({ userProfile, branches = [] }) {
                           {p.payment_method || 'cash'}
                         </td>
                         <td style={{ textAlign: 'right', padding: '0.4rem 0.5rem', fontWeight: 800, color: '#059669' }}>
-                          ৳{(parseFloat(p.amount) || 0).toFixed(2)}
+                          ৳{formatAmount(p.amount)}
                         </td>
                       </tr>
                     );
@@ -2108,42 +2109,42 @@ export default function Reports({ userProfile, branches = [] }) {
                 <>
                   <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                     <span style={{ fontWeight: 600 }}>Total Sales:</span>
-                    <span style={{ fontWeight: 700 }}>৳{overallTotalRevenue.toFixed(2)}</span>
+                    <span style={{ fontWeight: 700 }}>৳{formatAmount(overallTotalRevenue)}</span>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                     <span style={{ fontWeight: 600 }}>Total Purchases:</span>
-                    <span>৳{overallPurchasesTotal.toFixed(2)}</span>
+                    <span>৳{formatAmount(overallPurchasesTotal)}</span>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                     <span style={{ fontWeight: 600 }}>Total Expenses:</span>
-                    <span>৳{overallExpensesTotal.toFixed(2)}</span>
+                    <span>৳{formatAmount(overallExpensesTotal)}</span>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 800, borderTop: '1px dashed #000', paddingTop: '0.25rem', color: overallNetProfit >= 0 ? '#059669' : '#dc2626' }}>
                     <span>Net Profit:</span>
-                    <span>৳{overallNetProfit.toFixed(2)}</span>
+                    <span>৳{formatAmount(overallNetProfit)}</span>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', color: '#059669', fontWeight: 700, borderTop: '1.5px solid #000', paddingTop: '0.35rem' }}>
                     <span>Total Collected:</span>
-                    <span>৳{overallTotalPaid.toFixed(2)}</span>
+                    <span>৳{formatAmount(overallTotalPaid)}</span>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', color: overallTotalDue > 0 ? '#dc2626' : '#000', fontWeight: 800 }}>
                     <span>Total Customer Due:</span>
-                    <span>৳{overallTotalDue.toFixed(2)}</span>
+                    <span>৳{formatAmount(overallTotalDue)}</span>
                   </div>
                 </>
               ) : activeTab === 'customer' ? (
                 <>
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 700 }}>
                     <span>Total Invoiced:</span>
-                    <span>৳{customerTotalBilled.toFixed(2)}</span>
+                    <span>৳{formatAmount(customerTotalBilled)}</span>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', color: '#059669', fontWeight: 700 }}>
                     <span>Total Paid:</span>
-                    <span>৳{customerTotalPaid.toFixed(2)}</span>
+                    <span>৳{formatAmount(customerTotalPaid)}</span>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 900, borderTop: '1.5px solid #000', paddingTop: '0.35rem', fontSize: '0.95rem', color: customerTotalDue > 0 ? '#dc2626' : '#059669' }}>
                     <span>Total Due Balance:</span>
-                    <span>৳{customerTotalDue.toFixed(2)}</span>
+                    <span>৳{formatAmount(customerTotalDue)}</span>
                   </div>
                 </>
               ) : (
@@ -2154,15 +2155,15 @@ export default function Reports({ userProfile, branches = [] }) {
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                     <span style={{ fontWeight: 600 }}>Cash Collections:</span>
-                    <span>৳{paymentsCashAmount.toFixed(2)}</span>
+                    <span>৳{formatAmount(paymentsCashAmount)}</span>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                     <span style={{ fontWeight: 600 }}>Bank / Digital:</span>
-                    <span>৳{paymentsDigitalAmount.toFixed(2)}</span>
+                    <span>৳{formatAmount(paymentsDigitalAmount)}</span>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 900, borderTop: '1.5px solid #000', paddingTop: '0.35rem', fontSize: '0.95rem', color: '#059669' }}>
                     <span>Total Received:</span>
-                    <span>৳{paymentsTotalAmount.toFixed(2)}</span>
+                    <span>৳{formatAmount(paymentsTotalAmount)}</span>
                   </div>
                 </>
               )}

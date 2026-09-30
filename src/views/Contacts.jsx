@@ -3,6 +3,7 @@ import { supabase } from '../supabaseClient';
 import { Users, Plus, Search, Trash2, Edit, Building, Mail, Phone, MapPin, Receipt, History, DollarSign } from 'lucide-react';
 import { TableLoading } from '../components/TableLoading';
 import Pagination from '../components/Pagination';
+import { formatAmount } from '../utils/format';
 
 export default function Contacts({ userProfile, branches = [], addToast }) {
   const [contacts, setContacts] = useState([]);
@@ -269,7 +270,7 @@ export default function Contacts({ userProfile, branches = [], addToast }) {
     const inMemoryDue = typeof contact === 'object' ? getContactBalance(contact) : 0;
     if (inMemoryDue > 0.01) {
       showMessage(
-        `Cannot delete "${contactName}": Outstanding balance of ৳${inMemoryDue.toLocaleString(undefined, { minimumFractionDigits: 2 })}. Settle all dues first.`,
+        `Cannot delete "${contactName}": Outstanding balance of ৳${formatAmount(inMemoryDue)}. Settle all dues first.`,
         'error'
       );
       return;
@@ -292,7 +293,7 @@ export default function Contacts({ userProfile, branches = [], addToast }) {
           );
           if (totalDue > 0.01) {
             showMessage(
-              `Cannot delete "${contactName}": Outstanding due of ৳${totalDue.toLocaleString(undefined, { minimumFractionDigits: 2 })}. Settle all dues first.`,
+              `Cannot delete "${contactName}": Outstanding due of ৳${formatAmount(totalDue)}. Settle all dues first.`,
               'error'
             );
             return;
@@ -318,7 +319,7 @@ export default function Contacts({ userProfile, branches = [], addToast }) {
           );
           if (totalDue > 0.01) {
             showMessage(
-              `Cannot delete "${contactName}": Outstanding payable of ৳${totalDue.toLocaleString(undefined, { minimumFractionDigits: 2 })}. Settle all dues first.`,
+              `Cannot delete "${contactName}": Outstanding payable of ৳${formatAmount(totalDue)}. Settle all dues first.`,
               'error'
             );
             return;
@@ -391,6 +392,34 @@ export default function Contacts({ userProfile, branches = [], addToast }) {
     }
   };
 
+  const getContactBranchBreakdown = (contact) => {
+    const records = contact.type === 'customer'
+      ? sales.filter(s => s.customer_id === contact.id)
+      : purchases.filter(p => p.supplier_id === contact.id);
+
+    const branchMap = {};
+    records.forEach(r => {
+      const bId = r.branch_id || 'unknown';
+      const due = (parseFloat(r.net_amount) || 0) - (parseFloat(r.paid_amount) || 0);
+      if (!branchMap[bId]) {
+        const branchObj = branches.find(b => b.id === bId);
+        branchMap[bId] = {
+          branchId: bId,
+          branchName: branchObj ? branchObj.name : 'Unknown Branch',
+          isFactory: branchObj?.is_factory || false,
+          due: 0,
+          total: 0,
+          paid: 0
+        };
+      }
+      branchMap[bId].due += due;
+      branchMap[bId].total += (parseFloat(r.net_amount) || 0);
+      branchMap[bId].paid += (parseFloat(r.paid_amount) || 0);
+    });
+
+    return Object.values(branchMap);
+  };
+
   const handleOpenHistory = async (contact) => {
     setHistoryContact(contact);
     setShowHistoryModal(true);
@@ -407,19 +436,13 @@ export default function Contacts({ userProfile, branches = [], addToast }) {
         setHistorySales(salesData || []);
         setHistoryPurchases([]);
 
-        if (salesData && salesData.length > 0) {
-          const saleIds = salesData.map(s => s.id);
-          const { data: paymentsData, error: paymentsError } = await supabase
-            .from('payments')
-            .select('*')
-            .eq('type', 'customer_payment')
-            .in('sale_id', saleIds)
-            .order('payment_date', { ascending: false });
-          if (paymentsError) throw paymentsError;
-          setHistoryPayments(paymentsData || []);
-        } else {
-          setHistoryPayments([]);
-        }
+        const { data: paymentsData, error: paymentsError } = await supabase
+          .from('payments')
+          .select('*')
+          .eq('contact_id', contact.id)
+          .order('payment_date', { ascending: false });
+        if (paymentsError) throw paymentsError;
+        setHistoryPayments(paymentsData || []);
       } else {
         const { data: purchasesData, error: purchasesError } = await supabase
           .from('purchases')
@@ -431,22 +454,16 @@ export default function Contacts({ userProfile, branches = [], addToast }) {
         setHistoryPurchases(purchasesData || []);
         setHistorySales([]);
 
-        if (purchasesData && purchasesData.length > 0) {
-          const purchaseIds = purchasesData.map(p => p.id);
-          const { data: paymentsData, error: paymentsError } = await supabase
-            .from('payments')
-            .select('*')
-            .eq('type', 'supplier_payment')
-            .in('purchase_id', purchaseIds)
-            .order('payment_date', { ascending: false });
-          if (paymentsError) throw paymentsError;
-          setHistoryPayments(paymentsData || []);
-        } else {
-          setHistoryPayments([]);
-        }
+        const { data: paymentsData, error: paymentsError } = await supabase
+          .from('payments')
+          .select('*')
+          .eq('contact_id', contact.id)
+          .order('payment_date', { ascending: false });
+        if (paymentsError) throw paymentsError;
+        setHistoryPayments(paymentsData || []);
       }
     } catch (err) {
-      console.error(err);
+      console.error('Error loading transaction history:', err);
       showMessage('Failed to load transaction history.', 'error');
     } finally {
       setLoadingHistory(false);
@@ -454,14 +471,11 @@ export default function Contacts({ userProfile, branches = [], addToast }) {
   };
 
   const getInvoiceNumber = (payment) => {
-    if (payment.sale_id) {
-      const match = historySales.find(s => s.id === payment.sale_id);
-      return match ? match.invoice_number : `INV#${payment.sale_id.substring(0, 8).toUpperCase()}`;
-    } else if (payment.purchase_id) {
-      const match = historyPurchases.find(p => p.id === payment.purchase_id);
-      return match ? match.invoice_number : `PUR#${payment.purchase_id.substring(0, 8).toUpperCase()}`;
+    if (payment.reference_invoice_id) {
+      const match = historySales.find((s) => s.id === payment.reference_invoice_id) || historyPurchases.find((p) => p.id === payment.reference_invoice_id);
+      return match ? (match.invoice_number || `INV#${match.id.substring(0, 8).toUpperCase()}`) : `REF#${payment.reference_invoice_id.substring(0, 8).toUpperCase()}`;
     }
-    return 'N/A';
+    return payment.notes || 'Collection / Payout';
   };
 
   return (
@@ -643,18 +657,69 @@ export default function Contacts({ userProfile, branches = [], addToast }) {
                         {!c.phone && !c.email && <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>N/A</span>}
                       </td>
                       <td>
-                        <span 
-                          style={{ 
-                            fontWeight: 700, 
-                            fontFamily: 'Outfit, sans-serif',
-                            color: balance > 0 ? (isCustomer ? 'var(--primary)' : 'var(--danger-text)') : 'var(--text-muted)'
-                          }}
-                        >
-                          ৳{balance.toFixed(2)}
-                        </span>
-                        <span style={{ fontSize: '0.72rem', display: 'block', color: 'var(--text-muted)', textTransform: 'capitalize' }}>
-                          {balance > 0 ? (isCustomer ? 'Receivable' : 'Payable') : 'Cleared'}
-                        </span>
+                        {role === 'owner' && filterBranchId === 'all' ? (
+                          (() => {
+                            const branchList = getContactBranchBreakdown(c).filter(b => Math.abs(b.due) > 0.001);
+                            if (branchList.length === 0) {
+                              return (
+                                <div>
+                                  <span style={{ fontWeight: 700, fontFamily: 'Outfit, sans-serif', color: 'var(--text-muted)' }}>
+                                    ৳0
+                                  </span>
+                                  <span style={{ fontSize: '0.72rem', display: 'block', color: 'var(--text-muted)' }}>
+                                    Cleared
+                                  </span>
+                                </div>
+                              );
+                            }
+                            return (
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
+                                {branchList.map(b => (
+                                  <div 
+                                    key={b.branchId} 
+                                    style={{ 
+                                      display: 'inline-flex', 
+                                      alignItems: 'center', 
+                                      gap: '0.35rem',
+                                      padding: '0.2rem 0.45rem',
+                                      backgroundColor: b.isFactory ? '#fef3c7' : '#f0fdf4',
+                                      borderRadius: '4px',
+                                      border: `1px solid ${b.isFactory ? '#fde68a' : '#bbf7d0'}`,
+                                      width: 'fit-content'
+                                    }}
+                                  >
+                                    <span style={{ fontSize: '0.72rem', fontWeight: 600, color: b.isFactory ? '#92400e' : '#166534' }}>
+                                      {b.isFactory ? '🏭' : '🏪'} {b.branchName}:
+                                    </span>
+                                    <span style={{ 
+                                      fontSize: '0.78rem',
+                                      fontWeight: 700, 
+                                      fontFamily: 'Outfit, sans-serif',
+                                      color: b.due > 0 ? (isCustomer ? 'var(--primary)' : 'var(--danger-text)') : 'var(--text-muted)'
+                                    }}>
+                                      ৳{formatAmount(b.due)}
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+                            );
+                          })()
+                        ) : (
+                          <div>
+                            <span 
+                              style={{ 
+                                fontWeight: 700, 
+                                fontFamily: 'Outfit, sans-serif',
+                                color: balance > 0 ? (isCustomer ? 'var(--primary)' : 'var(--danger-text)') : 'var(--text-muted)'
+                              }}
+                            >
+                              ৳{formatAmount(balance)}
+                            </span>
+                            <span style={{ fontSize: '0.72rem', display: 'block', color: 'var(--text-muted)', textTransform: 'capitalize' }}>
+                              {balance > 0 ? (isCustomer ? 'Receivable' : 'Payable') : 'Cleared'}
+                            </span>
+                          </div>
+                        )}
                       </td>
                       <td>
                         <div style={{ display: 'flex', gap: '0.35rem', justifyContent: 'center' }}>
@@ -836,200 +901,282 @@ export default function Contacts({ userProfile, branches = [], addToast }) {
       )}
 
       {/* TRANSACTION & PAYMENT HISTORY MODAL */}
-      {showHistoryModal && historyContact && (
-        <div className="modal-overlay">
-          <div className="modal-content modal-xl">
-            <div className="modal-header">
-              <h3 className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                <History size={20} />
-                <span>Ledger History: {historyContact.name}</span>
-              </h3>
-              <button 
-                className="btn btn-secondary btn-sm" 
-                onClick={() => {
-                  setShowHistoryModal(false);
-                  setHistoryContact(null);
-                }} 
-                style={{ borderRadius: '50%', padding: '0.4rem', border: 'none' }}
-              >
-                ✕
-              </button>
-            </div>
-            <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-              {/* Financial Quick Summary Bar */}
-              <div 
-                style={{ 
-                  display: 'grid', 
-                  gridTemplateColumns: 'repeat(3, 1fr)', 
-                  gap: '1rem', 
-                  backgroundColor: '#f8fafc', 
-                  padding: '1rem', 
-                  borderRadius: 'var(--border-radius)',
-                  border: '1px solid var(--border-color)'
-                }}
-              >
-                <div style={{ textAlign: 'center' }}>
-                  <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', display: 'block', fontWeight: 500 }}>
-                    {historyContact.type === 'customer' ? 'Total Sales' : 'Total Purchases'}
-                  </span>
-                  <span style={{ fontFamily: 'Outfit, sans-serif', fontSize: '1.25rem', fontWeight: 700, color: 'var(--text-primary)' }}>
-                    ৳{(historyContact.type === 'customer' ? historySales : historyPurchases).reduce((sum, item) => sum + item.net_amount, 0).toFixed(2)}
-                  </span>
+      {showHistoryModal && historyContact && (() => {
+        const historyRecords = historyContact.type === 'customer' ? historySales : historyPurchases;
+        const totalAmount = historyRecords.reduce((sum, item) => sum + (parseFloat(item.net_amount) || 0), 0);
+        const totalPaid = historyPayments.reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0);
+        const totalDue = historyRecords.reduce((sum, item) => sum + ((parseFloat(item.net_amount) || 0) - (parseFloat(item.paid_amount) || 0)), 0);
+
+        // Calculate branch breakdown for history modal
+        const branchBreakdownMap = {};
+        historyRecords.forEach(r => {
+          const bId = r.branch_id || 'unknown';
+          const due = (parseFloat(r.net_amount) || 0) - (parseFloat(r.paid_amount) || 0);
+          if (!branchBreakdownMap[bId]) {
+            const branchObj = branches.find(b => b.id === bId);
+            branchBreakdownMap[bId] = {
+              branchId: bId,
+              branchName: branchObj ? branchObj.name : 'Unknown Branch',
+              isFactory: branchObj?.is_factory || false,
+              total: 0,
+              paid: 0,
+              due: 0
+            };
+          }
+          branchBreakdownMap[bId].total += (parseFloat(r.net_amount) || 0);
+          branchBreakdownMap[bId].paid += (parseFloat(r.paid_amount) || 0);
+          branchBreakdownMap[bId].due += due;
+        });
+        const historyBranchBreakdown = Object.values(branchBreakdownMap);
+
+        return (
+          <div className="modal-overlay">
+            <div className="modal-content modal-xl">
+              <div className="modal-header">
+                <h3 className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <History size={20} />
+                  <span>Ledger History: {historyContact.name}</span>
+                </h3>
+                <button 
+                  className="btn btn-secondary btn-sm" 
+                  onClick={() => {
+                    setShowHistoryModal(false);
+                    setHistoryContact(null);
+                  }} 
+                  style={{ borderRadius: '50%', padding: '0.4rem', border: 'none' }}
+                >
+                  ✕
+                </button>
+              </div>
+              <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+                {/* Financial Quick Summary Bar */}
+                <div 
+                  style={{ 
+                    display: 'grid', 
+                    gridTemplateColumns: 'repeat(3, 1fr)', 
+                    gap: '1rem', 
+                    backgroundColor: '#f8fafc', 
+                    padding: '1rem', 
+                    borderRadius: 'var(--border-radius)',
+                    border: '1px solid var(--border-color)'
+                  }}
+                >
+                  <div style={{ textAlign: 'center' }}>
+                    <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', display: 'block', fontWeight: 500 }}>
+                      {historyContact.type === 'customer' ? 'Total Sales' : 'Total Purchases'}
+                    </span>
+                    <span style={{ fontFamily: 'Outfit, sans-serif', fontSize: '1.25rem', fontWeight: 700, color: 'var(--text-primary)' }}>
+                      ৳{formatAmount(totalAmount)}
+                    </span>
+                  </div>
+                  <div style={{ textAlign: 'center', borderLeft: '1px solid var(--border-color)', borderRight: '1px solid var(--border-color)' }}>
+                    <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', display: 'block', fontWeight: 500 }}>
+                      Total Paid
+                    </span>
+                    <span style={{ fontFamily: 'Outfit, sans-serif', fontSize: '1.25rem', fontWeight: 700, color: 'var(--success-text)' }}>
+                      ৳{formatAmount(totalPaid)}
+                    </span>
+                  </div>
+                  <div style={{ textAlign: 'center' }}>
+                    <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', display: 'block', fontWeight: 500 }}>
+                      Total Due
+                    </span>
+                    <span 
+                      style={{ 
+                        fontFamily: 'Outfit, sans-serif', 
+                        fontSize: '1.25rem', 
+                        fontWeight: 800, 
+                        color: totalDue > 0 ? (historyContact.type === 'customer' ? 'var(--primary)' : 'var(--danger-text)') : 'var(--text-muted)'
+                      }}
+                    >
+                      ৳{formatAmount(totalDue)}
+                    </span>
+                  </div>
                 </div>
-                <div style={{ textAlign: 'center', borderLeft: '1px solid var(--border-color)', borderRight: '1px solid var(--border-color)' }}>
-                  <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', display: 'block', fontWeight: 500 }}>
-                    Total Paid
-                  </span>
-                  <span style={{ fontFamily: 'Outfit, sans-serif', fontSize: '1.25rem', fontWeight: 700, color: 'var(--success-text)' }}>
-                    ৳{historyPayments.reduce((sum, p) => sum + p.amount, 0).toFixed(2)}
-                  </span>
-                </div>
-                <div style={{ textAlign: 'center' }}>
-                  <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', display: 'block', fontWeight: 500 }}>
-                    Total Due
-                  </span>
-                  <span 
+
+                {/* Branch-wise breakdown strip (if multiple branches or when viewed by owner) */}
+                {historyBranchBreakdown.length > 1 && (
+                  <div 
                     style={{ 
-                      fontFamily: 'Outfit, sans-serif', 
-                      fontSize: '1.25rem', 
-                      fontWeight: 800, 
-                      color: getContactBalance(historyContact) > 0 ? (historyContact.type === 'customer' ? 'var(--primary)' : 'var(--danger-text)') : 'var(--text-muted)'
+                      display: 'flex', 
+                      flexDirection: 'column', 
+                      gap: '0.5rem', 
+                      backgroundColor: '#f8fafc', 
+                      padding: '0.75rem 1rem', 
+                      borderRadius: 'var(--border-radius)', 
+                      border: '1px solid var(--border-color)' 
                     }}
                   >
-                    ৳{getContactBalance(historyContact).toFixed(2)}
-                  </span>
-                </div>
-              </div>
-
-              {loadingHistory ? (
-                <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-secondary)' }}>
-                  Loading history...
-                </div>
-              ) : (
-                <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '1.5rem', alignItems: 'start' }}>
-                  
-                  {/* Left: Invoice/Purchases Logs */}
-                  <div>
-                    <h4 style={{ fontSize: '0.9rem', fontWeight: 700, marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-                      <Receipt size={16} className="text-muted" />
-                      <span>{historyContact.type === 'customer' ? 'Sales Invoices' : 'Purchase Bills'}</span>
-                    </h4>
-                    <div className="table-container" style={{ overflowY: 'auto' }}>
-                      <table style={{ fontSize: '0.8rem' }}>
-                        <thead>
-                          <tr>
-                            <th>SL</th>
-                            <th>Invoice ID</th>
-                            <th>Branch</th>
-                            <th>Date</th>
-                            <th>Net Total</th>
-                            <th>Due</th>
-                            <th>Status</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {(historyContact.type === 'customer' ? historySales : historyPurchases).length === 0 ? (
-                            <tr>
-                              <td colSpan="7" style={{ textAlign: 'center', padding: '1.5rem' }}>No records found.</td>
-                            </tr>
-                          ) : (
-                            (historyContact.type === 'customer' ? historySales : historyPurchases).map((inv, index) => {
-                              const due = inv.net_amount - inv.paid_amount;
-                              const invBranch = branches.find((b) => b.id === inv.branch_id);
-                              return (
-                                <tr key={inv.id}>
-                                  <td>{index + 1}</td>
-                                  <td style={{ fontFamily: 'monospace', fontWeight: 700 }}>
-                                    {inv.invoice_number || `ID-${inv.id.substring(0, 5).toUpperCase()}`}
-                                  </td>
-                                  <td style={{ fontSize: '0.75rem', fontWeight: 600 }}>
-                                    {invBranch ? (invBranch.is_factory ? `🏭 ${invBranch.name}` : `🏪 ${invBranch.name}`) : '—'}
-                                  </td>
-                                  <td>{new Date(inv.sale_date || inv.purchase_date).toLocaleDateString()}</td>
-                                  <td style={{ fontFamily: 'Outfit, sans-serif' }}>৳{inv.net_amount.toFixed(2)}</td>
-                                  <td style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 700, color: due > 0 ? 'var(--danger-text)' : 'inherit' }}>
-                                    ৳{due.toFixed(2)}
-                                  </td>
-                                  <td>
-                                    <span className={`badge badge-${inv.payment_status}`} style={{ fontSize: '0.7rem', padding: '0.15rem 0.4rem' }}>
-                                      {inv.payment_status}
-                                    </span>
-                                  </td>
-                                </tr>
-                              );
-                            })
-                          )}
-                        </tbody>
-                      </table>
+                    <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                      Branch-wise Breakdown:
+                    </span>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.6rem' }}>
+                      {historyBranchBreakdown.map((b) => (
+                        <div 
+                          key={b.branchId} 
+                          style={{ 
+                            display: 'flex', 
+                            alignItems: 'center', 
+                            gap: '0.45rem', 
+                            backgroundColor: '#ffffff', 
+                            padding: '0.35rem 0.65rem', 
+                            borderRadius: '6px', 
+                            border: '1px solid var(--border-color)', 
+                            fontSize: '0.76rem' 
+                          }}
+                        >
+                          <span style={{ fontWeight: 600, color: b.isFactory ? '#92400e' : '#0369a1' }}>
+                            {b.isFactory ? '🏭' : '🏪'} {b.branchName}
+                          </span>
+                          <span style={{ color: 'var(--border-color)' }}>|</span>
+                          <span style={{ color: 'var(--text-muted)' }}>Net: <strong style={{ fontFamily: 'Outfit, sans-serif', color: 'var(--text-primary)' }}>৳{formatAmount(b.total)}</strong></span>
+                          <span style={{ color: 'var(--border-color)' }}>|</span>
+                          <span style={{ color: 'var(--text-muted)' }}>Paid: <strong style={{ fontFamily: 'Outfit, sans-serif', color: 'var(--success-text)' }}>৳{formatAmount(b.paid)}</strong></span>
+                          <span style={{ color: 'var(--border-color)' }}>|</span>
+                          <span style={{ color: 'var(--text-muted)' }}>Due: <strong style={{ fontFamily: 'Outfit, sans-serif', color: b.due > 0 ? 'var(--danger-text)' : 'inherit' }}>৳{formatAmount(b.due)}</strong></span>
+                        </div>
+                      ))}
                     </div>
                   </div>
+                )}
 
-                  {/* Right: Payment Logs */}
-                  <div>
-                    <h4 style={{ fontSize: '0.9rem', fontWeight: 700, marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-                      <DollarSign size={16} className="text-muted" />
-                      <span>Payment History</span>
-                    </h4>
-                    <div className="table-container" style={{ overflowY: 'auto' }}>
-                      <table style={{ fontSize: '0.8rem' }}>
-                        <thead>
-                          <tr>
-                            <th>SL</th>
-                            <th>Receipt ID</th>
-                            <th>Date</th>
-                            <th>Invoice Reference</th>
-                            <th>Amount</th>
-                            <th>Mode</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {historyPayments.length === 0 ? (
+                {loadingHistory ? (
+                  <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-secondary)' }}>
+                    Loading history...
+                  </div>
+                ) : (
+                  <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '1.5rem', alignItems: 'start' }}>
+                    
+                    {/* Left: Invoice/Purchases Logs */}
+                    <div>
+                      <h4 style={{ fontSize: '0.9rem', fontWeight: 700, marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                        <Receipt size={16} className="text-muted" />
+                        <span>{historyContact.type === 'customer' ? 'Sales Invoices' : 'Purchase Bills'}</span>
+                      </h4>
+                      <div className="table-container" style={{ overflowY: 'auto', maxHeight: '420px' }}>
+                        <table style={{ fontSize: '0.8rem' }}>
+                          <thead>
                             <tr>
-                              <td colSpan="6" style={{ textAlign: 'center', padding: '1.5rem' }}>No payments found.</td>
+                              <th>SL</th>
+                              <th>Invoice ID</th>
+                              <th>Branch</th>
+                              <th>Date</th>
+                              <th>Net Total</th>
+                              <th>Due</th>
+                              <th>Status</th>
                             </tr>
-                          ) : (
-                            historyPayments.map((pay, index) => (
-                              <tr key={pay.id}>
-                                <td>{index + 1}</td>
-                                <td style={{ fontFamily: 'monospace' }}>
-                                  {pay.payment_number || `PM-${pay.id.substring(0, 5).toUpperCase()}`}
-                                </td>
-                                <td>{new Date(pay.payment_date).toLocaleDateString()}</td>
-                                <td style={{ fontFamily: 'monospace', fontWeight: 600 }}>
-                                  {getInvoiceNumber(pay)}
-                                </td>
-                                <td style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 700, color: 'var(--success-text)' }}>
-                                  ৳{pay.amount.toFixed(2)}
-                                </td>
-                                <td style={{ textTransform: 'capitalize' }}>
-                                  {pay.payment_method.replace('_', ' ')}
-                                </td>
+                          </thead>
+                          <tbody>
+                            {historyRecords.length === 0 ? (
+                              <tr>
+                                <td colSpan="7" style={{ textAlign: 'center', padding: '1.5rem' }}>No records found.</td>
                               </tr>
-                            ))
-                          )}
-                        </tbody>
-                      </table>
+                            ) : (
+                              historyRecords.map((inv, index) => {
+                                const due = (parseFloat(inv.net_amount) || 0) - (parseFloat(inv.paid_amount) || 0);
+                                const invBranch = branches.find((b) => b.id === inv.branch_id);
+                                return (
+                                  <tr key={inv.id}>
+                                    <td>{index + 1}</td>
+                                    <td style={{ fontFamily: 'monospace', fontWeight: 700 }}>
+                                      {inv.invoice_number || `ID-${inv.id.substring(0, 5).toUpperCase()}`}
+                                    </td>
+                                    <td style={{ fontSize: '0.75rem', fontWeight: 600 }}>
+                                      {invBranch ? (invBranch.is_factory ? `🏭 ${invBranch.name}` : `🏪 ${invBranch.name}`) : '—'}
+                                    </td>
+                                    <td>{new Date(inv.sale_date || inv.purchase_date).toLocaleDateString()}</td>
+                                    <td style={{ fontFamily: 'Outfit, sans-serif' }}>৳{formatAmount(inv.net_amount)}</td>
+                                    <td style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 700, color: due > 0 ? 'var(--danger-text)' : 'inherit' }}>
+                                      ৳{formatAmount(due)}
+                                    </td>
+                                    <td>
+                                      <span className={`badge badge-${inv.payment_status}`} style={{ fontSize: '0.7rem', padding: '0.15rem 0.4rem' }}>
+                                        {inv.payment_status}
+                                      </span>
+                                    </td>
+                                  </tr>
+                                );
+                              })
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
                     </div>
-                  </div>
 
-                </div>
-              )}
-            </div>
-            <div className="modal-footer" style={{ padding: '0.75rem 1.5rem' }}>
-              <button 
-                type="button" 
-                className="btn btn-secondary" 
-                onClick={() => {
-                  setShowHistoryModal(false);
-                  setHistoryContact(null);
-                }}
-              >
-                Close
-              </button>
+                    {/* Right: Payment Logs */}
+                    <div>
+                      <h4 style={{ fontSize: '0.9rem', fontWeight: 700, marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                        <DollarSign size={16} className="text-muted" />
+                        <span>Payment History</span>
+                      </h4>
+                      <div className="table-container" style={{ overflowY: 'auto', maxHeight: '420px' }}>
+                        <table style={{ fontSize: '0.8rem' }}>
+                          <thead>
+                            <tr>
+                              <th>SL</th>
+                              <th>Receipt ID</th>
+                              <th>Branch</th>
+                              <th>Date</th>
+                              <th>Invoice Reference</th>
+                              <th>Amount</th>
+                              <th>Mode</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {historyPayments.length === 0 ? (
+                              <tr>
+                                <td colSpan="7" style={{ textAlign: 'center', padding: '1.5rem' }}>No payments found.</td>
+                              </tr>
+                            ) : (
+                              historyPayments.map((pay, index) => {
+                                const payBranch = branches.find((b) => b.id === pay.branch_id);
+                                return (
+                                  <tr key={pay.id}>
+                                    <td>{index + 1}</td>
+                                    <td style={{ fontFamily: 'monospace' }}>
+                                      {pay.payment_number || `PM-${pay.id.substring(0, 5).toUpperCase()}`}
+                                    </td>
+                                    <td style={{ fontSize: '0.75rem', fontWeight: 600 }}>
+                                      {payBranch ? (payBranch.is_factory ? `🏭 ${payBranch.name}` : `🏪 ${payBranch.name}`) : '—'}
+                                    </td>
+                                    <td>{new Date(pay.payment_date).toLocaleDateString()}</td>
+                                    <td style={{ fontFamily: 'monospace', fontWeight: 600 }}>
+                                      {getInvoiceNumber(pay)}
+                                    </td>
+                                    <td style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 700, color: 'var(--success-text)' }}>
+                                      ৳{formatAmount(pay.amount)}
+                                    </td>
+                                    <td style={{ textTransform: 'capitalize' }}>
+                                      {pay.payment_method ? pay.payment_method.replace('_', ' ') : '—'}
+                                    </td>
+                                  </tr>
+                                );
+                              })
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+
+                  </div>
+                )}
+              </div>
+              <div className="modal-footer" style={{ padding: '0.75rem 1.5rem' }}>
+                <button 
+                  type="button" 
+                  className="btn btn-secondary" 
+                  onClick={() => {
+                    setShowHistoryModal(false);
+                    setHistoryContact(null);
+                  }} 
+                >
+                  Close
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
     </div>
   );
 }
