@@ -494,10 +494,64 @@ CREATE POLICY "Allow anon full access to branch_challan_items" ON public.branch_
 CREATE POLICY "Allow authenticated full access to branch_payments" ON public.branch_payments FOR ALL TO authenticated USING (true) WITH CHECK (true);
 CREATE POLICY "Allow anon full access to branch_payments" ON public.branch_payments FOR ALL TO anon USING (true) WITH CHECK (true);
 
--- Performance Indexes
+-- ====================================================================
+-- 9. PERFORMANCE & SEARCH INDEXES (High Performance Tuning)
+-- ====================================================================
+-- Sales & Sale Items
 CREATE INDEX IF NOT EXISTS idx_sales_branch_date ON public.sales (branch_id, sale_date DESC);
+CREATE INDEX IF NOT EXISTS idx_sales_customer ON public.sales (customer_id);
 CREATE INDEX IF NOT EXISTS idx_sales_invoice_number ON public.sales (invoice_number);
-CREATE INDEX IF NOT EXISTS idx_inventory_movements_branch_created ON public.inventory_movements (branch_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_sales_payment_status ON public.sales (payment_status);
 CREATE INDEX IF NOT EXISTS idx_sale_items_sale_id ON public.sale_items (sale_id);
+CREATE INDEX IF NOT EXISTS idx_sale_items_product_id ON public.sale_items (product_id);
+
+-- Purchases & Purchase Items
+CREATE INDEX IF NOT EXISTS idx_purchases_branch_date ON public.purchases (branch_id, purchase_date DESC);
+CREATE INDEX IF NOT EXISTS idx_purchases_supplier ON public.purchases (supplier_id);
+CREATE INDEX IF NOT EXISTS idx_purchases_invoice_number ON public.purchases (invoice_number);
+CREATE INDEX IF NOT EXISTS idx_purchases_payment_status ON public.purchases (payment_status);
+CREATE INDEX IF NOT EXISTS idx_purchase_items_purchase_id ON public.purchase_items (purchase_id);
+CREATE INDEX IF NOT EXISTS idx_purchase_items_product_id ON public.purchase_items (product_id);
+
+-- Inventory & Movements
+CREATE INDEX IF NOT EXISTS idx_inventory_branch_product ON public.inventory (branch_id, product_id);
+CREATE INDEX IF NOT EXISTS idx_inventory_product ON public.inventory (product_id);
+CREATE INDEX IF NOT EXISTS idx_inventory_quantity ON public.inventory (quantity);
+CREATE INDEX IF NOT EXISTS idx_inventory_movements_branch_created ON public.inventory_movements (branch_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_inventory_movements_product ON public.inventory_movements (product_id);
+CREATE INDEX IF NOT EXISTS idx_inventory_movements_type ON public.inventory_movements (type);
+
+-- Challans & Challan Items
+CREATE INDEX IF NOT EXISTS idx_branch_challans_from_branch ON public.branch_challans (from_branch_id, challan_date DESC);
+CREATE INDEX IF NOT EXISTS idx_branch_challans_to_branch ON public.branch_challans (to_branch_id, challan_date DESC);
+CREATE INDEX IF NOT EXISTS idx_branch_challans_challan_no ON public.branch_challans (challan_no);
+CREATE INDEX IF NOT EXISTS idx_branch_challans_payment_status ON public.branch_challans (payment_status);
+CREATE INDEX IF NOT EXISTS idx_branch_challan_items_challan_id ON public.branch_challan_items (challan_id);
+CREATE INDEX IF NOT EXISTS idx_branch_challan_items_product_id ON public.branch_challan_items (product_id);
+
+-- Branch Payments
+CREATE INDEX IF NOT EXISTS idx_branch_payments_challan_id ON public.branch_payments (challan_id);
+CREATE INDEX IF NOT EXISTS idx_branch_payments_from_branch ON public.branch_payments (from_branch_id);
+CREATE INDEX IF NOT EXISTS idx_branch_payments_to_branch ON public.branch_payments (to_branch_id);
+CREATE INDEX IF NOT EXISTS idx_branch_payments_status ON public.branch_payments (status);
+
+-- Financial Ledgers: Payments, Expenses, Cash Ledger
+CREATE INDEX IF NOT EXISTS idx_payments_branch_date ON public.payments (branch_id, payment_date DESC);
+CREATE INDEX IF NOT EXISTS idx_payments_contact_id ON public.payments (contact_id);
+CREATE INDEX IF NOT EXISTS idx_payments_ref_invoice ON public.payments (reference_invoice_id);
+CREATE INDEX IF NOT EXISTS idx_expenses_branch_date ON public.expenses (branch_id, expense_date DESC);
+CREATE INDEX IF NOT EXISTS idx_expenses_category ON public.expenses (category);
+CREATE INDEX IF NOT EXISTS idx_cash_ledger_branch_date ON public.cash_ledger (branch_id, transaction_date DESC);
+CREATE INDEX IF NOT EXISTS idx_cash_ledger_ref ON public.cash_ledger (reference_id);
+
+-- Contacts, Products, Profiles
+CREATE INDEX IF NOT EXISTS idx_contacts_branch_type ON public.contacts (branch_id, type);
+CREATE INDEX IF NOT EXISTS idx_contacts_phone ON public.contacts (phone);
+CREATE INDEX IF NOT EXISTS idx_contacts_name ON public.contacts (name);
+CREATE INDEX IF NOT EXISTS idx_products_sku ON public.products (sku);
+CREATE INDEX IF NOT EXISTS idx_products_code ON public.products (product_code);
+CREATE INDEX IF NOT EXISTS idx_products_category ON public.products (category);
+CREATE INDEX IF NOT EXISTS idx_profiles_branch_id ON public.profiles (branch_id);
+CREATE INDEX IF NOT EXISTS idx_profiles_phone ON public.profiles (phone);
+CREATE INDEX IF NOT EXISTS idx_profiles_role ON public.profiles (role);
 

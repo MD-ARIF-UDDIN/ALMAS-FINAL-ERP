@@ -160,7 +160,7 @@ export default function Reports({ userProfile, branches = [] }) {
   const loadOverallData = async () => {
     setLoading(true);
     try {
-      // 1. Sales
+      // 1. Prepare Queries
       let salesQuery = supabase
         .from('sales')
         .select(`
@@ -185,35 +185,36 @@ export default function Reports({ userProfile, branches = [] }) {
         .lte('sale_date', endDate)
         .order('sale_date', { ascending: false });
 
-      if (selectedBranchId) {
-        salesQuery = salesQuery.eq('branch_id', selectedBranchId);
-      }
-      const { data: sData } = await salesQuery;
-      setOverallSales(sData || []);
-
-      // 2. Purchases Total
       let purQuery = supabase
         .from('purchases')
         .select('net_amount')
         .gte('purchase_date', startDate)
         .lte('purchase_date', endDate);
-      if (selectedBranchId) {
-        purQuery = purQuery.eq('branch_id', selectedBranchId);
-      }
-      const { data: pData } = await purQuery;
-      const pTotal = (pData || []).reduce((sum, p) => sum + (parseFloat(p.net_amount) || 0), 0);
-      setOverallPurchasesTotal(pTotal);
 
-      // 3. Expenses Total
       let expQuery = supabase
         .from('expenses')
         .select('amount')
         .gte('expense_date', startDate)
         .lte('expense_date', endDate);
+
       if (selectedBranchId) {
+        salesQuery = salesQuery.eq('branch_id', selectedBranchId);
+        purQuery = purQuery.eq('branch_id', selectedBranchId);
         expQuery = expQuery.eq('branch_id', selectedBranchId);
       }
-      const { data: eData } = await expQuery;
+
+      // Execute all 3 queries concurrently in parallel
+      const [{ data: sData }, { data: pData }, { data: eData }] = await Promise.all([
+        salesQuery,
+        purQuery,
+        expQuery,
+      ]);
+
+      setOverallSales(sData || []);
+
+      const pTotal = (pData || []).reduce((sum, p) => sum + (parseFloat(p.net_amount) || 0), 0);
+      setOverallPurchasesTotal(pTotal);
+
       const eTotal = (eData || []).reduce((sum, e) => sum + (parseFloat(e.amount) || 0), 0);
       setOverallExpensesTotal(eTotal);
     } catch (err) {
