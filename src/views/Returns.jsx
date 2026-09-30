@@ -1217,7 +1217,7 @@ export default function Returns({ userProfile, branches, addToast }) {
                           <option value="" disabled>+ Choose product from catalog...</option>
                           {branchCatalog.map((c) => (
                             <option key={c.product_id} value={c.product_id}>
-                              {c.products?.name} (Stock: {c.quantity}) - ৳{c.products?.sale_price}
+                              {c.products?.name} {!activeBranch?.is_factory ? `(Stock: ${c.quantity}) ` : ''}- ৳{formatAmount(c.products?.sale_price)}
                             </option>
                           ))}
                         </select>

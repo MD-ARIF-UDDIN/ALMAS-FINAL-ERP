@@ -428,17 +428,59 @@ export default function Purchases({ userProfile, branches, addToast }) {
       if (purError) throw purError;
       const purchaseId = purData[0].id;
 
-      // 2. Insert Purchase Items (Catalog items link to product_id; custom items store item_name)
-      const purchaseItemsData = purchaseItems.map((item) => ({
-        purchase_id: purchaseId,
-        product_id: item.productId || null,
-        item_name: item.productId ? null : (item.name?.trim() || 'Custom Item'),
-        quantity: parseInt(item.quantity),
-        unit_price: parseFloat(item.costPrice),
-        total_price: parseFloat(item.costPrice) * parseInt(item.quantity),
-      }));
+      // 2. Resolve or Auto-Create Products for custom items and insert Purchase Items
+      const resolvedPurchaseItems = [];
+      let hadNewProducts = false;
 
-      const { error: itemsError } = await supabase.from('purchase_items').insert(purchaseItemsData);
+      for (const item of purchaseItems) {
+        let finalProdId = item.productId || null;
+        const cleanName = (item.name || '').trim();
+
+        if (!finalProdId && cleanName) {
+          // Check if a product already exists with matching name
+          const { data: matchedProd } = await supabase
+            .from('products')
+            .select('id, name, purchase_price')
+            .ilike('name', cleanName)
+            .limit(1);
+
+          if (matchedProd && matchedProd.length > 0) {
+            finalProdId = matchedProd[0].id;
+          } else {
+            // Auto-create product in catalog with clean code / SKU
+            const autoCode = 'PRD-' + Date.now().toString().slice(-6) + Math.floor(Math.random() * 100);
+            const costVal = parseFloat(item.costPrice) || 0;
+            const { data: createdProd, error: createProdErr } = await supabase
+              .from('products')
+              .insert([
+                {
+                  sku: autoCode,
+                  product_code: autoCode,
+                  name: cleanName,
+                  purchase_price: costVal,
+                  sale_price: costVal,
+                }
+              ])
+              .select()
+              .single();
+
+            if (createProdErr) throw createProdErr;
+            finalProdId = createdProd.id;
+            hadNewProducts = true;
+          }
+        }
+
+        resolvedPurchaseItems.push({
+          purchase_id: purchaseId,
+          product_id: finalProdId,
+          item_name: cleanName || 'Custom Item',
+          quantity: parseInt(item.quantity),
+          unit_price: parseFloat(item.costPrice),
+          total_price: parseFloat(item.costPrice) * parseInt(item.quantity),
+        });
+      }
+
+      const { error: itemsError } = await supabase.from('purchase_items').insert(resolvedPurchaseItems);
       if (itemsError) throw itemsError;
 
       // 3. Register payment if initial amount paid
@@ -488,8 +530,11 @@ export default function Purchases({ userProfile, branches, addToast }) {
       setShowSearchSuggestions(false);
       setShowPurchaseModal(false);
       
-      // Refresh history list
+      // Refresh history list and product catalog
       fetchPurchases();
+      if (hadNewProducts) {
+        fetchCatalogProducts();
+      }
     } catch (err) {
       console.error(err);
       showMessage(err.message || 'Error occurred saving purchase.', 'error');

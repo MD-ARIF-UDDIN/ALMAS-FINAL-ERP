@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Navigate } from 'react-router-dom';
+import { Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { createClient } from '@supabase/supabase-js';
 import { supabase } from '../supabaseClient';
 import { 
@@ -55,14 +55,40 @@ const authCreatorClient = createClient(supabaseUrl, supabaseAnonKey, {
   },
 });
 
-export default function Users({ userProfile, branches, fetchBranches, addToast }) {
+export default function Users({ userProfile, branches, fetchBranches, addToast, defaultTab }) {
   if (userProfile && userProfile.role !== 'owner') {
     return <Navigate to="/" replace />;
   }
 
+  const location = useLocation();
+  const navigate = useNavigate();
+
+  const getTabFromPath = () => {
+    if (location.pathname === '/branches') return 'branches';
+    if (location.pathname === '/permissions') return 'permissions';
+    return defaultTab || 'users';
+  };
+
   const [profiles, setProfiles] = useState([]);
-  const [activeTab, setActiveTab] = useState('users'); // 'users', 'branches', 'permissions'
+  const [activeTab, setActiveTab] = useState(getTabFromPath); // 'users', 'branches', 'permissions'
   const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (location.pathname === '/branches') {
+      setActiveTab('branches');
+    } else if (location.pathname === '/permissions') {
+      setActiveTab('permissions');
+    } else if (location.pathname === '/users') {
+      setActiveTab('users');
+    }
+  }, [location.pathname]);
+
+  const handleTabChange = (tab) => {
+    setActiveTab(tab);
+    if (tab === 'branches') navigate('/branches');
+    else if (tab === 'permissions') navigate('/permissions');
+    else navigate('/users');
+  };
 
   // Pagination states for users list
   const [page, setPage] = useState(1);
@@ -77,7 +103,7 @@ export default function Users({ userProfile, branches, fetchBranches, addToast }
 
   // User form states
   const [fullName, setFullName] = useState('');
-  const [email, setEmail] = useState('');
+  const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
   const [role, setRole] = useState('staff');
   const [selectedBranch, setSelectedBranch] = useState('');
@@ -142,13 +168,14 @@ export default function Users({ userProfile, branches, fetchBranches, addToast }
 
   const handleCreateUser = async (e) => {
     e.preventDefault();
-    if (!email || !password || !fullName) {
+    const cleanPhone = phone.trim().replace(/[^0-9+]/g, '');
+    if (!cleanPhone || !password || !fullName.trim()) {
       showMessage('Please fill all required user fields.', 'error');
       return;
     }
 
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
-      showMessage('Please enter a valid email address.', 'error');
+    if (cleanPhone.length < 6) {
+      showMessage('Please enter a valid phone number (at least 6 digits).', 'error');
       return;
     }
 
@@ -169,13 +196,17 @@ export default function Users({ userProfile, branches, fetchBranches, addToast }
 
     setLoading(true);
     try {
+      const normalized = cleanPhone.replace('+', '');
+      const authEmail = `${normalized}@almas.local`;
+
       // 1. Sign up the user in Supabase Auth (does not sign out current session)
       const { data, error } = await authCreatorClient.auth.signUp({
-        email,
+        email: authEmail,
         password,
         options: {
           data: {
-            full_name: fullName,
+            full_name: fullName.trim(),
+            phone: cleanPhone,
           },
         },
       });
@@ -189,7 +220,7 @@ export default function Users({ userProfile, branches, fetchBranches, addToast }
       const { error: profileError } = await supabase
         .from('profiles')
         .update({
-          full_name: fullName,
+          full_name: fullName.trim(),
           role: role,
           branch_id: role === 'owner' ? null : selectedBranch || null,
         })
@@ -488,7 +519,7 @@ export default function Users({ userProfile, branches, fetchBranches, addToast }
 
   const resetUserForm = () => {
     setFullName('');
-    setEmail('');
+    setPhone('');
     setPassword('');
     setRole('staff');
     setSelectedBranch('');
@@ -563,7 +594,7 @@ export default function Users({ userProfile, branches, fetchBranches, addToast }
         <button
           className={`btn ${activeTab === 'users' ? 'btn-primary' : 'btn-secondary'}`}
           style={{ borderBottomLeftRadius: 0, borderBottomRightRadius: 0, marginBottom: '-1px' }}
-          onClick={() => setActiveTab('users')}
+          onClick={() => handleTabChange('users')}
         >
           <UserPlus size={16} />
           <span>Staff Accounts</span>
@@ -571,7 +602,7 @@ export default function Users({ userProfile, branches, fetchBranches, addToast }
         <button
           className={`btn ${activeTab === 'branches' ? 'btn-primary' : 'btn-secondary'}`}
           style={{ borderBottomLeftRadius: 0, borderBottomRightRadius: 0, marginBottom: '-1px' }}
-          onClick={() => setActiveTab('branches')}
+          onClick={() => handleTabChange('branches')}
         >
           <Building size={16} />
           <span>Branch Locations</span>
@@ -579,7 +610,7 @@ export default function Users({ userProfile, branches, fetchBranches, addToast }
         <button
           className={`btn ${activeTab === 'permissions' ? 'btn-primary' : 'btn-secondary'}`}
           style={{ borderBottomLeftRadius: 0, borderBottomRightRadius: 0, marginBottom: '-1px' }}
-          onClick={() => setActiveTab('permissions')}
+          onClick={() => handleTabChange('permissions')}
         >
           <Shield size={16} />
           <span>Role Permissions</span>
@@ -599,7 +630,7 @@ export default function Users({ userProfile, branches, fetchBranches, addToast }
                   <tr>
                     <th style={{ width: '40px' }}>SL</th>
                     <th>Name</th>
-                    <th>Email</th>
+                    <th>Phone Number</th>
                     <th>Role</th>
                     <th>Branch Office</th>
                     <th style={{ textAlign: 'center', width: '150px' }}>Permissions</th>
@@ -625,9 +656,13 @@ export default function Users({ userProfile, branches, fetchBranches, addToast }
                         <tr key={p.id}>
                           <td>{(page - 1) * pageSize + index + 1}</td>
                           <td style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{p.full_name || 'N/A'}</td>
-                          <td style={{ fontSize: '0.85rem' }}>{p.email}</td>
+                          <td style={{ fontSize: '0.85rem', fontFamily: 'monospace' }}>
+                            {p.phone || (p.email ? p.email.replace('@almas.local', '') : 'N/A')}
+                          </td>
                           <td>
-                            <span className={`badge badge-${p.role}`}>{p.role.replace('_', ' ')}</span>
+                            <span className={`badge badge-${p.role}`} style={{ textTransform: 'capitalize' }}>
+                              {(p.role || 'staff').replace(/_/g, ' ')}
+                            </span>
                           </td>
                           <td style={{ fontWeight: 500 }}>
                             {isOwner ? (
@@ -798,6 +833,14 @@ export default function Users({ userProfile, branches, fetchBranches, addToast }
                   Configure Role:
                 </span>
                 <div style={{ display: 'flex', gap: '0.4rem' }}>
+                  <button
+                    type="button"
+                    className={`btn ${selectedMatrixRole === 'factory_manager' ? 'btn-primary' : 'btn-secondary'} btn-sm`}
+                    onClick={() => setSelectedMatrixRole('factory_manager')}
+                  >
+                    <Shield size={13} />
+                    <span>Factory Manager</span>
+                  </button>
                   <button
                     type="button"
                     className={`btn ${selectedMatrixRole === 'branch_manager' ? 'btn-primary' : 'btn-secondary'} btn-sm`}
@@ -1171,14 +1214,14 @@ export default function Users({ userProfile, branches, fetchBranches, addToast }
                 </div>
 
                 <div className="form-group">
-                  <label>Email</label>
+                  <label>Phone Number (Login ID)</label>
                   <div style={{ position: 'relative' }}>
-                    <Mail size={14} style={{ position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+                    <Phone size={14} style={{ position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
                     <input
                       type="text"
                       className="input-control"
                       style={{ paddingLeft: '2.5rem', backgroundColor: '#f8fafc', color: 'var(--text-muted)' }}
-                      value={editingProfile.email || ''}
+                      value={editingProfile.phone || (editingProfile.email ? editingProfile.email.replace('@almas.local', '') : '')}
                       disabled
                     />
                   </div>
@@ -1197,6 +1240,7 @@ export default function Users({ userProfile, branches, fetchBranches, addToast }
                     >
                       <option value="staff">Staff</option>
                       <option value="branch_manager">Branch Manager</option>
+                      <option value="factory_manager">Factory Manager</option>
                       <option value="owner">Owner</option>
                     </select>
                   </div>
@@ -1297,16 +1341,16 @@ export default function Users({ userProfile, branches, fetchBranches, addToast }
                 </div>
 
                 <div className="form-group">
-                  <label>Email *</label>
+                  <label>Phone Number (Login ID) *</label>
                   <div style={{ position: 'relative' }}>
-                    <Mail size={14} style={{ position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+                    <Phone size={14} style={{ position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
                     <input
-                      type="email"
+                      type="tel"
                       className="input-control"
                       style={{ paddingLeft: '2.5rem' }}
-                      placeholder="Enter email"
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
+                      placeholder="e.g. 01825334505"
+                      value={phone}
+                      onChange={(e) => setPhone(e.target.value)}
                       required
                     />
                   </div>
@@ -1341,6 +1385,7 @@ export default function Users({ userProfile, branches, fetchBranches, addToast }
                     >
                       <option value="staff">Staff</option>
                       <option value="branch_manager">Branch Manager</option>
+                      <option value="factory_manager">Factory Manager</option>
                       <option value="owner">Owner</option>
                     </select>
                   </div>

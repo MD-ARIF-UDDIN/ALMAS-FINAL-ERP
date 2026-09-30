@@ -1,10 +1,10 @@
 import React, { useState } from 'react';
 import { supabase } from '../supabaseClient';
-import { Mail, Eye, EyeOff, ArrowRight, Lock } from 'lucide-react';
+import { Phone, Eye, EyeOff, ArrowRight, Lock } from 'lucide-react';
 import logo from '../assets/logo.svg';
 
 export default function Auth({ onAuthSuccess }) {
-  const [email, setEmail] = useState('');
+  const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -13,8 +13,9 @@ export default function Auth({ onAuthSuccess }) {
 
   const handleLogin = async (e) => {
     e.preventDefault();
-    if (!email || !password) {
-      setErrorMsg('Please enter both email and password.');
+    const rawInput = phone.trim();
+    if (!rawInput || !password) {
+      setErrorMsg('Please enter both phone number and password.');
       return;
     }
 
@@ -22,8 +23,32 @@ export default function Auth({ onAuthSuccess }) {
     setErrorMsg('');
 
     try {
+      let loginEmail = rawInput.toLowerCase();
+
+      // If it is a phone number without @
+      if (!rawInput.includes('@')) {
+        const cleanPhone = rawInput.replace(/[^0-9+]/g, '');
+        const normalized = cleanPhone.replace('+', '');
+        loginEmail = `${normalized}@almas.local`;
+
+        // Check if there is an existing profile with this phone number or email match
+        try {
+          const { data: profileMatch } = await supabase
+            .from('profiles')
+            .select('email')
+            .or(`email.ilike.${normalized}@almas.local,email.ilike.%${normalized}%`)
+            .limit(1);
+
+          if (profileMatch && profileMatch.length > 0 && profileMatch[0].email) {
+            loginEmail = profileMatch[0].email;
+          }
+        } catch (lookupErr) {
+          console.warn('Profile phone lookup notice:', lookupErr);
+        }
+      }
+
       const { data, error } = await supabase.auth.signInWithPassword({
-        email: email.trim(),
+        email: loginEmail,
         password,
       });
 
@@ -33,7 +58,7 @@ export default function Auth({ onAuthSuccess }) {
       }
     } catch (error) {
       console.error('Login error:', error);
-      setErrorMsg(error.message || 'Invalid credentials. Please try again.');
+      setErrorMsg(error.message || 'Invalid phone number or password. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -70,23 +95,23 @@ export default function Auth({ onAuthSuccess }) {
 
           {/* Form */}
           <form onSubmit={handleLogin} className="auth-form">
-            {/* Email Field */}
+            {/* Phone Number Field */}
             <div className="auth-input-group">
-              <label htmlFor="auth-email" className="auth-label">
-                Email
+              <label htmlFor="auth-phone" className="auth-label">
+                Phone Number
               </label>
-              <div className={`auth-input-wrapper ${focusedField === 'email' ? 'focused' : ''}`}>
-                <Mail size={17} className="auth-input-icon" />
+              <div className={`auth-input-wrapper ${focusedField === 'phone' ? 'focused' : ''}`}>
+                <Phone size={17} className="auth-input-icon" />
                 <input
-                  id="auth-email"
-                  type="email"
-                  placeholder="name@almasaccessories.com"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  onFocus={() => setFocusedField('email')}
+                  id="auth-phone"
+                  type="tel"
+                  placeholder="Enter phone number (e.g. 01825334505)"
+                  value={phone}
+                  onChange={(e) => setPhone(e.target.value)}
+                  onFocus={() => setFocusedField('phone')}
                   onBlur={() => setFocusedField('')}
                   required
-                  autoComplete="email"
+                  autoComplete="tel"
                   className="auth-input"
                 />
               </div>

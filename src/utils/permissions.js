@@ -207,6 +207,29 @@ export const ALL_PERMISSIONS = Array.from(
 // Standard Default Templates
 export const DEFAULT_ROLE_PERMISSIONS = {
   owner: [...ALL_PERMISSIONS],
+  factory_manager: [
+    'product.items_view',
+    'product.items_create',
+    'inventory.stock_view',
+    'inventory.adjust',
+    'inventory.transfer_view',
+    'inventory.transfer',
+    'inventory.logs_view',
+    'sales.view',
+    'sales.pos_view',
+    'sales.create',
+    'purchases.view',
+    'purchases.new_view',
+    'purchases.create',
+    'payments.view',
+    'payments.create',
+    'expenses.view',
+    'expenses.create',
+    'contacts.view',
+    'contacts.create',
+    'contacts.edit',
+    'reports.view',
+  ],
   branch_manager: [
     'product.items_view',
     'product.items_create',
@@ -401,7 +424,7 @@ export async function clearUserCustomPermissions(userId) {
 export function hasPermission(userProfile, permissionKey) {
   if (!userProfile) return false;
   if (userProfile.role === 'owner') return true;
-  
+
   const perms = getUserPermissions(userProfile);
 
   // Aliases and module-level permission checks
@@ -426,6 +449,6 @@ export function hasPermission(userProfile, permissionKey) {
   if (permissionKey === 'returns.create') {
     return perms.includes('returns.create') || perms.includes('sales.create');
   }
-  
+
   return perms.includes(permissionKey);
 }

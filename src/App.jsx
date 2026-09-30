@@ -214,7 +214,27 @@ function App() {
               path="/users" 
               element={
                 userProfile?.role === 'owner' ? (
-                  <Users userProfile={userProfile} branches={branches} fetchBranches={fetchBranches} addToast={addToast} />
+                  <Users userProfile={userProfile} branches={branches} fetchBranches={fetchBranches} addToast={addToast} defaultTab="users" />
+                ) : (
+                  <Navigate to="/" replace />
+                )
+              } 
+            />
+            <Route 
+              path="/branches" 
+              element={
+                userProfile?.role === 'owner' ? (
+                  <Users userProfile={userProfile} branches={branches} fetchBranches={fetchBranches} addToast={addToast} defaultTab="branches" />
+                ) : (
+                  <Navigate to="/" replace />
+                )
+              } 
+            />
+            <Route 
+              path="/permissions" 
+              element={
+                userProfile?.role === 'owner' ? (
+                  <Users userProfile={userProfile} branches={branches} fetchBranches={fetchBranches} addToast={addToast} defaultTab="permissions" />
                 ) : (
                   <Navigate to="/" replace />
                 )

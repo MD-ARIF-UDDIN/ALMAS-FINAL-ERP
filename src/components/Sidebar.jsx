@@ -1,10 +1,13 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import logo from '../assets/almas_logo.jpg';
 import {
   LayoutDashboard,
   Users,
   UserCheck,
+  UserPlus,
+  Building,
+  Shield,
   Package,
   Layers,
   ShoppingCart,
@@ -15,6 +18,7 @@ import {
   LogOut,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
   Truck,
   RotateCcw,
 } from 'lucide-react';
@@ -33,6 +37,19 @@ export default function Sidebar({ userProfile, onLogout, branches, isOpen, setIs
     return path.substring(1); // removes leading slash
   };
   const activeView = getActiveView();
+
+  const [expandedMenus, setExpandedMenus] = useState({
+    users: true,
+  });
+
+  const toggleSubmenu = (menuId, e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setExpandedMenus((prev) => ({
+      ...prev,
+      [menuId]: !prev[menuId],
+    }));
+  };
 
   const menuGroups = [
     {
@@ -69,7 +86,18 @@ export default function Sidebar({ userProfile, onLogout, branches, isOpen, setIs
       items: [
         { id: 'reports', name: 'Reports', icon: BarChart3, perm: 'reports.view' },
         { id: 'contacts', name: 'Contacts', icon: Users, perm: 'contacts.view' },
-        { id: 'users', name: 'Staff & Users', icon: UserCheck, perm: 'users.manage', ownerOnly: true },
+        {
+          id: 'users',
+          name: 'Staff & Users',
+          icon: UserCheck,
+          perm: 'users.manage',
+          ownerOnly: true,
+          subItems: [
+            { id: 'users', name: 'Staff Accounts', icon: UserPlus, path: '/users' },
+            { id: 'branches', name: 'Branch Locations', icon: Building, path: '/branches' },
+            { id: 'permissions', name: 'Role Permissions', icon: Shield, path: '/permissions' },
+          ],
+        },
       ],
     },
   ];
@@ -91,7 +119,7 @@ export default function Sidebar({ userProfile, onLogout, branches, isOpen, setIs
       <div className="sidebar-header" style={{ position: 'relative' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', gap: '0.5rem' }}>
           <div className="sidebar-logo" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <img src={logo} alt="Almas Logo" style={{ width: '28px', height: '28px', objectFit: 'contain', borderRadius: '4px', flexShrink: 0 }} />
+            <img src={logo} alt="Almas Logo" style={{ width: '26px', height: '26px', objectFit: 'contain', borderRadius: '4px', flexShrink: 0 }} />
             <span className="logo-full">ALMAS ERP</span>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
@@ -123,15 +151,66 @@ export default function Sidebar({ userProfile, onLogout, branches, isOpen, setIs
             {group.title && <div className="sidebar-group-title">{group.title}</div>}
             {group.items.map((item) => {
               const Icon = item.icon;
+              const hasSubs = Array.isArray(item.subItems) && item.subItems.length > 0;
+              const isChildActive = hasSubs && item.subItems.some((sub) => activeView === sub.id);
+              const isItemActive = activeView === item.id || isChildActive;
+              const isExpanded = expandedMenus[item.id] ?? true;
+
+              if (hasSubs) {
+                return (
+                  <div key={item.id} className="sidebar-menu-parent-group">
+                    <div
+                      className={`sidebar-item sidebar-parent-item ${isItemActive ? 'active' : ''}`}
+                      onClick={(e) => {
+                        if (isCollapsed) {
+                          setIsCollapsed(false);
+                        } else {
+                          toggleSubmenu(item.id, e);
+                        }
+                      }}
+                      title={item.name}
+                    >
+                      <Icon size={17} />
+                      <span style={{ flex: 1 }}>{item.name}</span>
+                      {!isCollapsed && (
+                        <span className="sidebar-chevron-icon">
+                          {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                        </span>
+                      )}
+                    </div>
+                    {!isCollapsed && isExpanded && (
+                      <div className="sidebar-submenu">
+                        {item.subItems.map((sub) => {
+                          const SubIcon = sub.icon;
+                          const isSubActive = activeView === sub.id;
+                          return (
+                            <Link
+                              key={sub.id}
+                              to={sub.path}
+                              className={`sidebar-subitem ${isSubActive ? 'active' : ''}`}
+                              onClick={() => setIsOpen(false)}
+                              style={{ textDecoration: 'none' }}
+                            >
+                              <SubIcon size={15} />
+                              <span>{sub.name}</span>
+                            </Link>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              }
+
               return (
                 <Link
                   key={item.id}
                   to={item.id === 'dashboard' ? '/' : `/${item.id}`}
-                  className={`sidebar-item ${activeView === item.id ? 'active' : ''}`}
+                  className={`sidebar-item ${isItemActive ? 'active' : ''}`}
                   onClick={() => setIsOpen(false)}
                   style={{ textDecoration: 'none' }}
                 >
-                  <Icon size={18} />
+                  <Icon size={17} />
                   <span>{item.name}</span>
                 </Link>
               );

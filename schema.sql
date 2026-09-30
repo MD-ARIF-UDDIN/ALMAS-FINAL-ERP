@@ -51,7 +51,7 @@ DROP SEQUENCE IF EXISTS branch_payment_seq CASCADE;
 -- ====================================================================
 -- 4. ENUMS & SEQUENCES
 -- ====================================================================
-CREATE TYPE user_role AS ENUM ('owner', 'branch_manager', 'staff');
+CREATE TYPE user_role AS ENUM ('owner', 'factory_manager', 'branch_manager', 'staff');
 CREATE TYPE movement_type AS ENUM ('purchase', 'sale', 'adjustment_in', 'adjustment_out', 'transfer_in', 'transfer_out');
 CREATE TYPE contact_type AS ENUM ('customer', 'supplier');
 CREATE TYPE payment_status AS ENUM ('paid', 'partial', 'unpaid');
@@ -79,7 +79,7 @@ CREATE TABLE public.branches (
 -- 5.2 User Profiles (Linked with Supabase Auth & Role-Based Permissions)
 CREATE TABLE public.profiles (
     id UUID REFERENCES auth.users ON DELETE CASCADE PRIMARY KEY,
-    email VARCHAR(255) UNIQUE NOT NULL,
+    phone VARCHAR(50) UNIQUE,
     full_name VARCHAR(255),
     role user_role DEFAULT 'staff'::user_role NOT NULL,
     branch_id UUID REFERENCES public.branches(id) ON DELETE SET NULL,
@@ -334,20 +334,22 @@ CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS TRIGGER AS $$
 DECLARE
     is_first_user BOOLEAN;
+    user_phone VARCHAR(50);
 BEGIN
     SELECT count(*) = 0 INTO is_first_user FROM public.profiles;
+    user_phone := COALESCE(NEW.raw_user_meta_data->>'phone', split_part(NEW.email, '@', 1));
 
-    INSERT INTO public.profiles (id, email, full_name, role, branch_id, permissions)
+    INSERT INTO public.profiles (id, phone, full_name, role, branch_id, permissions)
     VALUES (
         NEW.id,
-        NEW.email,
-        COALESCE(NEW.raw_user_meta_data->>'full_name', split_part(NEW.email, '@', 1)),
+        user_phone,
+        COALESCE(NEW.raw_user_meta_data->>'full_name', user_phone),
         CASE WHEN is_first_user THEN 'owner'::user_role ELSE 'staff'::user_role END,
         NULL,
         '[]'::jsonb
     )
     ON CONFLICT (id) DO UPDATE SET
-        email = EXCLUDED.email,
+        phone = EXCLUDED.phone,
         full_name = COALESCE(EXCLUDED.full_name, public.profiles.full_name);
     RETURN NEW;
 END;

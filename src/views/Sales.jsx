@@ -2028,25 +2028,30 @@ export default function Sales({ userProfile, branches, addToast }) {
                       No available items found.
                     </div>
                   ) : (
-                    filteredProducts.map((invItem) => (
-                      <div
-                        key={invItem.product_id}
-                        className="pos-product-card card"
-                        onClick={() => {
-                          if (invItem.quantity <= 0) {
-                            showMessage("This item is currently out of stock.", "error");
-                            return;
-                          }
-                          addToCart(invItem);
-                        }}
-                        style={{ cursor: invItem.quantity > 0 ? 'pointer' : 'not-allowed', opacity: invItem.quantity > 0 ? 1 : 0.6 }}
-                      >
-                        <div className="pos-product-sku">{invItem.products?.sku}</div>
-                        <div className="pos-product-name">{invItem.products?.name}</div>
-                        <span className="pos-product-price">৳{formatAmount(invItem.products?.sale_price)}</span>
-                        <span className="pos-product-stock">Stock: {invItem.quantity} {invItem.products?.unit}</span>
-                      </div>
-                    ))
+                    filteredProducts.map((invItem) => {
+                      const isOutOfStock = !isFactory && invItem.quantity <= 0;
+                      return (
+                        <div
+                          key={invItem.product_id}
+                          className="pos-product-card card"
+                          onClick={() => {
+                            if (isOutOfStock) {
+                              showMessage("This item is currently out of stock.", "error");
+                              return;
+                            }
+                            addToCart(invItem);
+                          }}
+                          style={{ cursor: isOutOfStock ? 'not-allowed' : 'pointer', opacity: isOutOfStock ? 0.6 : 1 }}
+                        >
+                          <div className="pos-product-sku">{invItem.products?.sku}</div>
+                          <div className="pos-product-name">{invItem.products?.name}</div>
+                          <span className="pos-product-price">৳{formatAmount(invItem.products?.sale_price)}</span>
+                          {!isFactory && (
+                            <span className="pos-product-stock">Stock: {invItem.quantity} {invItem.products?.unit || 'pcs'}</span>
+                          )}
+                        </div>
+                      );
+                    })
                   )}
                 </div>
               </div>
@@ -2239,10 +2244,14 @@ export default function Sales({ userProfile, branches, addToast }) {
                                     <span style={{ fontFamily: 'monospace', fontWeight: 600, color: '#0284c7' }}>
                                       {invItem.products?.sku || invItem.products?.product_code || 'NO-SKU'}
                                     </span>
-                                    <span>•</span>
-                                    <span style={{ color: isOutOfStock ? 'var(--danger)' : 'var(--text-secondary)' }}>
-                                      {isFactory ? 'Direct Order' : `Stock: ${invItem.quantity} ${invItem.products?.unit || 'pcs'}`}
-                                    </span>
+                                    {!isFactory && (
+                                      <>
+                                        <span>•</span>
+                                        <span style={{ color: isOutOfStock ? 'var(--danger)' : 'var(--text-secondary)' }}>
+                                          Stock: {invItem.quantity} {invItem.products?.unit || 'pcs'}
+                                        </span>
+                                      </>
+                                    )}
                                   </div>
                                 </div>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
@@ -2347,7 +2356,7 @@ export default function Sales({ userProfile, branches, addToast }) {
                                       value={item.quantity}
                                       onChange={(e) => handleCustomQtyChange(item.product.id, e.target.value)}
                                       onBlur={() => handleQtyBlur(item.product.id)}
-                                      title={`Available: ${item.stockLimit}`}
+                                      title={!isFactory ? `Available: ${item.stockLimit}` : undefined}
                                     />
                                     <button
                                       type="button"
@@ -3300,7 +3309,7 @@ export default function Sales({ userProfile, branches, addToast }) {
                             </div>
                             <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '0.25rem', color: 'var(--text-muted)', fontSize: '0.75rem' }}>
                               <span>৳{formatAmount(item.products?.sale_price)}</span>
-                              <span>Stock: {isFactory ? '∞' : item.quantity}</span>
+                              {!isFactory && <span>Stock: {item.quantity}</span>}
                             </div>
                           </div>
                         ))}
@@ -3828,77 +3837,10 @@ export default function Sales({ userProfile, branches, addToast }) {
                 </div>
               </div>
 
-              {/* TABLE 1: OLD PRODUCTS (INITIAL SOLD ITEMS & RETURNS) */}
-              <div>
-                <div style={{ fontWeight: 700, fontSize: '0.88rem', marginBottom: '0.4rem', color: '#0f172a', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <span>Old Products (Initial Sold & Returns)</span>
-                  <span style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>
-                    {saleDetailItems.length} {saleDetailItems.length === 1 ? 'item' : 'items'}
-                  </span>
-                </div>
-                <div className="table-container">
-                  <table>
-                    <thead>
-                      <tr>
-                        <th style={{ width: '35px', textAlign: 'center' }}>#</th>
-                        <th>Product</th>
-                        <th style={{ width: '80px', textAlign: 'center' }}>Size</th>
-                        <th style={{ width: '70px', textAlign: 'center' }}>Cartons</th>
-                        <th style={{ width: '110px' }}>SKU / Code</th>
-                        <th style={{ textAlign: 'center', width: '80px' }}>Initial Qty</th>
-                        <th style={{ textAlign: 'center', width: '80px', color: '#c2410c' }}>Returned</th>
-                        <th style={{ textAlign: 'right', width: '90px' }}>Price</th>
-                        <th style={{ textAlign: 'right', width: '100px' }}>Total</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {loadingSaleDetails ? (
-                        <TableLoading colSpan={9} message="Loading items..." />
-                      ) : saleDetailItems.length === 0 ? (
-                        <tr>
-                          <td colSpan={9} style={{ textAlign: 'center', padding: '1rem', color: 'var(--text-muted)' }}>
-                            No items recorded.
-                          </td>
-                        </tr>
-                      ) : (
-                        saleDetailItems.map((item, idx) => {
-                          const initialQty = parseFloat(item.quantity) || 1;
-                          const price = parseFloat(item.unit_price) || 0;
-                          const initialTotal = initialQty * price;
-                          const itemSize = item.size || '—';
-                          const itemCarton = item.number_of_carton !== undefined && item.number_of_carton !== null ? item.number_of_carton : 0;
-                          
-                          // Calculate returned quantity for this specific product
-                          const returnedQty = saleDetailReturns
-                            .filter((r) => r.product?.id === item.product_id || r.product_id === item.product_id)
-                            .reduce((sum, r) => sum + (parseFloat(r.quantity) || 0), 0);
-
-                          return (
-                            <tr key={item.id || idx}>
-                              <td style={{ textAlign: 'center', color: 'var(--text-muted)' }}>{idx + 1}</td>
-                              <td style={{ fontWeight: 600 }}>{item.products?.name || 'Product'}</td>
-                              <td style={{ textAlign: 'center', fontSize: '0.82rem' }}>{itemSize}</td>
-                              <td style={{ textAlign: 'center', fontWeight: 600 }}>{itemCarton}</td>
-                              <td style={{ fontFamily: 'monospace', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
-                                {item.products?.sku || item.products?.product_code || '—'}
-                              </td>
-                              <td style={{ textAlign: 'center', fontWeight: 600 }}>{initialQty}</td>
-                              <td style={{ textAlign: 'center', fontWeight: 700, color: returnedQty > 0 ? '#c2410c' : 'var(--text-muted)' }}>
-                                {returnedQty > 0 ? `${returnedQty}` : '0'}
-                              </td>
-                              <td style={{ textAlign: 'right' }}>৳{formatAmount(price)}</td>
-                              <td style={{ textAlign: 'right', fontWeight: 700 }}>৳{formatAmount(initialTotal)}</td>
-                            </tr>
-                          );
-                        })
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-
-              {/* TABLE 2 & TOTALS: CURRENT INVOICE ITEMS (RETAINED + REPLACEMENTS) */}
+              {/* ITEMS & TOTALS SECTION */}
               {(() => {
+                const hasModifications = (saleDetailReturns && saleDetailReturns.length > 0) || (saleDetailReplacements && saleDetailReplacements.length > 0);
+
                 // 1. Retained original items (initial qty - returned)
                 const retainedItems = saleDetailItems
                   .map((item) => {
@@ -3923,7 +3865,7 @@ export default function Sales({ userProfile, branches, addToast }) {
                   .filter((it) => it.quantity > 0);
 
                 // 2. Replacement exchange items
-                const replacementItems = saleDetailReplacements.map((rep, idx) => {
+                const replacementItems = (saleDetailReplacements || []).map((rep, idx) => {
                   const repQty = parseFloat(rep.quantity) || 1;
                   const repPrice = parseFloat(rep.product?.sale_price) || 0;
                   return {
@@ -3940,9 +3882,10 @@ export default function Sales({ userProfile, branches, addToast }) {
                 });
 
                 const currentItems = [...retainedItems, ...replacementItems];
-                const currentSubtotal = currentItems.reduce((acc, it) => acc + it.total, 0);
+                const currentSubtotal = hasModifications 
+                  ? currentItems.reduce((acc, it) => acc + it.total, 0)
+                  : saleDetailItems.reduce((acc, it) => acc + ((parseFloat(it.quantity) || 0) * (parseFloat(it.unit_price) || 0)), 0);
                 const initialSubtotal = saleDetailItems.reduce((acc, it) => acc + ((parseFloat(it.quantity) || 0) * (parseFloat(it.unit_price) || 0)), 0) || (selectedSaleForDetails.total_amount || 0);
-                const hasModifications = saleDetailReturns.length > 0 || saleDetailReplacements.length > 0;
                 
                 const discount = parseFloat(selectedSaleForDetails.discount) || 0;
                 const tax = parseFloat(selectedSaleForDetails.tax) || 0;
@@ -3954,60 +3897,193 @@ export default function Sales({ userProfile, branches, addToast }) {
 
                 return (
                   <>
-                    <div>
-                      <div style={{ fontWeight: 700, fontSize: '0.88rem', marginBottom: '0.4rem', color: '#0284c7', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                        <span>New Products (Current Invoice Items)</span>
-                        <span style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>
-                          {currentItems.length} {currentItems.length === 1 ? 'item' : 'items'}
-                        </span>
-                      </div>
-                      <div className="table-container">
-                        <table>
-                          <thead>
-                            <tr style={{ backgroundColor: '#f0f9ff' }}>
-                              <th style={{ width: '35px', textAlign: 'center' }}>#</th>
-                              <th>Product</th>
-                              <th style={{ width: '80px', textAlign: 'center' }}>Size</th>
-                              <th style={{ width: '70px', textAlign: 'center' }}>Cartons</th>
-                              <th style={{ width: '110px' }}>SKU / Code</th>
-                              <th style={{ textAlign: 'center', width: '80px' }}>Current Qty</th>
-                              <th style={{ textAlign: 'right', width: '90px' }}>Price</th>
-                              <th style={{ textAlign: 'right', width: '100px' }}>Total</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {loadingSaleDetails ? (
-                              <TableLoading colSpan={8} message="Loading current items..." />
-                            ) : currentItems.length === 0 ? (
-                              <tr>
-                                <td colSpan={8} style={{ textAlign: 'center', padding: '0.85rem', color: 'var(--text-muted)', fontSize: '0.82rem' }}>
-                                  No active products on this invoice.
-                                </td>
-                              </tr>
-                            ) : (
-                              currentItems.map((it, idx) => (
-                                <tr key={it.key || idx}>
-                                  <td style={{ textAlign: 'center', color: 'var(--text-muted)' }}>{idx + 1}</td>
-                                  <td style={{ fontWeight: 600, color: it.isExchange ? '#0369a1' : 'var(--text-primary)' }}>
-                                    {it.name}
-                                  </td>
-                                  <td style={{ textAlign: 'center', fontSize: '0.82rem' }}>{it.size}</td>
-                                  <td style={{ textAlign: 'center', fontWeight: 600 }}>{it.cartons}</td>
-                                  <td style={{ fontFamily: 'monospace', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
-                                    {it.sku}
-                                  </td>
-                                  <td style={{ textAlign: 'center', fontWeight: 800, color: '#0284c7' }}>
-                                    {it.quantity}
-                                  </td>
-                                  <td style={{ textAlign: 'right' }}>৳{formatAmount(it.price)}</td>
-                                  <td style={{ textAlign: 'right', fontWeight: 700 }}>৳{formatAmount(it.total)}</td>
+                    {hasModifications ? (
+                      <>
+                        {/* TABLE 1: OLD PRODUCTS (INITIAL SOLD ITEMS & RETURNS) */}
+                        <div>
+                          <div style={{ fontWeight: 700, fontSize: '0.88rem', marginBottom: '0.4rem', color: '#0f172a', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                            <span>Old Products (Initial Sold & Returns)</span>
+                            <span style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>
+                              {saleDetailItems.length} {saleDetailItems.length === 1 ? 'item' : 'items'}
+                            </span>
+                          </div>
+                          <div className="table-container">
+                            <table>
+                              <thead>
+                                <tr>
+                                  <th style={{ width: '35px', textAlign: 'center' }}>#</th>
+                                  <th>Product</th>
+                                  <th style={{ width: '80px', textAlign: 'center' }}>Size</th>
+                                  <th style={{ width: '70px', textAlign: 'center' }}>Cartons</th>
+                                  <th style={{ width: '110px' }}>SKU / Code</th>
+                                  <th style={{ textAlign: 'center', width: '80px' }}>Initial Qty</th>
+                                  <th style={{ textAlign: 'center', width: '80px', color: '#c2410c' }}>Returned</th>
+                                  <th style={{ textAlign: 'right', width: '90px' }}>Price</th>
+                                  <th style={{ textAlign: 'right', width: '100px' }}>Total</th>
                                 </tr>
-                              ))
-                            )}
-                          </tbody>
-                        </table>
+                              </thead>
+                              <tbody>
+                                {loadingSaleDetails ? (
+                                  <TableLoading colSpan={9} message="Loading items..." />
+                                ) : saleDetailItems.length === 0 ? (
+                                  <tr>
+                                    <td colSpan={9} style={{ textAlign: 'center', padding: '1rem', color: 'var(--text-muted)' }}>
+                                      No items recorded.
+                                    </td>
+                                  </tr>
+                                ) : (
+                                  saleDetailItems.map((item, idx) => {
+                                    const initialQty = parseFloat(item.quantity) || 1;
+                                    const price = parseFloat(item.unit_price) || 0;
+                                    const initialTotal = initialQty * price;
+                                    const itemSize = item.size || '—';
+                                    const itemCarton = item.number_of_carton !== undefined && item.number_of_carton !== null ? item.number_of_carton : 0;
+                                    
+                                    const returnedQty = saleDetailReturns
+                                      .filter((r) => r.product?.id === item.product_id || r.product_id === item.product_id)
+                                      .reduce((sum, r) => sum + (parseFloat(r.quantity) || 0), 0);
+
+                                    return (
+                                      <tr key={item.id || idx}>
+                                        <td style={{ textAlign: 'center', color: 'var(--text-muted)' }}>{idx + 1}</td>
+                                        <td style={{ fontWeight: 600 }}>{item.products?.name || 'Product'}</td>
+                                        <td style={{ textAlign: 'center', fontSize: '0.82rem' }}>{itemSize}</td>
+                                        <td style={{ textAlign: 'center', fontWeight: 600 }}>{itemCarton}</td>
+                                        <td style={{ fontFamily: 'monospace', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                                          {item.products?.sku || item.products?.product_code || '—'}
+                                        </td>
+                                        <td style={{ textAlign: 'center', fontWeight: 600 }}>{initialQty}</td>
+                                        <td style={{ textAlign: 'center', fontWeight: 700, color: returnedQty > 0 ? '#c2410c' : 'var(--text-muted)' }}>
+                                          {returnedQty > 0 ? `${returnedQty}` : '0'}
+                                        </td>
+                                        <td style={{ textAlign: 'right' }}>৳{formatAmount(price)}</td>
+                                        <td style={{ textAlign: 'right', fontWeight: 700 }}>৳{formatAmount(initialTotal)}</td>
+                                      </tr>
+                                    );
+                                  })
+                                )}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+
+                        {/* TABLE 2: CURRENT INVOICE ITEMS (RETAINED + REPLACEMENTS) */}
+                        <div>
+                          <div style={{ fontWeight: 700, fontSize: '0.88rem', marginBottom: '0.4rem', color: '#0284c7', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                            <span>New Products (Current Invoice Items)</span>
+                            <span style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>
+                              {currentItems.length} {currentItems.length === 1 ? 'item' : 'items'}
+                            </span>
+                          </div>
+                          <div className="table-container">
+                            <table>
+                              <thead>
+                                <tr style={{ backgroundColor: '#f0f9ff' }}>
+                                  <th style={{ width: '35px', textAlign: 'center' }}>#</th>
+                                  <th>Product</th>
+                                  <th style={{ width: '80px', textAlign: 'center' }}>Size</th>
+                                  <th style={{ width: '70px', textAlign: 'center' }}>Cartons</th>
+                                  <th style={{ width: '110px' }}>SKU / Code</th>
+                                  <th style={{ textAlign: 'center', width: '80px' }}>Current Qty</th>
+                                  <th style={{ textAlign: 'right', width: '90px' }}>Price</th>
+                                  <th style={{ textAlign: 'right', width: '100px' }}>Total</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {loadingSaleDetails ? (
+                                  <TableLoading colSpan={8} message="Loading current items..." />
+                                ) : currentItems.length === 0 ? (
+                                  <tr>
+                                    <td colSpan={8} style={{ textAlign: 'center', padding: '0.85rem', color: 'var(--text-muted)', fontSize: '0.82rem' }}>
+                                      No active products on this invoice.
+                                    </td>
+                                  </tr>
+                                ) : (
+                                  currentItems.map((it, idx) => (
+                                    <tr key={it.key || idx}>
+                                      <td style={{ textAlign: 'center', color: 'var(--text-muted)' }}>{idx + 1}</td>
+                                      <td style={{ fontWeight: 600, color: it.isExchange ? '#0369a1' : 'var(--text-primary)' }}>
+                                        {it.name}
+                                      </td>
+                                      <td style={{ textAlign: 'center', fontSize: '0.82rem' }}>{it.size}</td>
+                                      <td style={{ textAlign: 'center', fontWeight: 600 }}>{it.cartons}</td>
+                                      <td style={{ fontFamily: 'monospace', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                                        {it.sku}
+                                      </td>
+                                      <td style={{ textAlign: 'center', fontWeight: 800, color: '#0284c7' }}>
+                                        {it.quantity}
+                                      </td>
+                                      <td style={{ textAlign: 'right' }}>৳{formatAmount(it.price)}</td>
+                                      <td style={{ textAlign: 'right', fontWeight: 700 }}>৳{formatAmount(it.total)}</td>
+                                    </tr>
+                                  ))
+                                )}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      </>
+                    ) : (
+                      /* SINGLE CLEAN TABLE FOR NORMAL INVOICE WITHOUT RETURNS/EXCHANGES */
+                      <div>
+                        <div style={{ fontWeight: 700, fontSize: '0.88rem', marginBottom: '0.4rem', color: '#0f172a', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                          <span>Invoice Items</span>
+                          <span style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>
+                            {saleDetailItems.length} {saleDetailItems.length === 1 ? 'item' : 'items'}
+                          </span>
+                        </div>
+                        <div className="table-container">
+                          <table>
+                            <thead>
+                              <tr>
+                                <th style={{ width: '35px', textAlign: 'center' }}>#</th>
+                                <th>Product</th>
+                                <th style={{ width: '80px', textAlign: 'center' }}>Size</th>
+                                <th style={{ width: '70px', textAlign: 'center' }}>Cartons</th>
+                                <th style={{ width: '110px' }}>SKU / Code</th>
+                                <th style={{ textAlign: 'center', width: '80px' }}>Qty</th>
+                                <th style={{ textAlign: 'right', width: '90px' }}>Price</th>
+                                <th style={{ textAlign: 'right', width: '100px' }}>Total</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {loadingSaleDetails ? (
+                                <TableLoading colSpan={8} message="Loading items..." />
+                              ) : saleDetailItems.length === 0 ? (
+                                <tr>
+                                  <td colSpan={8} style={{ textAlign: 'center', padding: '1rem', color: 'var(--text-muted)' }}>
+                                    No items recorded.
+                                  </td>
+                                </tr>
+                              ) : (
+                                saleDetailItems.map((item, idx) => {
+                                  const qty = parseFloat(item.quantity) || 1;
+                                  const price = parseFloat(item.unit_price) || 0;
+                                  const itemTotal = qty * price;
+                                  const itemSize = item.size || '—';
+                                  const itemCarton = item.number_of_carton !== undefined && item.number_of_carton !== null ? item.number_of_carton : 0;
+
+                                  return (
+                                    <tr key={item.id || idx}>
+                                      <td style={{ textAlign: 'center', color: 'var(--text-muted)' }}>{idx + 1}</td>
+                                      <td style={{ fontWeight: 600 }}>{item.products?.name || 'Product'}</td>
+                                      <td style={{ textAlign: 'center', fontSize: '0.82rem' }}>{itemSize}</td>
+                                      <td style={{ textAlign: 'center', fontWeight: 600 }}>{itemCarton}</td>
+                                      <td style={{ fontFamily: 'monospace', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                                        {item.products?.sku || item.products?.product_code || '—'}
+                                      </td>
+                                      <td style={{ textAlign: 'center', fontWeight: 700, color: '#0284c7' }}>{qty}</td>
+                                      <td style={{ textAlign: 'right' }}>৳{formatAmount(price)}</td>
+                                      <td style={{ textAlign: 'right', fontWeight: 700 }}>৳{formatAmount(itemTotal)}</td>
+                                    </tr>
+                                  );
+                                })
+                              )}
+                            </tbody>
+                          </table>
+                        </div>
                       </div>
-                    </div>
+                    )}
 
                     {/* TOTALS & OPTIONAL NOTES */}
                     <div style={{ display: 'flex', justifyContent: selectedSaleForDetails.notes ? 'space-between' : 'flex-end', alignItems: 'flex-start', flexWrap: 'wrap', gap: '1rem' }}>
@@ -4338,9 +4414,11 @@ export default function Sales({ userProfile, branches, addToast }) {
                               <div style={{ fontWeight: 700, color: '#0284c7', fontSize: '0.85rem' }}>
                                 ৳{formatAmount(invItem.products?.sale_price)}
                               </div>
-                              <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
-                                Stock: {isFactory ? '∞' : invItem.quantity}
-                              </div>
+                              {!isFactory && (
+                                <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                                  Stock: {invItem.quantity}
+                                </div>
+                              )}
                             </div>
                           </div>
                         ))}
