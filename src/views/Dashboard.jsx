@@ -26,14 +26,13 @@ export default function Dashboard({ userProfile, branches }) {
   const quickActions = [
     {
       id: 'sales-pos',
-      title: 'Sales (POS)',
+      title: 'Sales',
       icon: ShoppingCart,
       gradient: 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)',
       glow: 'rgba(37, 99, 235, 0.28)',
       hoverBorder: '#3b82f6',
       themeColor: '#1d4ed8',
       path: '/sales',
-      state: { openPos: true },
       perm: 'sales.view',
     },
     {
@@ -45,7 +44,6 @@ export default function Dashboard({ userProfile, branches }) {
       hoverBorder: '#0ea5e9',
       themeColor: '#0284c7',
       path: '/purchases',
-      state: { openNewPurchase: true },
       perm: 'purchases.view',
     },
     {
@@ -112,7 +110,6 @@ export default function Dashboard({ userProfile, branches }) {
       hoverBorder: '#f59e0b',
       themeColor: '#d97706',
       path: '/expenses',
-      state: { openCreateExpense: true },
       perm: 'expenses.view',
     },
     {
@@ -159,7 +156,7 @@ export default function Dashboard({ userProfile, branches }) {
   });
 
   const handleActionClick = (action) => {
-    navigate(action.path, { state: action.state || {} });
+    navigate(action.path);
   };
 
   return (

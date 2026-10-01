@@ -2247,20 +2247,10 @@ export default function Sales({ userProfile, branches, addToast }) {
                               <button
                                 className="btn btn-secondary btn-sm btn-icon"
                                 onClick={() => handleOpenPaymentModal(sale)}
-                                title={`Collect Due Payment (Due: ৳${formatAmount(due)})`}
-                                style={{
-                                  color: '#15803d',
-                                  background: 'rgba(22, 163, 74, 0.09)',
-                                  border: '1px solid rgba(22, 163, 74, 0.35)',
-                                  padding: '0.35rem 0.45rem',
-                                  display: 'inline-flex',
-                                  alignItems: 'center',
-                                  justifyContent: 'center',
-                                  gap: '1px'
-                                }}
+                                title={`Collect Payment (Due: ৳${formatAmount(due)})`}
+                                style={{ color: '#16a34a', padding: '0.35rem 0.45rem' }}
                               >
-                                <Plus size={10} strokeWidth={3.5} />
-                                <Banknote size={15} strokeWidth={2.2} />
+                                <DollarSign size={15} />
                               </button>
                             )}
                             <button
