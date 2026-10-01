@@ -2856,8 +2856,8 @@ export default function Sales({ userProfile, branches, addToast }) {
                     </div>
                   )}
 
-                  {/* Cart Items Table */}
-                  <div className="table-container" style={{ maxHeight: '320px', overflowY: 'auto', border: '1px solid var(--border-color)', borderRadius: 'var(--border-radius-sm)', marginTop: '0.4rem' }}>
+                  {/* Cart Items Table (Desktop) */}
+                  <div className="table-container hide-on-mobile" style={{ maxHeight: '320px', overflowY: 'auto', border: '1px solid var(--border-color)', borderRadius: 'var(--border-radius-sm)', marginTop: '0.4rem' }}>
                     <table style={{ margin: 0, fontSize: '0.82rem' }}>
                       <thead style={{ position: 'sticky', top: 0, zIndex: 5, backgroundColor: 'var(--bg-secondary, #f8fafc)' }}>
                         <tr>
@@ -2999,6 +2999,130 @@ export default function Sales({ userProfile, branches, addToast }) {
                         )}
                       </tbody>
                     </table>
+                  </div>
+
+                  {/* Mobile Cart Items Card View */}
+                  <div className="hide-on-desktop mobile-card-list" style={{ maxHeight: '350px', overflowY: 'auto', marginTop: '0.4rem' }}>
+                    {cart.length === 0 ? (
+                      <div style={{ textAlign: 'center', padding: '1.5rem 1rem', color: 'var(--text-muted)', backgroundColor: '#f8fafc', borderRadius: 'var(--border-radius-sm)', border: '1px dashed var(--border-color)', fontSize: '0.85rem' }}>
+                        Cart is empty. Search above to add items to invoice.
+                      </div>
+                    ) : (
+                      cart.map((item, idx) => {
+                        const unitPrice = item.unitPrice !== undefined ? item.unitPrice : (item.product.sale_price || 0);
+                        const lineTotal = (parseFloat(unitPrice) || 0) * (parseFloat(item.quantity) || 0);
+                        const isUnlisted = item.isCustomUnlisted || item.product?.is_custom_unlisted;
+                        return (
+                          <div key={item.product.id || idx} className="mobile-item-card">
+                            <div className="mobile-card-header">
+                              <span className="mobile-card-badge">#{idx + 1}</span>
+                              <div style={{ flex: 1, minWidth: 0 }}>
+                                <div style={{ fontWeight: 600, fontSize: '0.88rem', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '0.3rem' }}>
+                                  <span>{item.product.name}</span>
+                                  {isUnlisted && (
+                                    <span style={{ backgroundColor: '#fef3c7', color: '#92400e', fontSize: '0.62rem', fontWeight: 700, padding: '0.1rem 0.35rem', borderRadius: '3px' }}>
+                                      NEW
+                                    </span>
+                                  )}
+                                </div>
+                                <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '0.1rem' }}>
+                                  {item.product.sku || item.product.product_code ? <span style={{ fontFamily: 'monospace' }}>{item.product.sku || item.product.product_code}</span> : null}
+                                  {item.product.unit ? ` • ${item.product.unit}` : ''}
+                                </div>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => removeFromCart(item.product.id)}
+                                style={{ border: 'none', background: 'none', color: 'var(--danger, #ef4444)', cursor: 'pointer', padding: '0.25rem' }}
+                                title="Remove item"
+                              >
+                                <Trash2 size={16} />
+                              </button>
+                            </div>
+
+                            <div className="mobile-card-row-2">
+                              <div className="form-group" style={{ marginBottom: 0 }}>
+                                <label style={{ fontSize: '0.72rem', color: 'var(--text-secondary)' }}>Size (Opt)</label>
+                                <input
+                                  type="text"
+                                  className="input-control"
+                                  placeholder="e.g. XL"
+                                  value={item.size || ''}
+                                  onChange={(e) => updateItemSize(item.product.id, e.target.value)}
+                                  style={{ height: '34px', fontSize: '0.85rem', textAlign: 'center' }}
+                                />
+                              </div>
+                              <div className="form-group" style={{ marginBottom: 0 }}>
+                                <label style={{ fontSize: '0.72rem', color: 'var(--text-secondary)' }}>Cartons (Opt)</label>
+                                <input
+                                  type="number"
+                                  min="0"
+                                  step="1"
+                                  placeholder="0"
+                                  className="input-control"
+                                  value={item.number_of_carton === '' ? '' : (item.number_of_carton ?? '')}
+                                  onChange={(e) => updateItemCarton(item.product.id, e.target.value)}
+                                  style={{ height: '34px', fontSize: '0.85rem', textAlign: 'center' }}
+                                />
+                              </div>
+                            </div>
+
+                            <div className="mobile-card-row-pricing">
+                              <div className="form-group" style={{ marginBottom: 0 }}>
+                                <label style={{ fontSize: '0.72rem', color: 'var(--text-secondary)' }}>Quantity</label>
+                                <div className="mobile-qty-stepper">
+                                  <button
+                                    type="button"
+                                    onClick={() => updateQty(item.product.id, -1)}
+                                    title="Decrease"
+                                  >
+                                    -
+                                  </button>
+                                  <input
+                                    type="number"
+                                    min="1"
+                                    step="any"
+                                    max={!isFactory ? item.stockLimit : undefined}
+                                    value={item.quantity}
+                                    onChange={(e) => handleCustomQtyChange(item.product.id, e.target.value)}
+                                    onBlur={() => handleQtyBlur(item.product.id)}
+                                    style={{ height: '34px', width: '46px', textAlign: 'center', fontSize: '0.88rem' }}
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => updateQty(item.product.id, 1)}
+                                    title="Increase"
+                                  >
+                                    +
+                                  </button>
+                                </div>
+                              </div>
+
+                              <div className="form-group" style={{ marginBottom: 0 }}>
+                                <label style={{ fontSize: '0.72rem', color: 'var(--text-secondary)' }}>Unit Price (৳)</label>
+                                <input
+                                  type="number"
+                                  min="0"
+                                  step="any"
+                                  className="input-control"
+                                  value={unitPrice}
+                                  onChange={(e) => handleCustomPriceChange(item.product.id, e.target.value)}
+                                  onBlur={() => handlePriceBlur(item.product.id)}
+                                  style={{ height: '34px', fontSize: '0.85rem', textAlign: 'right' }}
+                                />
+                              </div>
+
+                              <div style={{ textAlign: 'right' }}>
+                                <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)' }}>Line Total</div>
+                                <div style={{ fontWeight: 700, fontSize: '0.95rem', color: 'var(--primary)', marginTop: '0.2rem' }}>
+                                  ৳{formatAmount(lineTotal)}
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })
+                    )}
                   </div>
 
                   {/* Totals Summary */}
@@ -3242,44 +3366,44 @@ export default function Sales({ userProfile, branches, addToast }) {
                 })()}
 
                 {/* OPTIONAL NOTES, RECEIPT & TRX */}
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.65rem' }}>
+                <div className="form-grid-responsive-3" style={{ gap: '0.65rem' }}>
                   <div className="form-group" style={{ marginBottom: 0 }}>
-                    <label style={{ fontSize: '0.78rem', color: 'var(--text-muted)', display: 'block', marginBottom: '0.2rem' }}>
+                    <label style={{ fontSize: '0.78rem', color: 'var(--text-muted)', display: 'block', marginBottom: '0.2rem', fontWeight: 600 }}>
                       Stored Receipt No
                     </label>
                     <input
                       type="text"
                       className="input-control"
                       placeholder="e.g. REC-102"
-                      style={{ fontSize: '0.82rem', padding: '0.35rem 0.5rem' }}
+                      style={{ fontSize: '0.85rem', height: '36px' }}
                       value={storedReceiptNo}
                       onChange={(e) => setStoredReceiptNo(e.target.value)}
                     />
                   </div>
 
                   <div className="form-group" style={{ marginBottom: 0 }}>
-                    <label style={{ fontSize: '0.78rem', color: 'var(--text-muted)', display: 'block', marginBottom: '0.2rem' }}>
+                    <label style={{ fontSize: '0.78rem', color: 'var(--text-muted)', display: 'block', marginBottom: '0.2rem', fontWeight: 600 }}>
                       Reference No
                     </label>
                     <input
                       type="text"
                       className="input-control"
                       placeholder="e.g. Trx ID"
-                      style={{ fontSize: '0.82rem', padding: '0.35rem 0.5rem' }}
+                      style={{ fontSize: '0.85rem', height: '36px' }}
                       value={referenceNumber}
                       onChange={(e) => setReferenceNumber(e.target.value)}
                     />
                   </div>
 
                   <div className="form-group" style={{ marginBottom: 0 }}>
-                    <label style={{ fontSize: '0.78rem', color: 'var(--text-muted)', display: 'block', marginBottom: '0.2rem' }}>
+                    <label style={{ fontSize: '0.78rem', color: 'var(--text-muted)', display: 'block', marginBottom: '0.2rem', fontWeight: 600 }}>
                       Notes
                     </label>
                     <input
                       type="text"
                       className="input-control"
                       placeholder="Enter notes..."
-                      style={{ fontSize: '0.82rem', padding: '0.35rem 0.5rem' }}
+                      style={{ fontSize: '0.85rem', height: '36px' }}
                       value={notes}
                       onChange={(e) => setNotes(e.target.value)}
                     />
@@ -4993,7 +5117,7 @@ export default function Sales({ userProfile, branches, addToast }) {
               <div className="modal-body" style={{ overflowY: 'auto', padding: '1.25rem', display: 'flex', flexDirection: 'column', gap: '1.15rem' }}>
 
                 {/* Customer & Date Selection */}
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '0.85rem' }}>
+                <div className="form-grid-responsive-2" style={{ gap: '0.85rem' }}>
                   <div className="form-group" style={{ marginBottom: 0 }}>
                     <label style={{ fontWeight: 600, fontSize: '0.82rem', marginBottom: '0.3rem', display: 'block' }}>
                       Customer / Buyer *
@@ -5003,6 +5127,7 @@ export default function Sales({ userProfile, branches, addToast }) {
                       value={editCustomerId}
                       onChange={(e) => setEditCustomerId(e.target.value)}
                       required
+                      style={{ height: '36px', minHeight: '36px', fontSize: '0.85rem' }}
                     >
                       <option value="">-- Select Customer --</option>
                       {customers.map((c) => (
@@ -5023,6 +5148,7 @@ export default function Sales({ userProfile, branches, addToast }) {
                       value={editSaleDate}
                       onChange={(e) => setEditSaleDate(e.target.value)}
                       required
+                      style={{ height: '36px', minHeight: '36px', fontSize: '0.85rem' }}
                     />
                   </div>
                 </div>
@@ -5045,7 +5171,7 @@ export default function Sales({ userProfile, branches, addToast }) {
                         setShowEditSearchDropdown(true);
                       }}
                       onFocus={() => setShowEditSearchDropdown(true)}
-                      style={{ paddingLeft: '2.25rem', fontSize: '0.85rem' }}
+                      style={{ paddingLeft: '2.25rem', fontSize: '0.85rem', height: '36px', minHeight: '36px' }}
                     />
                   </div>
 
@@ -5120,7 +5246,8 @@ export default function Sales({ userProfile, branches, addToast }) {
                   <div style={{ fontWeight: 700, fontSize: '0.88rem', marginBottom: '0.45rem' }}>
                     Invoice Line Items ({editCart.length})
                   </div>
-                  <div className="table-container" style={{ maxHeight: '240px', overflowY: 'auto' }}>
+                  {/* Desktop Table View */}
+                  <div className="table-container hide-on-mobile" style={{ maxHeight: '240px', overflowY: 'auto' }}>
                     <table>
                       <thead>
                         <tr>
@@ -5257,10 +5384,122 @@ export default function Sales({ userProfile, branches, addToast }) {
                       </tbody>
                     </table>
                   </div>
+
+                  {/* Mobile Cards View */}
+                  <div className="hide-on-desktop mobile-card-list" style={{ maxHeight: '350px', overflowY: 'auto' }}>
+                    {loadingEditItems ? (
+                      <LoadingBlock message="Loading invoice items..." />
+                    ) : editCart.length === 0 ? (
+                      <div style={{ textAlign: 'center', padding: '1.5rem 1rem', color: '#dc2626', backgroundColor: '#fef2f2', borderRadius: 'var(--border-radius-sm)', border: '1px dashed #fca5a5', fontSize: '0.85rem' }}>
+                        Please add at least one product to this invoice.
+                      </div>
+                    ) : (
+                      editCart.map((item, index) => {
+                        const lineTotal = (parseFloat(item.quantity) || 0) * (parseFloat(item.unit_price) || 0);
+                        return (
+                          <div key={item.product_id || index} className="mobile-item-card">
+                            <div className="mobile-card-header">
+                              <span className="mobile-card-badge">#{index + 1}</span>
+                              <div style={{ flex: 1, minWidth: 0 }}>
+                                <div style={{ fontWeight: 600, fontSize: '0.88rem', color: 'var(--text-primary)' }}>
+                                  {item.product?.name || 'Item'}
+                                </div>
+                                <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '0.1rem' }}>
+                                  {item.product?.sku || item.product?.product_code || ''}
+                                </div>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => removeFromEditCart(item.product_id)}
+                                style={{ border: 'none', background: 'none', color: '#ef4444', cursor: 'pointer', padding: '0.25rem' }}
+                                title="Remove Item"
+                              >
+                                <Trash2 size={16} />
+                              </button>
+                            </div>
+
+                            <div className="mobile-card-row-2">
+                              <div className="form-group" style={{ marginBottom: 0 }}>
+                                <label style={{ fontSize: '0.72rem', color: 'var(--text-secondary)' }}>Size (Opt)</label>
+                                <input
+                                  type="text"
+                                  placeholder="Size"
+                                  className="input-control"
+                                  value={item.size || ''}
+                                  onChange={(e) => {
+                                    const val = e.target.value;
+                                    setEditCart(editCart.map((c, i) => i === index ? { ...c, size: val } : c));
+                                  }}
+                                  style={{ height: '34px', fontSize: '0.85rem', textAlign: 'center' }}
+                                />
+                              </div>
+                              <div className="form-group" style={{ marginBottom: 0 }}>
+                                <label style={{ fontSize: '0.72rem', color: 'var(--text-secondary)' }}>Cartons (Opt)</label>
+                                <input
+                                  type="number"
+                                  min="0"
+                                  step="1"
+                                  placeholder="0"
+                                  className="input-control"
+                                  value={item.number_of_carton ?? 0}
+                                  onChange={(e) => {
+                                    const val = e.target.value;
+                                    setEditCart(editCart.map((c, i) => i === index ? { ...c, number_of_carton: val } : c));
+                                  }}
+                                  style={{ height: '34px', fontSize: '0.85rem', textAlign: 'center' }}
+                                />
+                              </div>
+                            </div>
+
+                            <div className="mobile-card-row-pricing">
+                              <div className="form-group" style={{ marginBottom: 0 }}>
+                                <label style={{ fontSize: '0.72rem', color: 'var(--text-secondary)' }}>Quantity</label>
+                                <input
+                                  type="number"
+                                  min="1"
+                                  step="1"
+                                  className="input-control"
+                                  value={item.quantity}
+                                  onChange={(e) => {
+                                    const val = e.target.value;
+                                    setEditCart(editCart.map((c, i) => i === index ? { ...c, quantity: val } : c));
+                                  }}
+                                  style={{ height: '34px', fontSize: '0.88rem', textAlign: 'center', fontWeight: 600 }}
+                                />
+                              </div>
+
+                              <div className="form-group" style={{ marginBottom: 0 }}>
+                                <label style={{ fontSize: '0.72rem', color: 'var(--text-secondary)' }}>Unit Price (৳)</label>
+                                <input
+                                  type="number"
+                                  min="0"
+                                  step="any"
+                                  className="input-control"
+                                  value={item.unit_price}
+                                  onChange={(e) => {
+                                    const val = e.target.value;
+                                    setEditCart(editCart.map((c, i) => i === index ? { ...c, unit_price: val } : c));
+                                  }}
+                                  style={{ height: '34px', fontSize: '0.85rem', textAlign: 'right' }}
+                                />
+                              </div>
+
+                              <div style={{ textAlign: 'right' }}>
+                                <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)' }}>Line Total</div>
+                                <div style={{ fontWeight: 700, fontSize: '0.95rem', color: 'var(--primary)', marginTop: '0.2rem' }}>
+                                  ৳{formatAmount(lineTotal)}
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
                 </div>
 
                 {/* Calculation Inputs & Summary */}
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '1rem' }}>
+                <div className="form-grid-responsive-2" style={{ gap: '1rem' }}>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
                     <div className="form-group" style={{ marginBottom: 0 }}>
                       <label style={{ fontSize: '0.8rem', fontWeight: 600, display: 'block', marginBottom: '0.25rem' }}>
@@ -5273,6 +5512,7 @@ export default function Sales({ userProfile, branches, addToast }) {
                         className="input-control"
                         value={editDiscount}
                         onChange={(e) => setEditDiscount(Math.max(0, parseFloat(e.target.value) || 0))}
+                        style={{ height: '36px', minHeight: '36px', fontSize: '0.85rem' }}
                       />
                     </div>
 

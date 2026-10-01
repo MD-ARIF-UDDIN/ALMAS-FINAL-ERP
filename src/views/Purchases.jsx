@@ -1088,16 +1088,16 @@ export default function Purchases({ userProfile, branches, addToast }) {
             </div>
 
             <form onSubmit={handleSavePurchase} style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
-              <div className="modal-body" style={{ flex: 1, overflowY: 'auto', padding: '0.85rem 1.15rem', display: 'grid', gridTemplateColumns: '1.75fr 1fr', gap: '1rem' }}>
+              <div className="modal-body purchase-form-grid" style={{ flex: 1, overflowY: 'auto' }}>
                 {/* Left Column: Supplier & Items */}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', minWidth: 0 }}>
                   
                   {/* Supplier & Date Bar */}
-                  <div style={{ backgroundColor: '#f8fafc', padding: '0.75rem 0.9rem', borderRadius: '6px', border: '1px solid var(--border-color)' }}>
+                  <div className="purchase-supplier-bar">
                     {supplierType === 'existing' ? (
-                      <div style={{ display: 'grid', gridTemplateColumns: '130px 1fr 145px', gap: '0.75rem', alignItems: 'start' }}>
+                      <div className="purchase-supplier-grid">
                         <div className="form-group" style={{ marginBottom: 0 }}>
-                          <label style={{ fontSize: '0.78rem' }}>Supplier Type</label>
+                          <label style={{ fontSize: '0.78rem', fontWeight: 600 }}>Supplier Type</label>
                           <select
                             className="input-control"
                             value={supplierType}
@@ -1109,8 +1109,8 @@ export default function Purchases({ userProfile, branches, addToast }) {
                           </select>
                         </div>
 
-                        <div className="form-group" style={{ marginBottom: 0 }}>
-                          <label style={{ fontSize: '0.78rem' }}>Supplier *</label>
+                        <div className="form-group supplier-select-cell" style={{ marginBottom: 0 }}>
+                          <label style={{ fontSize: '0.78rem', fontWeight: 600 }}>Supplier *</label>
                           <select
                             className="input-control"
                             value={selectedSupplierId}
@@ -1128,7 +1128,7 @@ export default function Purchases({ userProfile, branches, addToast }) {
                         </div>
 
                         <div className="form-group" style={{ marginBottom: 0 }}>
-                          <label style={{ fontSize: '0.78rem' }}>Purchase Date *</label>
+                          <label style={{ fontSize: '0.78rem', fontWeight: 600 }}>Purchase Date *</label>
                           <input
                             type="date"
                             className="input-control"
@@ -1142,9 +1142,9 @@ export default function Purchases({ userProfile, branches, addToast }) {
                     ) : (
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
                         {/* Top row: Type and Date */}
-                        <div style={{ display: 'grid', gridTemplateColumns: '130px 145px', gap: '0.75rem', alignItems: 'start' }}>
+                        <div className="purchase-supplier-grid-new">
                           <div className="form-group" style={{ marginBottom: 0 }}>
-                            <label style={{ fontSize: '0.78rem' }}>Supplier Type</label>
+                            <label style={{ fontSize: '0.78rem', fontWeight: 600 }}>Supplier Type</label>
                             <select
                               className="input-control"
                               value={supplierType}
@@ -1157,7 +1157,7 @@ export default function Purchases({ userProfile, branches, addToast }) {
                           </div>
 
                           <div className="form-group" style={{ marginBottom: 0 }}>
-                            <label style={{ fontSize: '0.78rem' }}>Purchase Date *</label>
+                            <label style={{ fontSize: '0.78rem', fontWeight: 600 }}>Purchase Date *</label>
                             <input
                               type="date"
                               className="input-control"
@@ -1170,7 +1170,7 @@ export default function Purchases({ userProfile, branches, addToast }) {
                         </div>
 
                         {/* Large Name and Phone row */}
-                        <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr', gap: '0.75rem', alignItems: 'start' }}>
+                        <div className="purchase-supplier-new-details">
                           <div className="form-group" style={{ marginBottom: 0 }}>
                             <label style={{ fontSize: '0.78rem', fontWeight: 700 }}>Supplier Name *</label>
                             <input
@@ -1200,14 +1200,14 @@ export default function Purchases({ userProfile, branches, addToast }) {
 
                         {/* Address row */}
                         <div className="form-group" style={{ marginBottom: 0 }}>
-                          <label style={{ fontSize: '0.78rem' }}>Address</label>
+                          <label style={{ fontSize: '0.78rem', fontWeight: 600 }}>Address</label>
                           <input
                             type="text"
                             className="input-control"
                             placeholder="Enter supplier address (optional)"
                             value={newSupAddress}
                             onChange={(e) => setNewSupAddress(e.target.value)}
-                            style={{ height: '34px', minHeight: '34px', fontSize: '0.84rem' }}
+                            style={{ height: '36px', minHeight: '36px', fontSize: '0.84rem' }}
                           />
                         </div>
                       </div>
@@ -1228,7 +1228,7 @@ export default function Purchases({ userProfile, branches, addToast }) {
                         }}
                         onFocus={() => setShowSearchSuggestions(true)}
                         onBlur={() => setTimeout(() => setShowSearchSuggestions(false), 250)}
-                        style={{ height: '32px', minHeight: '32px', fontSize: '0.82rem', padding: '0.25rem 0.6rem' }}
+                        style={{ height: '36px', minHeight: '36px', fontSize: '0.85rem', padding: '0.3rem 0.65rem' }}
                       />
                       {productSearchQuery && (
                         <button
@@ -1238,7 +1238,7 @@ export default function Purchases({ userProfile, branches, addToast }) {
                             setProductSearchQuery('');
                             setShowSearchSuggestions(false);
                           }}
-                          style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem', height: '32px' }}
+                          style={{ padding: '0.3rem 0.6rem', fontSize: '0.8rem', height: '36px' }}
                         >
                           Clear
                         </button>
@@ -1247,7 +1247,7 @@ export default function Purchases({ userProfile, branches, addToast }) {
                         type="button"
                         className="btn btn-secondary btn-sm"
                         onClick={addItemToPurchase}
-                        style={{ whiteSpace: 'nowrap', padding: '0.25rem 0.6rem', fontSize: '0.78rem', height: '32px', fontWeight: 600 }}
+                        style={{ whiteSpace: 'nowrap', padding: '0.3rem 0.75rem', fontSize: '0.82rem', height: '36px', fontWeight: 700 }}
                       >
                         + Add Row
                       </button>
@@ -1263,7 +1263,7 @@ export default function Purchases({ userProfile, branches, addToast }) {
                         border: '1px solid var(--border-color)',
                         borderRadius: 'var(--border-radius-sm)',
                         boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)',
-                        maxHeight: '180px',
+                        maxHeight: '220px',
                         overflowY: 'auto',
                         zIndex: 999,
                         marginTop: '0.2rem'
@@ -1280,10 +1280,10 @@ export default function Purchases({ userProfile, branches, addToast }) {
                             <div
                               key={prod.id}
                               style={{
-                                padding: '0.4rem 0.65rem',
+                                padding: '0.5rem 0.75rem',
                                 cursor: 'pointer',
                                 borderBottom: '1px solid #f1f5f9',
-                                fontSize: '0.8rem',
+                                fontSize: '0.82rem',
                                 textAlign: 'left'
                               }}
                               onClick={() => {
@@ -1310,7 +1310,7 @@ export default function Purchases({ userProfile, branches, addToast }) {
                             p.sku.toLowerCase().includes(productSearchQuery.toLowerCase())
                           );
                         }).length === 0 && (
-                          <div style={{ padding: '0.5rem', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.8rem' }}>
+                          <div style={{ padding: '0.65rem', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.82rem' }}>
                             No matching products found.
                           </div>
                         )}
@@ -1318,8 +1318,8 @@ export default function Purchases({ userProfile, branches, addToast }) {
                     )}
                   </div>
 
-                  {/* Compact Items Table */}
-                  <div className="table-container" style={{ border: '1px solid var(--border-color)', borderRadius: '6px', maxHeight: '450px', overflowY: 'auto', width: '100%' }}>
+                  {/* Desktop Items Table */}
+                  <div className="hide-on-mobile table-container" style={{ border: '1px solid var(--border-color)', borderRadius: '6px', maxHeight: '450px', overflowY: 'auto', width: '100%' }}>
                     <table style={{ width: '100%', minWidth: '640px', fontSize: '0.82rem' }}>
                       <thead>
                         <tr>
@@ -1491,38 +1491,202 @@ export default function Purchases({ userProfile, branches, addToast }) {
                       </tbody>
                     </table>
                   </div>
+
+                  {/* Mobile Items Card View */}
+                  <div className="hide-on-desktop mobile-card-list">
+                    {purchaseItems.map((item, idx) => (
+                      <div key={idx} className="mobile-item-card">
+                        <div className="mobile-card-header">
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', flex: 1 }}>
+                            <span style={{ fontSize: '0.8rem', fontWeight: 800, color: '#0284c7' }}>#{idx + 1}</span>
+                            <div style={{ position: 'relative', flex: 1, display: 'flex', alignItems: 'center' }}>
+                              <input
+                                type="text"
+                                className="input-control"
+                                placeholder="Type or select product..."
+                                value={item.name || ''}
+                                readOnly={Boolean(item.productId)}
+                                onChange={(e) => {
+                                  if (item.productId) return;
+                                  const val = e.target.value;
+                                  const matched = catalogProducts.find(
+                                    (p) => p.name.toLowerCase() === val.toLowerCase() || p.sku?.toLowerCase() === val.toLowerCase()
+                                  );
+                                  if (matched) {
+                                    const bPrice = matched.branch_prices?.[selectedBranchId]?.purchase_price;
+                                    const effectiveCost = (bPrice !== null && bPrice !== undefined) ? bPrice : matched.purchase_price;
+                                    updateItemRow(idx, { productId: matched.id, code: matched.sku || matched.product_code || item.code || '', name: matched.name, costPrice: effectiveCost });
+                                  } else {
+                                    updateItemRow(idx, { productId: '', name: val });
+                                  }
+                                }}
+                                list={!item.productId ? `mob-pur-prods-${idx}` : undefined}
+                                required
+                                style={{
+                                  height: '36px',
+                                  minHeight: '36px',
+                                  width: '100%',
+                                  padding: '0.25rem 0.5rem',
+                                  paddingRight: item.productId ? '1.8rem' : '0.5rem',
+                                  fontSize: '0.88rem',
+                                  backgroundColor: item.productId ? '#f1f5f9' : '#ffffff',
+                                  cursor: item.productId ? 'not-allowed' : 'text',
+                                  fontWeight: item.productId ? 600 : 'normal',
+                                }}
+                              />
+                              {item.productId && (
+                                <button
+                                  type="button"
+                                  onClick={() => updateItemRow(idx, { productId: '', code: '', name: '', costPrice: 0 })}
+                                  title="Clear selection and enter unlisted item"
+                                  style={{
+                                    position: 'absolute',
+                                    right: '0.4rem',
+                                    background: 'none',
+                                    border: 'none',
+                                    color: 'var(--text-muted)',
+                                    cursor: 'pointer',
+                                    padding: '0.2rem',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                  }}
+                                >
+                                  <X size={15} />
+                                </button>
+                              )}
+                              {!item.productId && (
+                                <datalist id={`mob-pur-prods-${idx}`}>
+                                  {catalogProducts.map((p) => {
+                                    const bPrice = p.branch_prices?.[selectedBranchId]?.purchase_price;
+                                    const effectiveCost = (bPrice !== null && bPrice !== undefined) ? bPrice : p.purchase_price;
+                                    return (
+                                      <option key={p.id} value={p.name}>
+                                        {p.sku} (Cost: ৳{formatAmount(effectiveCost)})
+                                      </option>
+                                    );
+                                  })}
+                                </datalist>
+                              )}
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            className="btn btn-danger btn-sm btn-icon"
+                            style={{ border: 'none', background: '#fee2e2', color: 'var(--danger)', display: 'inline-flex', padding: '0.35rem', borderRadius: '6px', minWidth: '32px', height: '32px', alignItems: 'center', justifyContent: 'center' }}
+                            onClick={() => removeItemFromPurchase(idx)}
+                          >
+                            <Trash2 size={15} />
+                          </button>
+                        </div>
+
+                        <div className="mobile-card-row-2">
+                          <div className="form-group" style={{ marginBottom: 0 }}>
+                            <label className="mobile-card-label">Code / SKU (Opt)</label>
+                            <input
+                              type="text"
+                              className="input-control"
+                              placeholder="Code (optional)"
+                              value={item.code || ''}
+                              readOnly={Boolean(item.productId)}
+                              onChange={(e) => {
+                                if (item.productId) return;
+                                const val = e.target.value;
+                                const matched = catalogProducts.find(
+                                  (p) => p.sku?.toLowerCase() === val.toLowerCase() || p.product_code?.toLowerCase() === val.toLowerCase()
+                                );
+                                if (matched) {
+                                  const bPrice = matched.branch_prices?.[selectedBranchId]?.purchase_price;
+                                  const effectiveCost = (bPrice !== null && bPrice !== undefined) ? bPrice : matched.purchase_price;
+                                  updateItemRow(idx, { productId: matched.id, code: matched.sku || matched.product_code || val, name: matched.name, costPrice: effectiveCost });
+                                } else {
+                                  updateItemField(idx, 'code', val);
+                                }
+                              }}
+                              style={{
+                                height: '34px',
+                                minHeight: '34px',
+                                width: '100%',
+                                fontSize: '0.84rem',
+                                fontFamily: 'monospace',
+                                backgroundColor: item.productId ? '#f1f5f9' : '#ffffff',
+                              }}
+                            />
+                          </div>
+
+                          <div className="form-group" style={{ marginBottom: 0 }}>
+                            <label className="mobile-card-label">Quantity *</label>
+                            <input
+                              type="number"
+                              min="1"
+                              placeholder="Qty"
+                              className="input-control"
+                              value={item.quantity}
+                              onChange={(e) => updateItemField(idx, 'quantity', parseInt(e.target.value) || 1)}
+                              required
+                              style={{ height: '34px', minHeight: '34px', fontSize: '0.88rem', textAlign: 'center', fontWeight: 700 }}
+                            />
+                          </div>
+                        </div>
+
+                        <div className="mobile-card-row-pricing">
+                          <div className="form-group" style={{ marginBottom: 0 }}>
+                            <label className="mobile-card-label">Unit Cost (৳) *</label>
+                            <input
+                              type="number"
+                              step="0.01"
+                              min="0"
+                              placeholder="0.00"
+                              className="input-control"
+                              value={item.costPrice}
+                              onChange={(e) => updateItemField(idx, 'costPrice', parseFloat(e.target.value) || 0.00)}
+                              required
+                              style={{ height: '34px', minHeight: '34px', fontSize: '0.88rem', textAlign: 'right', fontWeight: 600 }}
+                            />
+                          </div>
+                          <div></div>
+                          <div className="mobile-card-total-display">
+                            <span className="mobile-card-label">Total Cost</span>
+                            <span className="mobile-card-total-value">
+                              ৳{formatAmount((parseFloat(item.costPrice) || 0) * (parseInt(item.quantity) || 0))}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 </div>
 
                 {/* Right Column: Bill Summary & Payment Settlement */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem', backgroundColor: '#f8fafc', padding: '0.75rem 0.85rem', borderRadius: '6px', border: '1px solid var(--border-color)' }}>
-                  <div style={{ fontWeight: 700, fontSize: '0.84rem', color: 'var(--text-primary)', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.35rem' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', backgroundColor: '#f8fafc', padding: '0.9rem 1rem', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
+                  <div style={{ fontWeight: 700, fontSize: '0.88rem', color: 'var(--text-primary)', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.45rem' }}>
                     Payment Summary
                   </div>
 
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.82rem' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.86rem' }}>
                     <span style={{ color: 'var(--text-secondary)' }}>Subtotal:</span>
                     <strong>৳{formatAmount(getSubtotal())}</strong>
                   </div>
 
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.82rem' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.86rem' }}>
                     <span style={{ color: 'var(--text-secondary)' }}>Discount:</span>
                     <input
                       type="number"
                       min="0"
                       className="input-control"
-                      style={{ width: '95px', height: '28px', minHeight: '28px', padding: '0.15rem 0.4rem', textAlign: 'right', fontSize: '0.8rem' }}
+                      style={{ width: '110px', height: '34px', minHeight: '34px', padding: '0.2rem 0.5rem', textAlign: 'right', fontSize: '0.86rem' }}
                       value={discount}
                       onChange={(e) => setDiscount(Math.max(0, parseFloat(e.target.value) || 0))}
                     />
                   </div>
 
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontWeight: 800, fontSize: '0.95rem', borderTop: '1px solid var(--border-color)', paddingTop: '0.4rem', color: 'var(--primary)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontWeight: 800, fontSize: '1.05rem', borderTop: '1px solid var(--border-color)', paddingTop: '0.5rem', color: 'var(--primary)' }}>
                     <span>Net Total:</span>
                     <span>৳{formatAmount(getGrandTotal())}</span>
                   </div>
 
                   <div className="form-group" style={{ marginBottom: 0, marginTop: '0.2rem' }}>
-                    <label style={{ fontSize: '0.75rem' }}>Paid Amount</label>
+                    <label style={{ fontSize: '0.8rem', fontWeight: 600 }}>Paid Amount</label>
                     <input
                       type="number"
                       step="0.01"
@@ -1532,18 +1696,18 @@ export default function Purchases({ userProfile, branches, addToast }) {
                       placeholder="0.00"
                       value={paidAmount}
                       onChange={(e) => setPaidAmount(e.target.value)}
-                      style={{ height: '30px', minHeight: '30px', fontSize: '0.82rem', padding: '0.2rem 0.5rem' }}
+                      style={{ height: '36px', minHeight: '36px', fontSize: '0.9rem', padding: '0.3rem 0.6rem', fontWeight: 700 }}
                     />
                   </div>
 
                   {parseFloat(paidAmount) > 0 && (
                     <div className="form-group" style={{ marginBottom: 0 }}>
-                      <label style={{ fontSize: '0.75rem' }}>Payment Method</label>
+                      <label style={{ fontSize: '0.8rem', fontWeight: 600 }}>Payment Method</label>
                       <select
                         className="input-control"
                         value={paymentMethod}
                         onChange={(e) => setPaymentMethod(e.target.value)}
-                        style={{ height: '30px', minHeight: '30px', fontSize: '0.82rem', padding: '0.2rem 0.5rem' }}
+                        style={{ height: '36px', minHeight: '36px', fontSize: '0.88rem', padding: '0.3rem 0.6rem' }}
                       >
                         <option value="cash">Cash</option>
                         <option value="bank">Bank</option>
@@ -1553,32 +1717,32 @@ export default function Purchases({ userProfile, branches, addToast }) {
                   )}
 
                   <div className="form-group" style={{ marginBottom: 0 }}>
-                    <label style={{ fontSize: '0.75rem' }}>Reference No</label>
+                    <label style={{ fontSize: '0.8rem', fontWeight: 600 }}>Reference No</label>
                     <input
                       type="text"
                       className="input-control"
                       placeholder="Check # or Trx ID (optional)"
                       value={referenceNumber}
                       onChange={(e) => setReferenceNumber(e.target.value)}
-                      style={{ height: '30px', minHeight: '30px', fontSize: '0.82rem', padding: '0.2rem 0.5rem' }}
+                      style={{ height: '36px', minHeight: '36px', fontSize: '0.88rem', padding: '0.3rem 0.6rem' }}
                     />
                   </div>
 
                   <div className="form-group" style={{ marginBottom: 0 }}>
-                    <label style={{ fontSize: '0.75rem' }}>Notes / Challan No</label>
+                    <label style={{ fontSize: '0.8rem', fontWeight: 600 }}>Notes / Challan No</label>
                     <input
                       type="text"
                       className="input-control"
                       placeholder="Notes or challan (optional)"
                       value={notes}
                       onChange={(e) => setNotes(e.target.value)}
-                      style={{ height: '30px', minHeight: '30px', fontSize: '0.82rem', padding: '0.2rem 0.5rem' }}
+                      style={{ height: '36px', minHeight: '36px', fontSize: '0.88rem', padding: '0.3rem 0.6rem' }}
                     />
                   </div>
                 </div>
               </div>
 
-              <div className="modal-footer" style={{ borderTop: '1px solid var(--border-color)', padding: '0.65rem 1.15rem', display: 'flex', justifyContent: 'flex-end', gap: '0.5rem', background: '#f8fafc' }}>
+              <div className="modal-footer" style={{ borderTop: '1px solid var(--border-color)', padding: '0.75rem 1.15rem', display: 'flex', justifyContent: 'flex-end', gap: '0.5rem', background: '#f8fafc' }}>
                 <button type="button" className="btn btn-secondary btn-sm" onClick={() => setShowPurchaseModal(false)}>Cancel</button>
                 <button
                   type="submit"
@@ -1843,14 +2007,14 @@ export default function Purchases({ userProfile, branches, addToast }) {
               </div>
             ) : (
               <form onSubmit={handleSaveEditPurchase} style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
-                <div className="modal-body" style={{ flex: 1, overflowY: 'auto', padding: '0.85rem 1.15rem', display: 'grid', gridTemplateColumns: '1.75fr 1fr', gap: '1rem' }}>
+                <div className="modal-body purchase-form-grid" style={{ flex: 1, overflowY: 'auto' }}>
                   {/* Left Column: Supplier & Items */}
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', minWidth: 0 }}>
                     {/* Supplier & Date Bar */}
-                    <div style={{ backgroundColor: '#f8fafc', padding: '0.75rem 0.9rem', borderRadius: '6px', border: '1px solid var(--border-color)' }}>
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 145px', gap: '0.75rem', alignItems: 'start' }}>
+                    <div className="purchase-supplier-bar">
+                      <div className="purchase-supplier-grid">
                         <div className="form-group" style={{ marginBottom: 0 }}>
-                          <label style={{ fontSize: '0.78rem' }}>Supplier *</label>
+                          <label style={{ fontSize: '0.8rem', fontWeight: 600 }}>Supplier *</label>
                           <select
                             className="input-control"
                             value={editSupplierId}
@@ -1868,7 +2032,7 @@ export default function Purchases({ userProfile, branches, addToast }) {
                         </div>
 
                         <div className="form-group" style={{ marginBottom: 0 }}>
-                          <label style={{ fontSize: '0.78rem' }}>Purchase Date *</label>
+                          <label style={{ fontSize: '0.8rem', fontWeight: 600 }}>Purchase Date *</label>
                           <input
                             type="date"
                             className="input-control"
@@ -1895,7 +2059,7 @@ export default function Purchases({ userProfile, branches, addToast }) {
                           }}
                           onFocus={() => setShowEditSearchSuggestions(true)}
                           onBlur={() => setTimeout(() => setShowEditSearchSuggestions(false), 250)}
-                          style={{ height: '32px', minHeight: '32px', fontSize: '0.82rem', padding: '0.25rem 0.6rem' }}
+                          style={{ height: '36px', minHeight: '36px', fontSize: '0.85rem', padding: '0.25rem 0.6rem' }}
                         />
                         {editSearchQuery && (
                           <button
@@ -1905,7 +2069,7 @@ export default function Purchases({ userProfile, branches, addToast }) {
                               setEditSearchQuery('');
                               setShowEditSearchSuggestions(false);
                             }}
-                            style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem', height: '32px' }}
+                            style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem', height: '36px' }}
                           >
                             Clear
                           </button>
@@ -1914,7 +2078,7 @@ export default function Purchases({ userProfile, branches, addToast }) {
                           type="button"
                           className="btn btn-secondary btn-sm"
                           onClick={addEditItemRow}
-                          style={{ whiteSpace: 'nowrap', padding: '0.25rem 0.6rem', fontSize: '0.78rem', height: '32px', fontWeight: 600 }}
+                          style={{ whiteSpace: 'nowrap', padding: '0.25rem 0.75rem', fontSize: '0.82rem', height: '36px', fontWeight: 600 }}
                         >
                           + Add Row
                         </button>
@@ -1985,8 +2149,8 @@ export default function Purchases({ userProfile, branches, addToast }) {
                       )}
                     </div>
 
-                    {/* Compact Items Table */}
-                    <div className="table-container" style={{ border: '1px solid var(--border-color)', borderRadius: '6px', maxHeight: '420px', overflowY: 'auto', width: '100%' }}>
+                    {/* Desktop Items Table */}
+                    <div className="table-container hide-on-mobile" style={{ border: '1px solid var(--border-color)', borderRadius: '6px', maxHeight: '420px', overflowY: 'auto', width: '100%' }}>
                       <table style={{ width: '100%', minWidth: '640px', fontSize: '0.82rem' }}>
                         <thead>
                           <tr>
@@ -2157,6 +2321,162 @@ export default function Purchases({ userProfile, branches, addToast }) {
                           ))}
                         </tbody>
                       </table>
+                    </div>
+
+                    {/* Mobile Items Card View */}
+                    <div className="hide-on-desktop mobile-card-list">
+                      {editPurchaseItems.map((item, idx) => (
+                        <div key={idx} className="mobile-item-card">
+                          <div className="mobile-card-header">
+                            <span className="mobile-card-badge">#{idx + 1}</span>
+                            <div style={{ flex: 1, minWidth: 0, fontWeight: 600, fontSize: '0.85rem' }}>
+                              {item.productId ? (
+                                <span style={{ color: 'var(--primary)' }}>{item.name}</span>
+                              ) : (
+                                <span>Custom / Unlisted Item</span>
+                              )}
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => removeEditItemRow(idx)}
+                              style={{ border: 'none', background: 'none', color: 'var(--danger)', cursor: 'pointer', padding: '0.2rem' }}
+                              title="Delete Item"
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          </div>
+
+                          <div className="mobile-card-row-2">
+                            <div className="form-group" style={{ marginBottom: 0 }}>
+                              <label style={{ fontSize: '0.72rem', color: 'var(--text-secondary)' }}>Code / SKU</label>
+                              <input
+                                type="text"
+                                className="input-control"
+                                placeholder="Code"
+                                value={item.code || ''}
+                                readOnly={Boolean(item.productId)}
+                                onChange={(e) => {
+                                  if (item.productId) return;
+                                  const val = e.target.value;
+                                  const matched = catalogProducts.find(
+                                    (p) => p.sku?.toLowerCase() === val.toLowerCase() || p.product_code?.toLowerCase() === val.toLowerCase()
+                                  );
+                                  if (matched) {
+                                    const bPrice = matched.branch_prices?.[editingPurchase.branch_id]?.purchase_price;
+                                    const effectiveCost = (bPrice !== null && bPrice !== undefined) ? bPrice : matched.purchase_price;
+                                    updateEditItemRow(idx, { productId: matched.id, code: matched.sku || matched.product_code || val, name: matched.name, costPrice: effectiveCost });
+                                  } else {
+                                    updateEditItemField(idx, 'code', val);
+                                  }
+                                }}
+                                style={{
+                                  height: '34px',
+                                  fontSize: '0.82rem',
+                                  backgroundColor: item.productId ? '#f1f5f9' : '#fff'
+                                }}
+                              />
+                            </div>
+
+                            <div className="form-group" style={{ marginBottom: 0 }}>
+                              <label style={{ fontSize: '0.72rem', color: 'var(--text-secondary)' }}>Product Name *</label>
+                              <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                                <input
+                                  type="text"
+                                  className="input-control"
+                                  placeholder="Product Name"
+                                  value={item.name || ''}
+                                  readOnly={Boolean(item.productId)}
+                                  onChange={(e) => {
+                                    if (item.productId) return;
+                                    const val = e.target.value;
+                                    const matched = catalogProducts.find(
+                                      (p) => p.name.toLowerCase() === val.toLowerCase() || p.sku?.toLowerCase() === val.toLowerCase()
+                                    );
+                                    if (matched) {
+                                      const bPrice = matched.branch_prices?.[editingPurchase.branch_id]?.purchase_price;
+                                      const effectiveCost = (bPrice !== null && bPrice !== undefined) ? bPrice : matched.purchase_price;
+                                      updateEditItemRow(idx, { productId: matched.id, code: matched.sku || matched.product_code || item.code || '', name: matched.name, costPrice: effectiveCost });
+                                    } else {
+                                      updateEditItemRow(idx, { productId: '', name: val });
+                                    }
+                                  }}
+                                  list={!item.productId ? `mob-edit-catalog-prods-${idx}` : undefined}
+                                  required
+                                  style={{
+                                    height: '34px',
+                                    fontSize: '0.82rem',
+                                    backgroundColor: item.productId ? '#f1f5f9' : '#fff',
+                                    paddingRight: item.productId ? '1.5rem' : '0.4rem'
+                                  }}
+                                />
+                                {item.productId && (
+                                  <button
+                                    type="button"
+                                    onClick={() => updateEditItemRow(idx, { productId: '', code: '', name: '', costPrice: 0 })}
+                                    style={{
+                                      position: 'absolute',
+                                      right: '0.3rem',
+                                      background: 'none',
+                                      border: 'none',
+                                      color: 'var(--text-muted)',
+                                      cursor: 'pointer'
+                                    }}
+                                  >
+                                    <X size={14} />
+                                  </button>
+                                )}
+                              </div>
+                              {!item.productId && (
+                                <datalist id={`mob-edit-catalog-prods-${idx}`}>
+                                  {catalogProducts.map((p) => {
+                                    const bPrice = p.branch_prices?.[editingPurchase.branch_id]?.purchase_price;
+                                    const effectiveCost = (bPrice !== null && bPrice !== undefined) ? bPrice : p.purchase_price;
+                                    return (
+                                      <option key={p.id} value={p.name}>
+                                        {p.sku} (Cost: ৳{formatAmount(effectiveCost)})
+                                      </option>
+                                    );
+                                  })}
+                                </datalist>
+                              )}
+                            </div>
+                          </div>
+
+                          <div className="mobile-card-row-pricing">
+                            <div className="form-group" style={{ marginBottom: 0 }}>
+                              <label style={{ fontSize: '0.72rem', color: 'var(--text-secondary)' }}>Quantity *</label>
+                              <input
+                                type="number"
+                                min="1"
+                                className="input-control"
+                                value={item.quantity}
+                                onChange={(e) => updateEditItemField(idx, 'quantity', parseInt(e.target.value) || 1)}
+                                required
+                                style={{ height: '34px', fontSize: '0.85rem', textAlign: 'center', fontWeight: 600 }}
+                              />
+                            </div>
+                            <div className="form-group" style={{ marginBottom: 0 }}>
+                              <label style={{ fontSize: '0.72rem', color: 'var(--text-secondary)' }}>Unit Cost (৳) *</label>
+                              <input
+                                type="number"
+                                step="0.01"
+                                min="0"
+                                className="input-control"
+                                value={item.costPrice}
+                                onChange={(e) => updateEditItemField(idx, 'costPrice', parseFloat(e.target.value) || 0.00)}
+                                required
+                                style={{ height: '34px', fontSize: '0.85rem', textAlign: 'right' }}
+                              />
+                            </div>
+                            <div style={{ textAlign: 'right' }}>
+                              <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)' }}>Line Total</div>
+                              <div style={{ fontWeight: 700, fontSize: '0.95rem', color: 'var(--primary)', marginTop: '0.2rem' }}>
+                                ৳{formatAmount((parseFloat(item.costPrice) || 0) * (parseInt(item.quantity) || 0))}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
                     </div>
                   </div>
 

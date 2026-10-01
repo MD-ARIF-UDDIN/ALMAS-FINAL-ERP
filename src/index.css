@@ -861,12 +861,229 @@ textarea.input-control {
   gap: 1.25rem;
 }
 
+.form-grid-responsive-3 {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.75rem;
+}
+
+.form-grid-responsive-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+}
+
+.purchase-supplier-bar {
+  background-color: #f8fafc;
+  padding: 0.75rem 0.9rem;
+  border-radius: 6px;
+  border: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.purchase-supplier-grid {
+  display: grid;
+  grid-template-columns: 140px 1fr 150px;
+  gap: 0.75rem;
+  align-items: start;
+}
+
+.purchase-supplier-grid-new {
+  display: grid;
+  grid-template-columns: 140px 150px;
+  gap: 0.75rem;
+  align-items: start;
+}
+
+.purchase-supplier-new-details {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr;
+  gap: 0.75rem;
+  align-items: start;
+}
+
+/* Visibility Switches */
+.hide-on-desktop {
+  display: none !important;
+}
+
+.hide-on-mobile {
+  display: block;
+}
+
+/* Mobile Item Cards for POS and Purchases */
+.mobile-card-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  max-height: 380px;
+  overflow-y: auto;
+  padding: 0.2rem 0.1rem;
+}
+
+.mobile-item-card {
+  background: #ffffff;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 0.75rem 0.85rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.mobile-item-card:focus-within {
+  border-color: #0284c7;
+  box-shadow: 0 0 0 2px rgba(2, 132, 199, 0.15);
+}
+
+.mobile-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 0.5rem;
+  border-bottom: 1px solid #f1f5f9;
+  padding-bottom: 0.45rem;
+}
+
+.mobile-card-title {
+  font-weight: 700;
+  font-size: 0.88rem;
+  color: var(--text-primary);
+  line-height: 1.3;
+}
+
+.mobile-card-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin-top: 0.15rem;
+}
+
+.mobile-card-row-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.5rem;
+}
+
+.mobile-card-row-pricing {
+  display: grid;
+  grid-template-columns: 1.1fr 1.1fr 1fr;
+  gap: 0.5rem;
+  align-items: flex-end;
+  background: #f8fafc;
+  padding: 0.5rem 0.65rem;
+  border-radius: 6px;
+  border: 1px solid #e2e8f0;
+}
+
+.mobile-card-label {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: 0.2rem;
+  display: block;
+}
+
+.mobile-card-total-display {
+  text-align: right;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.mobile-card-total-value {
+  font-family: 'Outfit', sans-serif;
+  font-weight: 800;
+  font-size: 1rem;
+  color: #0284c7;
+  white-space: nowrap;
+}
+
+.mobile-qty-stepper {
+  display: flex;
+  align-items: center;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: #ffffff;
+  overflow: hidden;
+  height: 34px;
+}
+
+.mobile-qty-stepper button {
+  width: 32px;
+  height: 100%;
+  border: none;
+  background: #f1f5f9;
+  font-weight: 700;
+  font-size: 1rem;
+  cursor: pointer;
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s;
+}
+
+.mobile-qty-stepper button:hover {
+  background: #e2e8f0;
+}
+
+.mobile-qty-stepper input {
+  flex: 1;
+  min-width: 35px;
+  height: 100%;
+  border: none;
+  text-align: center;
+  font-weight: 700;
+  font-size: 0.9rem;
+  padding: 0;
+  outline: none;
+}
+
 @media (max-width: 1024px) {
   .pos-layout {
     grid-template-columns: 1fr;
   }
   .purchase-form-grid {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 768px) {
+  .hide-on-desktop {
+    display: flex !important;
+  }
+  .hide-on-mobile {
+    display: none !important;
+  }
+  .form-grid-responsive-3 {
+    grid-template-columns: 1fr !important;
+    gap: 0.65rem !important;
+  }
+  .form-grid-responsive-2 {
+    grid-template-columns: 1fr !important;
+    gap: 0.65rem !important;
+  }
+  .purchase-supplier-grid {
+    grid-template-columns: 1fr 1fr !important;
+    gap: 0.5rem !important;
+  }
+  .purchase-supplier-grid > .supplier-select-cell {
+    grid-column: 1 / -1 !important;
+  }
+  .purchase-supplier-grid-new {
+    grid-template-columns: 1fr 1fr !important;
+    gap: 0.5rem !important;
+  }
+  .purchase-supplier-new-details {
+    grid-template-columns: 1fr !important;
+    gap: 0.5rem !important;
   }
 }
 
