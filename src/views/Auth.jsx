@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { supabase } from '../supabaseClient';
-import { Phone, Eye, EyeOff, ArrowRight, Lock } from 'lucide-react';
-import logo from '../assets/logo.svg';
+import { Phone, Eye, EyeOff, ArrowRight, Lock, ShieldCheck } from 'lucide-react';
+import logo from '../assets/almas_logo.jpg';
 
 export default function Auth({ onAuthSuccess }) {
   const [phone, setPhone] = useState('');
@@ -66,21 +66,19 @@ export default function Auth({ onAuthSuccess }) {
 
   return (
     <div className="auth-canvas">
-      {/* Dynamic Animated Ambient Glow Orbs */}
-      <div className="glow-orb glow-orb-1" />
-      <div className="glow-orb glow-orb-2" />
-      <div className="glow-orb glow-orb-3" />
+      {/* Refined Ambient Glow */}
+      <div className="auth-ambient-glow" />
 
-      {/* Subtle Geometric Thread Mesh Grid */}
-      <div className="auth-grid-overlay" />
+      {/* Grid Pattern */}
+      <div className="auth-grid-pattern" />
 
-      {/* Main Glassmorphic Login Container */}
+      {/* Card Wrapper */}
       <div className="auth-card-wrapper">
         <div className="auth-card">
           {/* Brand Header */}
           <div className="auth-brand-header">
-            <div className="brand-badge-container">
-              <img src={logo} alt="Almas ERP" className="brand-logo-img" />
+            <div className="brand-logo-container">
+              <img src={logo} alt="Almas Accessories Logo" className="brand-logo-img" />
             </div>
             <h1 className="auth-brand-title">ALMAS ACCESSORIES</h1>
             <p className="auth-brand-subtitle">Enterprise Resource Planning</p>
@@ -93,25 +91,25 @@ export default function Auth({ onAuthSuccess }) {
             </div>
           )}
 
-          {/* Form */}
+          {/* Login Form */}
           <form onSubmit={handleLogin} className="auth-form">
             {/* Phone Number Field */}
             <div className="auth-input-group">
               <label htmlFor="auth-phone" className="auth-label">
-                Phone Number
+                Phone Number / Email
               </label>
               <div className={`auth-input-wrapper ${focusedField === 'phone' ? 'focused' : ''}`}>
                 <Phone size={17} className="auth-input-icon" />
                 <input
                   id="auth-phone"
-                  type="tel"
-                  placeholder="Enter phone number (e.g. 01825334505)"
+                  type="text"
+                  placeholder="e.g. 01825334505"
                   value={phone}
                   onChange={(e) => setPhone(e.target.value)}
                   onFocus={() => setFocusedField('phone')}
                   onBlur={() => setFocusedField('')}
                   required
-                  autoComplete="tel"
+                  autoComplete="username"
                   className="auth-input"
                 />
               </div>
@@ -127,7 +125,7 @@ export default function Auth({ onAuthSuccess }) {
                 <input
                   id="auth-password"
                   type={showPassword ? 'text' : 'password'}
-                  placeholder="••••••••••••"
+                  placeholder="Enter your password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   onFocus={() => setFocusedField('password')}
@@ -141,6 +139,7 @@ export default function Auth({ onAuthSuccess }) {
                   onClick={() => setShowPassword(!showPassword)}
                   className="auth-eye-btn"
                   tabIndex="-1"
+                  title={showPassword ? 'Hide password' : 'Show password'}
                 >
                   {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
                 </button>
@@ -157,12 +156,18 @@ export default function Auth({ onAuthSuccess }) {
                 <div className="auth-spinner" />
               ) : (
                 <>
-                  <span>Sign In</span>
+                  <span>Sign In to Dashboard</span>
                   <ArrowRight size={17} className="auth-btn-arrow" />
                 </>
               )}
             </button>
           </form>
+
+          {/* Secure Portal Footer */}
+          <div className="auth-footer-badge">
+            <ShieldCheck size={14} />
+            <span>Secure Authorized Portal</span>
+          </div>
         </div>
       </div>
 
@@ -174,92 +179,51 @@ export default function Auth({ onAuthSuccess }) {
           display: flex;
           align-items: center;
           justify-content: center;
-          background-color: #090d16;
+          background-color: #0b0f19;
           background-image: 
-            radial-gradient(at 15% 20%, rgba(30, 58, 138, 0.45) 0px, transparent 50%),
-            radial-gradient(at 85% 80%, rgba(13, 148, 136, 0.35) 0px, transparent 50%),
-            radial-gradient(at 50% 50%, rgba(15, 23, 42, 0.9) 0px, transparent 100%);
+            radial-gradient(circle at 50% 0%, rgba(30, 58, 138, 0.28) 0%, transparent 60%),
+            radial-gradient(circle at 50% 100%, rgba(15, 23, 42, 0.8) 0%, transparent 80%);
           overflow: hidden;
           padding: 1.5rem;
           font-family: 'Outfit', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
         }
 
-        /* Ambient Glowing Spheres */
-        .glow-orb {
+        .auth-ambient-glow {
           position: absolute;
+          width: 550px;
+          height: 550px;
           border-radius: 50%;
-          filter: blur(80px);
+          background: radial-gradient(circle, rgba(14, 165, 233, 0.12) 0%, rgba(37, 99, 235, 0.05) 50%, transparent 70%);
+          top: 50%;
+          left: 50%;
+          transform: translate(-50%, -50%);
+          filter: blur(50px);
           pointer-events: none;
-          opacity: 0.6;
-          animation: floatOrb 18s ease-in-out infinite alternate;
         }
 
-        .glow-orb-1 {
-          width: 380px;
-          height: 380px;
-          background: linear-gradient(135deg, #2563eb, #38bdf8);
-          top: -80px;
-          left: 10%;
-          animation-duration: 20s;
-        }
-
-        .glow-orb-2 {
-          width: 420px;
-          height: 420px;
-          background: linear-gradient(135deg, #059669, #10b981);
-          bottom: -100px;
-          right: 8%;
-          animation-duration: 24s;
-          animation-delay: -5s;
-        }
-
-        .glow-orb-3 {
-          width: 260px;
-          height: 260px;
-          background: linear-gradient(135deg, #6366f1, #8b5cf6);
-          top: 40%;
-          right: 25%;
-          animation-duration: 16s;
-          animation-delay: -10s;
-        }
-
-        @keyframes floatOrb {
-          0% {
-            transform: translate(0, 0) scale(1);
-          }
-          50% {
-            transform: translate(35px, 45px) scale(1.1);
-          }
-          100% {
-            transform: translate(-30px, -25px) scale(0.95);
-          }
-        }
-
-        /* Subtle Grid Mesh Overlay */
-        .auth-grid-overlay {
+        .auth-grid-pattern {
           position: absolute;
           inset: 0;
           background-image: 
-            linear-gradient(to right, rgba(255, 255, 255, 0.03) 1px, transparent 1px),
-            linear-gradient(to bottom, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
-          background-size: 40px 40px;
-          mask-image: radial-gradient(ellipse at center, black 40%, transparent 80%);
+            linear-gradient(to right, rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+            linear-gradient(to bottom, rgba(255, 255, 255, 0.035) 1px, transparent 1px);
+          background-size: 32px 32px;
+          mask-image: radial-gradient(ellipse at center, black 40%, transparent 75%);
           pointer-events: none;
         }
 
-        /* Glassmorphic Container */
         .auth-card-wrapper {
           position: relative;
           z-index: 10;
           width: 100%;
-          max-width: 440px;
-          animation: cardEntrance 0.7s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+          max-width: 420px;
+          animation: cardFadeIn 0.5s ease-out forwards;
         }
 
-        @keyframes cardEntrance {
+        @keyframes cardFadeIn {
           0% {
             opacity: 0;
-            transform: translateY(24px) scale(0.98);
+            transform: translateY(16px) scale(0.99);
           }
           100% {
             opacity: 1;
@@ -268,16 +232,16 @@ export default function Auth({ onAuthSuccess }) {
         }
 
         .auth-card {
-          background: rgba(15, 23, 42, 0.75);
-          backdrop-filter: blur(20px);
-          -webkit-backdrop-filter: blur(20px);
-          border: 1px solid rgba(255, 255, 255, 0.12);
-          border-radius: 20px;
-          padding: 2.75rem 2.25rem;
+          background: rgba(15, 23, 42, 0.82);
+          backdrop-filter: blur(16px);
+          -webkit-backdrop-filter: blur(16px);
+          border: 1px solid rgba(255, 255, 255, 0.1);
+          border-radius: 18px;
+          padding: 2.5rem 2.2rem;
           box-shadow: 
-            0 20px 40px -15px rgba(0, 0, 0, 0.7),
-            0 0 0 1px rgba(255, 255, 255, 0.06),
-            inset 0 1px 0 rgba(255, 255, 255, 0.15);
+            0 20px 45px -10px rgba(0, 0, 0, 0.6),
+            0 0 0 1px rgba(255, 255, 255, 0.04),
+            inset 0 1px 0 rgba(255, 255, 255, 0.12);
           display: flex;
           flex-direction: column;
         }
@@ -286,111 +250,99 @@ export default function Auth({ onAuthSuccess }) {
           display: flex;
           flex-direction: column;
           align-items: center;
-          margin-bottom: 2rem;
+          margin-bottom: 1.85rem;
           text-align: center;
         }
 
-        .brand-badge-container {
-          width: 64px;
-          height: 64px;
-          border-radius: 16px;
-          background: linear-gradient(135deg, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.04));
-          border: 1px solid rgba(255, 255, 255, 0.2);
+        .brand-logo-container {
+          width: 68px;
+          height: 68px;
+          border-radius: 14px;
+          background: #ffffff;
+          padding: 6px;
           display: flex;
           align-items: center;
           justify-content: center;
-          margin-bottom: 1.1rem;
-          box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4), inset 0 1px 1px rgba(255, 255, 255, 0.3);
-          transition: transform 0.3s ease;
-        }
-
-        .brand-badge-container:hover {
-          transform: translateY(-2px) scale(1.04);
+          margin-bottom: 1rem;
+          box-shadow: 0 8px 20px rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(255, 255, 255, 0.15);
+          overflow: hidden;
         }
 
         .brand-logo-img {
-          width: 40px;
-          height: 40px;
-          filter: drop-shadow(0 2px 6px rgba(0,0,0,0.3));
+          width: 100%;
+          height: 100%;
+          object-fit: contain;
+          border-radius: 8px;
         }
 
         .auth-brand-title {
           margin: 0;
-          font-size: 1.55rem;
+          font-size: 1.45rem;
           font-weight: 800;
           letter-spacing: 0.5px;
-          background: linear-gradient(135deg, #ffffff 30%, #94a3b8 100%);
-          -webkit-background-clip: text;
-          -webkit-text-fill-color: transparent;
+          color: #f8fafc;
         }
 
         .auth-brand-subtitle {
-          margin: 0.4rem 0 0 0;
-          font-size: 0.82rem;
+          margin: 0.35rem 0 0 0;
+          font-size: 0.8rem;
           color: #94a3b8;
           font-weight: 500;
           letter-spacing: 0.2px;
         }
 
         .auth-error-banner {
-          background: rgba(220, 38, 38, 0.15);
-          border: 1px solid rgba(239, 68, 68, 0.35);
+          background: rgba(220, 38, 38, 0.12);
+          border: 1px solid rgba(239, 68, 68, 0.3);
           color: #fca5a5;
-          padding: 0.75rem 1rem;
-          border-radius: 10px;
-          font-size: 0.82rem;
+          padding: 0.65rem 0.9rem;
+          border-radius: 8px;
+          font-size: 0.8rem;
           font-weight: 500;
-          margin-bottom: 1.35rem;
-          animation: shake 0.4s ease;
-        }
-
-        @keyframes shake {
-          0%, 100% { transform: translateX(0); }
-          25% { transform: translateX(-4px); }
-          75% { transform: translateX(4px); }
+          margin-bottom: 1.25rem;
+          text-align: center;
         }
 
         .auth-form {
           display: flex;
           flex-direction: column;
-          gap: 1.25rem;
+          gap: 1.15rem;
         }
 
         .auth-input-group {
           display: flex;
           flex-direction: column;
-          gap: 0.45rem;
+          gap: 0.4rem;
         }
 
         .auth-label {
-          font-size: 0.8rem;
+          font-size: 0.78rem;
           font-weight: 600;
           color: #cbd5e1;
-          letter-spacing: 0.2px;
         }
 
         .auth-input-wrapper {
           position: relative;
           display: flex;
           align-items: center;
-          background: rgba(2, 6, 23, 0.65);
-          border: 1.5px solid rgba(255, 255, 255, 0.1);
-          border-radius: 10px;
-          transition: all 0.25s ease;
+          background: rgba(2, 6, 23, 0.6);
+          border: 1px solid rgba(255, 255, 255, 0.12);
+          border-radius: 8px;
+          transition: all 0.2s ease;
         }
 
         .auth-input-wrapper.focused {
           border-color: #38bdf8;
-          background: rgba(2, 6, 23, 0.85);
-          box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.18), 0 4px 12px rgba(0, 0, 0, 0.25);
+          background: rgba(2, 6, 23, 0.8);
+          box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.15);
         }
 
         .auth-input-icon {
           position: absolute;
-          left: 0.95rem;
+          left: 0.9rem;
           color: #64748b;
           pointer-events: none;
-          transition: color 0.25s ease;
+          transition: color 0.2s ease;
         }
 
         .auth-input-wrapper.focused .auth-input-icon {
@@ -401,26 +353,26 @@ export default function Auth({ onAuthSuccess }) {
           width: 100%;
           background: transparent;
           border: none;
-          padding: 0.78rem 2.8rem 0.78rem 2.8rem;
-          color: #ffffff;
-          font-size: 0.9rem;
+          padding: 0.72rem 2.6rem 0.72rem 2.6rem;
+          color: #f8fafc;
+          font-size: 0.88rem;
           outline: none;
           font-family: inherit;
         }
 
         .auth-input::placeholder {
           color: #475569;
-          font-size: 0.85rem;
+          font-size: 0.82rem;
         }
 
         .auth-eye-btn {
           position: absolute;
-          right: 0.85rem;
+          right: 0.75rem;
           background: transparent;
           border: none;
           color: #64748b;
           cursor: pointer;
-          padding: 0.3rem;
+          padding: 0.25rem;
           display: flex;
           align-items: center;
           justify-content: center;
@@ -432,30 +384,29 @@ export default function Auth({ onAuthSuccess }) {
         }
 
         .auth-submit-btn {
-          margin-top: 0.5rem;
-          position: relative;
+          margin-top: 0.35rem;
           width: 100%;
-          padding: 0.85rem 1.25rem;
-          border-radius: 10px;
+          padding: 0.78rem 1.2rem;
+          border-radius: 8px;
           border: none;
           background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%);
           color: #ffffff;
-          font-size: 0.92rem;
-          font-weight: 700;
-          letter-spacing: 0.3px;
+          font-size: 0.9rem;
+          font-weight: 600;
+          letter-spacing: 0.2px;
           cursor: pointer;
           display: flex;
           align-items: center;
           justify-content: center;
-          gap: 0.6rem;
-          box-shadow: 0 4px 14px rgba(2, 132, 199, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.25);
-          transition: all 0.25s ease;
+          gap: 0.5rem;
+          box-shadow: 0 4px 12px rgba(2, 132, 199, 0.3);
+          transition: all 0.2s ease;
         }
 
         .auth-submit-btn:hover:not(:disabled) {
           background: linear-gradient(135deg, #0369a1 0%, #075985 100%);
-          transform: translateY(-1.5px);
-          box-shadow: 0 6px 20px rgba(2, 132, 199, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.35);
+          box-shadow: 0 6px 16px rgba(2, 132, 199, 0.4);
+          transform: translateY(-1px);
         }
 
         .auth-submit-btn:active:not(:disabled) {
@@ -476,12 +427,23 @@ export default function Auth({ onAuthSuccess }) {
         }
 
         .auth-spinner {
-          width: 20px;
-          height: 20px;
-          border: 2.5px solid rgba(255, 255, 255, 0.3);
+          width: 18px;
+          height: 18px;
+          border: 2px solid rgba(255, 255, 255, 0.3);
           border-top-color: #ffffff;
           border-radius: 50%;
           animation: spin 0.8s linear infinite;
+        }
+
+        .auth-footer-badge {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 0.4rem;
+          margin-top: 1.6rem;
+          color: #64748b;
+          font-size: 0.74rem;
+          font-weight: 500;
         }
 
         @keyframes spin {

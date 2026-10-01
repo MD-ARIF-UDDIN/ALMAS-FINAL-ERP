@@ -305,6 +305,7 @@ export default function Returns({ userProfile, branches, addToast }) {
           invoice_number,
           sale_date,
           total_amount,
+          discount,
           net_amount,
           paid_amount,
           payment_status,
@@ -451,11 +452,18 @@ export default function Returns({ userProfile, branches, addToast }) {
   };
 
   // Calculations
-  const totalReturnCredit = returnItems.reduce((sum, it) => {
+  const grossReturnTotal = returnItems.reduce((sum, it) => {
     const retQty = parseInt(it.returnQty || 0, 10);
     const price = parseFloat(it.unit_price || 0);
     return sum + retQty * price;
   }, 0);
+
+  // Proportional invoice discount deduction
+  const invoiceGross = selectedInvoice ? (parseFloat(selectedInvoice.total_amount) || parseFloat(selectedInvoice.net_amount) || 0) : 0;
+  const invoiceDiscount = selectedInvoice ? (parseFloat(selectedInvoice.discount) || Math.max(0, invoiceGross - (parseFloat(selectedInvoice.net_amount) || 0))) : 0;
+  const discountRatio = invoiceGross > 0 ? (invoiceDiscount / invoiceGross) : 0;
+  const returnDiscountDeduction = grossReturnTotal * discountRatio;
+  const totalReturnCredit = Math.max(0, grossReturnTotal - returnDiscountDeduction);
 
   const totalExchangeValue = exchangeCart.reduce((sum, it) => {
     const qty = parseFloat(it.quantity || 0);
@@ -563,40 +571,51 @@ export default function Returns({ userProfile, branches, addToast }) {
       }
 
       // 3. Financial update
+      const originalGross = parseFloat(selectedInvoice.total_amount || selectedInvoice.net_amount || 0);
+      const originalDiscount = parseFloat(selectedInvoice.discount || 0);
       const originalNet = parseFloat(selectedInvoice.net_amount || 0);
       const originalPaid = parseFloat(selectedInvoice.paid_amount || 0);
       const currentDue = Math.max(0, originalNet - originalPaid);
 
       if (resolutionMode === 'refund') {
-        let newTotal = Math.max(0, (parseFloat(selectedInvoice.total_amount) || originalNet) - totalReturnCredit);
+        let newTotal = Math.max(0, originalGross - grossReturnTotal);
+        let newDiscount = Math.max(0, originalDiscount - returnDiscountDeduction);
         let newNet = Math.max(0, originalNet - totalReturnCredit);
         let newPaid = originalPaid;
         let newStatus = selectedInvoice.payment_status;
 
-        if (refundMethod === 'deduct_due') {
-          const newDue = Math.max(0, currentDue - totalReturnCredit);
-          newStatus = newDue <= 0.01 ? 'paid' : 'partial';
-        } else {
-          await supabase.from('cash_ledger').insert([{
-            branch_id: targetBranchId,
-            amount_in: 0,
-            amount_out: totalReturnCredit,
-            reference_id: selectedInvoice.id,
-            description: `Sales Return Refund [${voucherNumber}]: Inv #${selectedInvoice.invoice_number || selectedInvoice.id.substring(0, 8)} (${refundMethod})`,
-            transaction_date: timestamp,
-            created_by: userProfile?.id,
-          }]);
+        const dueCleared = Math.min(currentDue, totalReturnCredit);
+        const remainingDue = Math.max(0, currentDue - dueCleared);
+        const payableCashRefund = Math.min(originalPaid, Math.max(0, totalReturnCredit - dueCleared));
 
-          newPaid = Math.max(0, originalPaid - totalReturnCredit);
+        if (refundMethod === 'deduct_due') {
+          newPaid = originalPaid;
+          const newDue = Math.max(0, newNet - newPaid);
+          newStatus = newDue <= 0.01 ? 'paid' : (newPaid > 0 ? 'partial' : 'unpaid');
+        } else {
+          if (payableCashRefund > 0) {
+            await supabase.from('cash_ledger').insert([{
+              branch_id: targetBranchId,
+              amount_in: 0,
+              amount_out: payableCashRefund,
+              reference_id: selectedInvoice.id,
+              description: `Sales Return Refund [${voucherNumber}]: Inv #${selectedInvoice.invoice_number || selectedInvoice.id.substring(0, 8)} (${refundMethod})`,
+              transaction_date: timestamp,
+              created_by: userProfile?.id,
+            }]);
+          }
+
+          newPaid = Math.max(0, originalPaid - payableCashRefund);
           const newDue = Math.max(0, newNet - newPaid);
           newStatus = newDue <= 0.01 ? 'paid' : (newPaid > 0 ? 'partial' : 'unpaid');
         }
 
-        const noteEntry = `[${voucherNumber}: Return credit ৳${formatAmount(totalReturnCredit)} (${refundMethod}) - ${returnReason}]`;
+        const noteEntry = `[${voucherNumber}: Return gross ৳${formatAmount(grossReturnTotal)}, less discount ৳${formatAmount(returnDiscountDeduction)} = refund credit ৳${formatAmount(totalReturnCredit)} (${refundMethod}) - ${returnReason}]`;
         const updatedNotes = selectedInvoice.notes ? `${selectedInvoice.notes}\n${noteEntry}` : noteEntry;
 
         await supabase.from('sales').update({
           total_amount: newTotal,
+          discount: newDiscount,
           net_amount: newNet,
           paid_amount: newPaid,
           payment_status: newStatus,
@@ -629,7 +648,8 @@ export default function Returns({ userProfile, branches, addToast }) {
           }
         }
 
-        let newTotal = Math.max(0, (parseFloat(selectedInvoice.total_amount) || originalNet) - totalReturnCredit + totalExchangeValue);
+        let newTotal = Math.max(0, originalGross - grossReturnTotal + totalExchangeValue);
+        let newDiscount = Math.max(0, originalDiscount - returnDiscountDeduction);
         let newNet = Math.max(0, originalNet + exchangeDifference);
         let newPaid = originalPaid;
 
@@ -644,11 +664,12 @@ export default function Returns({ userProfile, branches, addToast }) {
         const newDue = Math.max(0, newNet - newPaid);
         const newStatus = newDue <= 0.01 ? 'paid' : (newPaid > 0 ? 'partial' : 'unpaid');
 
-        const noteEntry = `[${voucherNumber}: Exchange - Returned ৳${formatAmount(totalReturnCredit)}, Taken ৳${formatAmount(totalExchangeValue)}, Net: ৳${formatAmount(exchangeDifference)}]`;
+        const noteEntry = `[${voucherNumber}: Exchange - Returned gross ৳${formatAmount(grossReturnTotal)}, less discount ৳${formatAmount(returnDiscountDeduction)} = credit ৳${formatAmount(totalReturnCredit)}, Replacement ৳${formatAmount(totalExchangeValue)}, Net: ৳${formatAmount(exchangeDifference)}]`;
         const updatedNotes = selectedInvoice.notes ? `${selectedInvoice.notes}\n${noteEntry}` : noteEntry;
 
         await supabase.from('sales').update({
           total_amount: newTotal,
+          discount: newDiscount,
           net_amount: newNet,
           paid_amount: newPaid,
           payment_status: newStatus,
@@ -665,6 +686,8 @@ export default function Returns({ userProfile, branches, addToast }) {
         branch: branches.find((b) => b.id === targetBranchId),
         returnedItems: itemsToReturn,
         exchangeItems: resolutionMode === 'exchange' ? exchangeCart : [],
+        grossReturnTotal,
+        returnDiscountDeduction,
         totalReturnCredit,
         totalExchangeValue,
         exchangeDifference,
@@ -1191,8 +1214,18 @@ export default function Returns({ userProfile, branches, addToast }) {
                         </tbody>
                       </table>
                     )}
-                    <div style={{ textAlign: 'right', fontWeight: 800, fontSize: '0.88rem', color: '#c2410c', marginTop: '0.4rem' }}>
-                      Return Credit: ৳{formatAmount(totalReturnCredit)}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem', alignItems: 'flex-end', marginTop: '0.5rem', fontSize: '0.82rem' }}>
+                      <div style={{ color: 'var(--text-secondary)' }}>
+                        Gross Items Value: <strong>৳{formatAmount(grossReturnTotal)}</strong>
+                      </div>
+                      {returnDiscountDeduction > 0 && (
+                        <div style={{ color: '#dc2626', fontWeight: 600 }}>
+                          Less Invoice Discount ({(discountRatio * 100).toFixed(1)}%): <strong>-৳{formatAmount(returnDiscountDeduction)}</strong>
+                        </div>
+                      )}
+                      <div style={{ fontWeight: 800, fontSize: '0.92rem', color: '#c2410c', marginTop: '0.1rem' }}>
+                        Net Return Credit: ৳{formatAmount(totalReturnCredit)}
+                      </div>
                     </div>
                   </div>
 
@@ -1483,8 +1516,20 @@ export default function Returns({ userProfile, branches, addToast }) {
 
                 {/* Summary */}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', width: '280px', alignSelf: 'flex-end', marginTop: '1rem' }}>
+                  {activeVoucher.returnDiscountDeduction > 0 ? (
+                    <>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', color: '#555' }}>
+                        <span>Gross Items Value:</span>
+                        <span>৳{formatAmount(activeVoucher.grossReturnTotal || (activeVoucher.totalReturnCredit + activeVoucher.returnDiscountDeduction))}</span>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', color: '#dc2626' }}>
+                        <span>Less Invoice Discount:</span>
+                        <span>-৳{formatAmount(activeVoucher.returnDiscountDeduction)}</span>
+                      </div>
+                    </>
+                  ) : null}
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.88rem' }}>
-                    <span>Return Value:</span>
+                    <span>{activeVoucher.returnDiscountDeduction > 0 ? 'Net Return Credit:' : 'Return Value:'}</span>
                     <strong>৳{formatAmount(activeVoucher.totalReturnCredit)}</strong>
                   </div>
                   {activeVoucher.type === 'exchange' && (

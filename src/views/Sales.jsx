@@ -1741,17 +1741,22 @@ export default function Sales({ userProfile, branches, addToast }) {
     setIsSubmittingReturn(true);
     try {
       const sale = selectedSaleForReturn;
+      const originalGross = parseFloat(sale.total_amount) || parseFloat(sale.net_amount) || 0;
+      const originalDiscount = parseFloat(sale.discount) || Math.max(0, originalGross - (parseFloat(sale.net_amount) || 0));
+      const discountRatio = originalGross > 0 ? (originalDiscount / originalGross) : 0;
       const originalNet = parseFloat(sale.net_amount || 0);
       const originalPaid = parseFloat(sale.paid_amount || 0);
       const currentDue = Math.max(0, originalNet - originalPaid);
       const isExchange = returnType === 'exchange';
 
-      // Calculate return goods credit
-      const totalReturnCredit = itemsToReturn.reduce((sum, it) => {
+      // Calculate return goods gross & net credit with proportional invoice discount deduction
+      const grossReturnTotal = itemsToReturn.reduce((sum, it) => {
         const unitP = parseFloat(it.unit_price) || 0;
         const q = parseInt(it.returnQty);
         return sum + (unitP * q);
       }, 0);
+      const returnDiscountDeduction = grossReturnTotal * discountRatio;
+      const totalReturnCredit = Math.max(0, grossReturnTotal - returnDiscountDeduction);
 
       // Calculate replacement goods value
       const totalExchangeValue = isExchange
@@ -1840,34 +1845,44 @@ export default function Sales({ userProfile, branches, addToast }) {
       }
 
       // 3. Financial settlement
+      const newGross = Math.max(0, originalGross - grossReturnTotal);
+      const newDiscount = Math.max(0, originalDiscount - returnDiscountDeduction);
       let newNet = originalNet;
       let newPaid = originalPaid;
       let newStatus = sale.payment_status;
+
+      const dueCleared = Math.min(currentDue, totalReturnCredit);
+      const remainingDue = Math.max(0, currentDue - dueCleared);
+      const payableCashRefund = Math.min(originalPaid, Math.max(0, totalReturnCredit - dueCleared));
 
       if (!isExchange) {
         // Pure Refund
         newNet = Math.max(0, originalNet - totalReturnCredit);
         if (refundMethod === 'deduct_due') {
-          const newDue = Math.max(0, currentDue - totalReturnCredit);
-          newStatus = newDue <= 0.01 ? 'paid' : 'partial';
+          newPaid = originalPaid;
+          const newDue = Math.max(0, newNet - newPaid);
+          newStatus = newDue <= 0.01 ? 'paid' : (newPaid > 0 ? 'partial' : 'unpaid');
         } else {
-          // Cash payout to customer
-          await supabase.from('cash_ledger').insert([{
-            branch_id: targetBranchId,
-            amount_in: 0,
-            amount_out: totalReturnCredit,
-            reference_id: sale.id,
-            description: `Sales Return Refund [${creditNoteNumber}]: Inv #${sale.invoice_number || sale.id.substring(0, 8)} to ${sale.contacts?.name || 'Customer'} (${refundMethod})`,
-            transaction_date: new Date().toISOString(),
-            created_by: userProfile.id,
-          }]);
+          // Cash payout to customer (only the net excess after clearing unpaid due)
+          if (payableCashRefund > 0) {
+            await supabase.from('cash_ledger').insert([{
+              branch_id: targetBranchId,
+              amount_in: 0,
+              amount_out: payableCashRefund,
+              reference_id: sale.id,
+              description: `Sales Return Refund [${creditNoteNumber}]: Inv #${sale.invoice_number || sale.id.substring(0, 8)} to ${sale.contacts?.name || 'Customer'} (${refundMethod})`,
+              transaction_date: new Date().toISOString(),
+              created_by: userProfile.id,
+            }]);
+          }
 
-          newPaid = Math.max(0, originalPaid - totalReturnCredit);
+          newPaid = Math.max(0, originalPaid - payableCashRefund);
           const newDue = Math.max(0, newNet - newPaid);
           newStatus = newDue <= 0.01 ? 'paid' : (newPaid > 0 ? 'partial' : 'unpaid');
         }
       } else {
         // Product Exchange Settlement
+        newNet = Math.max(0, originalNet - totalReturnCredit + totalExchangeValue);
         if (exchangeDifference > 0) {
           // Customer pays extra difference
           await supabase.from('payments').insert([{
@@ -1890,35 +1905,42 @@ export default function Sales({ userProfile, branches, addToast }) {
             transaction_date: new Date().toISOString(),
             created_by: userProfile.id,
           }]);
+
+          newPaid = originalPaid + exchangeDifference;
         } else if (exchangeDifference < 0) {
-          // Store refunds difference to customer
+          // Store refunds difference to customer (first clearing any due)
           const refundDiff = Math.abs(exchangeDifference);
-          if (refundMethod === 'deduct_due') {
-            const newDue = Math.max(0, currentDue - refundDiff);
-            newStatus = newDue <= 0.01 ? 'paid' : 'partial';
-          } else {
+          const exDueCleared = Math.min(currentDue, refundDiff);
+          const exPayableCash = Math.min(originalPaid, Math.max(0, refundDiff - exDueCleared));
+
+          if (refundMethod !== 'deduct_due' && exPayableCash > 0) {
             await supabase.from('cash_ledger').insert([{
               branch_id: targetBranchId,
               amount_in: 0,
-              amount_out: refundDiff,
+              amount_out: exPayableCash,
               reference_id: sale.id,
               description: `Exchange Refund Difference [${creditNoteNumber}]: Inv #${sale.invoice_number || sale.id.substring(0, 8)} (${refundMethod})`,
               transaction_date: new Date().toISOString(),
               created_by: userProfile.id,
             }]);
+            newPaid = Math.max(0, originalPaid - exPayableCash);
           }
         }
+        const newDue = Math.max(0, newNet - newPaid);
+        newStatus = newDue <= 0.01 ? 'paid' : (newPaid > 0 ? 'partial' : 'unpaid');
       }
 
       // 4. Update Sale record with notes
       const returnNote = isExchange
-        ? `[Exchange ${creditNoteNumber}: Returned ৳${formatAmount(totalReturnCredit)}, Replacement ৳${formatAmount(totalExchangeValue)}, Net diff: ৳${formatAmount(exchangeDifference)}]`
-        : `[Return ${creditNoteNumber}: ৳${formatAmount(totalReturnCredit)} (${refundMethod}) - ${returnReasonCategory} ${returnReasonNotes ? `(${returnReasonNotes})` : ''}]`;
+        ? `[Exchange ${creditNoteNumber}: Returned gross ৳${formatAmount(grossReturnTotal)}, less discount ৳${formatAmount(returnDiscountDeduction)} = credit ৳${formatAmount(totalReturnCredit)}, Replacement ৳${formatAmount(totalExchangeValue)}, Net diff: ৳${formatAmount(exchangeDifference)}]`
+        : `[Return ${creditNoteNumber}: Gross ৳${formatAmount(grossReturnTotal)}, less discount ৳${formatAmount(returnDiscountDeduction)} = refund ৳${formatAmount(totalReturnCredit)} (${refundMethod}) - ${returnReasonCategory} ${returnReasonNotes ? `(${returnReasonNotes})` : ''}]`;
       const combinedNotes = sale.notes ? `${sale.notes}\n${returnNote}` : returnNote;
 
       const { error: saleUpdateErr } = await supabase
         .from('sales')
         .update({
+          total_amount: newGross,
+          discount: newDiscount,
           net_amount: newNet,
           paid_amount: newPaid,
           payment_status: newStatus,
@@ -3542,27 +3564,51 @@ export default function Sales({ userProfile, branches, addToast }) {
 
                 {/* Return Refund Summary Card */}
                 {(() => {
-                  const totalRefund = returnLineItems.reduce((sum, it) => sum + (parseFloat(it.unit_price || 0) * (parseInt(it.returnQty || 0) || 0)), 0);
-                  const due = Math.max(0, (selectedSaleForReturn.net_amount || 0) - (selectedSaleForReturn.paid_amount || 0));
+                  const grossReturn = returnLineItems.reduce((sum, it) => sum + (parseFloat(it.unit_price || 0) * (parseInt(it.returnQty || 0) || 0)), 0);
+                  const invoiceGross = parseFloat(selectedSaleForReturn.total_amount) || parseFloat(selectedSaleForReturn.net_amount) || 0;
+                  const invoiceDiscount = parseFloat(selectedSaleForReturn.discount) || Math.max(0, invoiceGross - (parseFloat(selectedSaleForReturn.net_amount) || 0));
+                  const discountRatio = invoiceGross > 0 ? (invoiceDiscount / invoiceGross) : 0;
+                  const discountDeduction = grossReturn * discountRatio;
+                  const totalReturnCredit = Math.max(0, grossReturn - discountDeduction);
+
+                  const originalPaid = parseFloat(selectedSaleForReturn.paid_amount || 0);
+                  const due = Math.max(0, (selectedSaleForReturn.net_amount || 0) - originalPaid);
+                  const dueCleared = Math.min(due, totalReturnCredit);
+                  const remainingDue = Math.max(0, due - dueCleared);
+                  const payableCashRefund = Math.min(originalPaid, Math.max(0, totalReturnCredit - dueCleared));
 
                   return (
                     <div style={{
                       padding: '0.85rem 1rem',
-                      background: totalRefund > 0 ? 'rgba(217, 119, 6, 0.08)' : 'var(--bg-secondary)',
+                      background: totalReturnCredit > 0 ? 'rgba(217, 119, 6, 0.08)' : 'var(--bg-secondary)',
                       borderRadius: 'var(--radius-md)',
-                      border: `1px solid ${totalRefund > 0 ? 'var(--warning-text, #d97706)' : 'var(--border-color)'}`,
+                      border: `1px solid ${totalReturnCredit > 0 ? 'var(--warning-text, #d97706)' : 'var(--border-color)'}`,
                       display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'center',
-                      flexWrap: 'wrap',
-                      gap: '0.75rem'
+                      flexDirection: 'column',
+                      gap: '0.4rem'
                     }}>
-                      <div style={{ fontWeight: 700, fontSize: '1rem' }}>
-                        Total Refund: <span style={{ color: 'var(--warning-text, #d97706)' }}>৳{formatAmount(totalRefund)}</span>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem' }}>
+                        <div style={{ fontWeight: 700, fontSize: '0.95rem' }}>
+                          Returned Goods (Net): <span style={{ color: 'var(--warning-text, #d97706)' }}>৳{formatAmount(totalReturnCredit)}</span>
+                        </div>
+                        <div style={{ fontSize: '1rem', fontWeight: 800, color: payableCashRefund > 0 ? '#15803d' : 'var(--text-secondary)' }}>
+                          Cash to Refund: ৳{formatAmount(payableCashRefund)}
+                        </div>
                       </div>
-                      {due > 0 && totalRefund > 0 && (
-                        <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-                          Remaining Due: <strong>৳{formatAmount(Math.max(0, due - totalRefund))}</strong>
+
+                      {discountDeduction > 0 && (
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', color: 'var(--text-secondary)', borderTop: '1px dashed var(--border-color)', paddingTop: '0.3rem' }}>
+                          <span>Gross Value: <strong>৳{formatAmount(grossReturn)}</strong></span>
+                          <span style={{ color: 'var(--danger-text, #dc2626)', fontWeight: 600 }}>
+                            Less Invoice Discount ({(discountRatio * 100).toFixed(1)}%): <strong>-৳{formatAmount(discountDeduction)}</strong>
+                          </span>
+                        </div>
+                      )}
+
+                      {due > 0 && totalReturnCredit > 0 && (
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.82rem', color: 'var(--text-secondary)', borderTop: '1px dashed var(--border-color)', paddingTop: '0.3rem' }}>
+                          <span>Adjusted Unpaid Due: <strong style={{ color: '#dc2626' }}>-৳{formatAmount(dueCleared)}</strong></span>
+                          <span>Remaining Invoice Due: <strong style={{ color: remainingDue > 0 ? '#ea580c' : '#15803d' }}>৳{formatAmount(remainingDue)}</strong></span>
                         </div>
                       )}
                     </div>
@@ -3776,12 +3822,23 @@ export default function Sales({ userProfile, branches, addToast }) {
 
                 {/* Summary Card */}
                 {(() => {
-                  const totalReturn = returnLineItems.reduce((sum, it) => sum + (parseFloat(it.unit_price || 0) * (parseInt(it.returnQty || 0) || 0)), 0);
+                  const grossReturn = returnLineItems.reduce((sum, it) => sum + (parseFloat(it.unit_price || 0) * (parseInt(it.returnQty || 0) || 0)), 0);
+                  const invoiceGross = parseFloat(selectedSaleForReturn.total_amount) || parseFloat(selectedSaleForReturn.net_amount) || 0;
+                  const invoiceDiscount = parseFloat(selectedSaleForReturn.discount) || Math.max(0, invoiceGross - (parseFloat(selectedSaleForReturn.net_amount) || 0));
+                  const discountRatio = invoiceGross > 0 ? (invoiceDiscount / invoiceGross) : 0;
+                  const discountDeduction = grossReturn * discountRatio;
+                  const totalReturn = Math.max(0, grossReturn - discountDeduction);
+
+                  const originalPaid = parseFloat(selectedSaleForReturn.paid_amount || 0);
+                  const due = Math.max(0, (selectedSaleForReturn.net_amount || 0) - originalPaid);
+                  const dueCleared = Math.min(due, totalReturn);
+                  const remainingDue = Math.max(0, due - dueCleared);
+                  const payableCashRefund = Math.min(originalPaid, Math.max(0, totalReturn - dueCleared));
+
                   const totalExchange = returnType === 'exchange'
                     ? exchangeCart.reduce((sum, it) => sum + (parseFloat(it.unit_price || 0) * (parseFloat(it.quantity || 0) || 0)), 0)
                     : 0;
                   const diff = totalExchange - totalReturn;
-                  const due = Math.max(0, (selectedSaleForReturn.net_amount || 0) - (selectedSaleForReturn.paid_amount || 0));
 
                   return (
                     <div style={{
@@ -3794,11 +3851,20 @@ export default function Sales({ userProfile, branches, addToast }) {
                       gap: '0.4rem'
                     }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
-                        <div style={{ fontWeight: 600, fontSize: '0.9rem' }}>Returned Goods Total:</div>
+                        <div style={{ fontWeight: 600, fontSize: '0.9rem' }}>Returned Goods Total (Net):</div>
                         <div style={{ fontWeight: 700, fontSize: '1rem', color: 'var(--warning-text, #d97706)' }}>
                           ৳{formatAmount(totalReturn)}
                         </div>
                       </div>
+
+                      {discountDeduction > 0 && (
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                          <span>Gross Value: ৳{formatAmount(grossReturn)}</span>
+                          <span style={{ color: 'var(--danger-text, #dc2626)', fontWeight: 600 }}>
+                            Less Invoice Discount ({(discountRatio * 100).toFixed(1)}%): -৳{formatAmount(discountDeduction)}
+                          </span>
+                        </div>
+                      )}
 
                       {returnType === 'exchange' && (
                         <>
@@ -3812,16 +3878,27 @@ export default function Sales({ userProfile, branches, addToast }) {
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px dashed var(--border-color)', paddingTop: '0.4rem', marginTop: '0.2rem' }}>
                             <div style={{ fontWeight: 700, fontSize: '0.95rem' }}>Settlement:</div>
                             <div style={{ fontWeight: 800, fontSize: '1.05rem', color: diff > 0 ? 'var(--danger-text)' : (diff < 0 ? 'var(--success-text)' : 'inherit') }}>
-                              {diff > 0 ? `Customer to Pay: +৳${formatAmount(diff)}` : (diff < 0 ? `Store to Refund: -৳${formatAmount(Math.abs(diff))}` : 'Even Exchange (৳0)')}
+                              {diff > 0 ? `Customer to Pay: +৳${formatAmount(diff)}` : (diff < 0 ? `Store to Refund: -৳${formatAmount(Math.min(originalPaid, Math.abs(diff)))}` : 'Even Exchange (৳0)')}
                             </div>
                           </div>
                         </>
                       )}
 
-                      {returnType === 'cash' && due > 0 && totalReturn > 0 && (
-                        <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-                          Remaining Due: <strong>৳{formatAmount(Math.max(0, due - totalReturn))}</strong>
-                        </div>
+                      {returnType === 'cash' && (
+                        <>
+                          {due > 0 && totalReturn > 0 && (
+                            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.82rem', color: 'var(--text-secondary)', borderTop: '1px dashed var(--border-color)', paddingTop: '0.3rem' }}>
+                              <span>Adjusted against Unpaid Due: <strong style={{ color: '#dc2626' }}>-৳{formatAmount(dueCleared)}</strong></span>
+                              <span>Remaining Due: <strong style={{ color: remainingDue > 0 ? '#ea580c' : '#15803d' }}>৳{formatAmount(remainingDue)}</strong></span>
+                            </div>
+                          )}
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid var(--border-color)', paddingTop: '0.4rem', marginTop: '0.2rem' }}>
+                            <div style={{ fontWeight: 700, fontSize: '0.95rem' }}>Actual Cash Refund to Customer:</div>
+                            <div style={{ fontWeight: 800, fontSize: '1.05rem', color: payableCashRefund > 0 ? '#15803d' : 'inherit' }}>
+                              ৳{formatAmount(payableCashRefund)}
+                            </div>
+                          </div>
+                        </>
                       )}
                     </div>
                   );
