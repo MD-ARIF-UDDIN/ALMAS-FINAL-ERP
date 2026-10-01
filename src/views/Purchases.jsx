@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useLocation } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
-import { Download, Plus, Search, Trash2, UserPlus, CreditCard, Eye } from 'lucide-react';
+import { Download, Plus, Search, Trash2, UserPlus, CreditCard, Eye, X } from 'lucide-react';
 import { TableLoading } from '../components/TableLoading';
 import Pagination from '../components/Pagination';
 import { formatAmount } from '../utils/format';
@@ -39,7 +39,7 @@ export default function Purchases({ userProfile, branches, addToast }) {
   const [supplierType, setSupplierType] = useState('existing'); // 'existing' or 'new'
   const [selectedSupplierId, setSelectedSupplierId] = useState('');
   const [purchaseDate, setPurchaseDate] = useState(new Date().toISOString().split('T')[0]);
-  const [purchaseItems, setPurchaseItems] = useState([{ productId: '', name: '', quantity: 1, costPrice: 0.00 }]); // { productId, name, quantity, costPrice }
+  const [purchaseItems, setPurchaseItems] = useState([{ productId: '', code: '', name: '', quantity: 1, costPrice: 0.00 }]); // { productId, code, name, quantity, costPrice }
   const [discount, setDiscount] = useState(0);
   const [paidAmount, setPaidAmount] = useState('');
   const [paymentMethod, setPaymentMethod] = useState('cash');
@@ -71,6 +71,9 @@ export default function Purchases({ userProfile, branches, addToast }) {
       }
     }
   }, [branches, userProfile, selectedBranchId]);
+
+  const activeBranch = branches.find((b) => b.id === selectedBranchId);
+  const isFactory = Boolean(activeBranch?.is_factory || activeBranch?.name?.toLowerCase().includes('factory'));
 
   // Global lookups: Suppliers and Product catalog are fetched on mount
   useEffect(() => {
@@ -241,7 +244,7 @@ export default function Purchases({ userProfile, branches, addToast }) {
 
 
   const addItemToPurchase = () => {
-    setPurchaseItems([...purchaseItems, { productId: '', name: '', quantity: 1, costPrice: 0.00 }]);
+    setPurchaseItems([...purchaseItems, { productId: '', code: '', name: '', quantity: 1, costPrice: 0.00 }]);
   };
 
   const updateItemField = (index, field, value) => {
@@ -428,56 +431,129 @@ export default function Purchases({ userProfile, branches, addToast }) {
       if (purError) throw purError;
       const purchaseId = purData[0].id;
 
-      // 2. Resolve or Auto-Create Products for custom items and insert Purchase Items
+      // 2. Resolve Purchase Items:
+      // If Factory: Unlisted items are saved with product_id: null and NOT added to products catalog or inventory.
+      // If Branch/Showroom: Unlisted items are auto-saved to products catalog, and inventory stock is increased for the branch.
       const resolvedPurchaseItems = [];
       let hadNewProducts = false;
 
       for (const item of purchaseItems) {
         let finalProdId = item.productId || null;
         const cleanName = (item.name || '').trim();
+        const costVal = parseFloat(item.costPrice) || 0;
+        const itemQty = parseInt(item.quantity) || 1;
 
-        if (!finalProdId && cleanName) {
-          // Check if a product already exists with matching name
-          const { data: matchedProd } = await supabase
-            .from('products')
-            .select('id, name, purchase_price')
-            .ilike('name', cleanName)
-            .limit(1);
+        if (isFactory) {
+          // Factory Purchase: do not insert to products catalog if unlisted
+          resolvedPurchaseItems.push({
+            purchase_id: purchaseId,
+            product_id: finalProdId,
+            item_name: cleanName || 'Custom Item',
+            quantity: itemQty,
+            unit_price: costVal,
+            total_price: costVal * itemQty,
+          });
+        } else {
+          // Branch / Showroom Purchase:
+          if (!finalProdId && (cleanName || (item.code || '').trim())) {
+            const cleanCode = (item.code || '').trim();
+            const autoCode = cleanCode || ('PRD-' + Date.now().toString().slice(-6) + Math.floor(Math.random() * 100));
+            const displayName = cleanName || cleanCode || 'Purchased Item';
 
-          if (matchedProd && matchedProd.length > 0) {
-            finalProdId = matchedProd[0].id;
-          } else {
-            // Auto-create product in catalog with clean code / SKU
-            const autoCode = 'PRD-' + Date.now().toString().slice(-6) + Math.floor(Math.random() * 100);
-            const costVal = parseFloat(item.costPrice) || 0;
-            const { data: createdProd, error: createProdErr } = await supabase
+            // Check if product exists in catalog
+            let query = supabase
               .from('products')
-              .insert([
+              .select('id, name, sku, product_code');
+
+            if (cleanCode && cleanName) {
+              query = query.or(`sku.ilike.${cleanCode},product_code.ilike.${cleanCode},name.ilike.${cleanName}`);
+            } else if (cleanCode) {
+              query = query.or(`sku.ilike.${cleanCode},product_code.ilike.${cleanCode}`);
+            } else {
+              query = query.ilike('name', cleanName);
+            }
+
+            const { data: matchedProd } = await query.limit(1);
+
+            if (matchedProd && matchedProd.length > 0) {
+              finalProdId = matchedProd[0].id;
+            } else {
+              // Create new product in products catalog
+              const { data: createdProd, error: createProdErr } = await supabase
+                .from('products')
+                .insert([
+                  {
+                    sku: autoCode,
+                    product_code: autoCode,
+                    name: displayName,
+                    purchase_price: costVal,
+                    sale_price: costVal,
+                    description: 'Added via Branch Purchase Bill',
+                  }
+                ])
+                .select()
+                .single();
+
+              if (createProdErr) throw createProdErr;
+              finalProdId = createdProd.id;
+              hadNewProducts = true;
+            }
+          }
+
+          // Update inventory stock for this branch
+          if (finalProdId) {
+            const { data: currentInv } = await supabase
+              .from('inventory')
+              .select('id, quantity')
+              .eq('branch_id', selectedBranchId)
+              .eq('product_id', finalProdId)
+              .maybeSingle();
+
+            if (currentInv) {
+              await supabase
+                .from('inventory')
+                .update({
+                  quantity: (currentInv.quantity || 0) + itemQty,
+                  purchase_price: costVal > 0 ? costVal : undefined,
+                  updated_at: new Date().toISOString(),
+                })
+                .eq('id', currentInv.id);
+            } else {
+              await supabase.from('inventory').insert([
                 {
-                  sku: autoCode,
-                  product_code: autoCode,
-                  name: cleanName,
+                  branch_id: selectedBranchId,
+                  product_id: finalProdId,
+                  quantity: itemQty,
                   purchase_price: costVal,
                   sale_price: costVal,
+                  updated_at: new Date().toISOString(),
                 }
-              ])
-              .select()
-              .single();
+              ]);
+            }
 
-            if (createProdErr) throw createProdErr;
-            finalProdId = createdProd.id;
-            hadNewProducts = true;
+            // Log movement in inventory audit log
+            await supabase.from('inventory_movements').insert([
+              {
+                branch_id: selectedBranchId,
+                product_id: finalProdId,
+                type: 'purchase',
+                quantity: itemQty,
+                reference_id: purchaseId,
+                description: `Branch Purchase: Bill #${purData[0].invoice_number || purchaseId.substring(0, 8)} (${cleanName || 'Item'})`,
+                created_by: userProfile.id,
+              }
+            ]);
           }
-        }
 
-        resolvedPurchaseItems.push({
-          purchase_id: purchaseId,
-          product_id: finalProdId,
-          item_name: cleanName || 'Custom Item',
-          quantity: parseInt(item.quantity),
-          unit_price: parseFloat(item.costPrice),
-          total_price: parseFloat(item.costPrice) * parseInt(item.quantity),
-        });
+          resolvedPurchaseItems.push({
+            purchase_id: purchaseId,
+            product_id: finalProdId,
+            item_name: cleanName || 'Custom Item',
+            quantity: itemQty,
+            unit_price: costVal,
+            total_price: costVal * itemQty,
+          });
+        }
       }
 
       const { error: itemsError } = await supabase.from('purchase_items').insert(resolvedPurchaseItems);
@@ -514,11 +590,11 @@ export default function Purchases({ userProfile, branches, addToast }) {
         if (ledgerError) throw ledgerError;
       }
 
-      showMessage('Purchase record and inventory updated successfully!', 'success');
+      showMessage('Purchase record and invoice saved successfully!', 'success');
       // Reset forms
       setSupplierType('existing');
       setSelectedSupplierId('');
-      setPurchaseItems([{ productId: '', name: '', quantity: 1, costPrice: 0.00 }]);
+      setPurchaseItems([{ productId: '', code: '', name: '', quantity: 1, costPrice: 0.00 }]);
       setDiscount(0);
       setPaidAmount('');
       setReferenceNumber('');
@@ -530,7 +606,7 @@ export default function Purchases({ userProfile, branches, addToast }) {
       setShowSearchSuggestions(false);
       setShowPurchaseModal(false);
       
-      // Refresh history list and product catalog
+      // Refresh history list and catalog if new products were created
       fetchPurchases();
       if (hadNewProducts) {
         fetchCatalogProducts();
@@ -568,7 +644,7 @@ export default function Purchases({ userProfile, branches, addToast }) {
             </div>
           )}
           <button className="btn btn-primary" onClick={() => {
-            setPurchaseItems([{ productId: '', quantity: 1, costPrice: 0.00 }]);
+            setPurchaseItems([{ productId: '', code: '', name: '', quantity: 1, costPrice: 0.00 }]);
             setSupplierType('existing');
             setSelectedSupplierId('');
             setDiscount(0);
@@ -686,7 +762,7 @@ export default function Purchases({ userProfile, branches, addToast }) {
       {/* RECORD NEW PURCHASE MODAL (COMPACT & SLEEK) */}
       {showPurchaseModal && (
         <div className="modal-overlay">
-          <div className="modal-content modal-lg" style={{ maxWidth: '1020px', maxHeight: '92vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+          <div className="modal-content modal-xl" style={{ maxWidth: '1400px', width: '96vw', maxHeight: '94vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
             <div className="modal-header" style={{ padding: '0.65rem 1.15rem' }}>
               <h3 className="modal-title" style={{ fontSize: '1.05rem', margin: 0 }}>New Purchase</h3>
               <button
@@ -699,9 +775,9 @@ export default function Purchases({ userProfile, branches, addToast }) {
             </div>
 
             <form onSubmit={handleSavePurchase} style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
-              <div className="modal-body" style={{ flex: 1, overflowY: 'auto', padding: '0.85rem 1.15rem', display: 'grid', gridTemplateColumns: '1.6fr 1fr', gap: '0.85rem' }}>
+              <div className="modal-body" style={{ flex: 1, overflowY: 'auto', padding: '0.85rem 1.15rem', display: 'grid', gridTemplateColumns: '2.4fr 1fr', gap: '1.25rem' }}>
                 {/* Left Column: Supplier & Items */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', minWidth: 0 }}>
                   
                   {/* Supplier & Date Bar */}
                   <div style={{ backgroundColor: '#f8fafc', padding: '0.75rem 0.9rem', borderRadius: '6px', border: '1px solid var(--border-color)' }}>
@@ -787,7 +863,7 @@ export default function Purchases({ userProfile, branches, addToast }) {
                             <input
                               type="text"
                               className="input-control"
-                              placeholder="Enter supplier full name"
+                              placeholder="Enter supplier name"
                               value={newSupName}
                               onChange={(e) => setNewSupName(e.target.value)}
                               required={supplierType === 'new'}
@@ -898,10 +974,10 @@ export default function Purchases({ userProfile, branches, addToast }) {
                                 textAlign: 'left'
                               }}
                               onClick={() => {
-                                if (purchaseItems.length === 1 && !purchaseItems[0].productId && !purchaseItems[0].name) {
-                                  updateItemRow(0, { productId: prod.id, name: prod.name, quantity: 1, costPrice: prod.purchase_price });
+                                if (purchaseItems.length === 1 && !purchaseItems[0].productId && !purchaseItems[0].name && !purchaseItems[0].code) {
+                                  updateItemRow(0, { productId: prod.id, code: prod.sku || prod.product_code || '', name: prod.name, quantity: 1, costPrice: prod.purchase_price });
                                 } else {
-                                  setPurchaseItems([...purchaseItems, { productId: prod.id, name: prod.name, quantity: 1, costPrice: prod.purchase_price }]);
+                                  setPurchaseItems([...purchaseItems, { productId: prod.id, code: prod.sku || prod.product_code || '', name: prod.name, quantity: 1, costPrice: prod.purchase_price }]);
                                 }
                                 setProductSearchQuery('');
                                 setShowSearchSuggestions(false);
@@ -910,7 +986,7 @@ export default function Purchases({ userProfile, branches, addToast }) {
                             >
                               <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{prod.name}</div>
                               <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
-                                SKU: {prod.sku} | Cost: ৳{formatAmount(prod.purchase_price)}
+                                SKU: {prod.sku || prod.product_code || '—'} | Cost: ৳{formatAmount(prod.purchase_price)}
                               </div>
                             </div>
                           ))}
@@ -930,58 +1006,136 @@ export default function Purchases({ userProfile, branches, addToast }) {
                   </div>
 
                   {/* Compact Items Table */}
-                  <div className="table-container" style={{ border: '1px solid var(--border-color)', borderRadius: '6px', maxHeight: '310px', overflowY: 'auto' }}>
-                    <table style={{ minWidth: '520px', fontSize: '0.82rem' }}>
+                  <div className="table-container" style={{ border: '1px solid var(--border-color)', borderRadius: '6px', maxHeight: '450px', overflowY: 'auto', width: '100%' }}>
+                    <table style={{ width: '100%', minWidth: '640px', fontSize: '0.82rem' }}>
                       <thead>
                         <tr>
-                          <th style={{ width: '38px', padding: '0.35rem 0.5rem' }}>SL</th>
-                          <th style={{ padding: '0.35rem 0.5rem' }}>Product *</th>
-                          <th style={{ width: '85px', textAlign: 'right', padding: '0.35rem 0.5rem' }}>Qty *</th>
-                          <th style={{ width: '105px', textAlign: 'right', padding: '0.35rem 0.5rem' }}>Cost *</th>
-                          <th style={{ width: '95px', textAlign: 'right', padding: '0.35rem 0.5rem' }}>Total</th>
-                          <th style={{ width: '45px', textAlign: 'center', padding: '0.35rem 0.5rem' }}>Del</th>
+                          <th style={{ width: '35px', padding: '0.35rem 0.4rem', textAlign: 'center' }}>SL</th>
+                          <th style={{ width: '110px', padding: '0.35rem 0.4rem' }}>Code / SKU</th>
+                          <th style={{ padding: '0.35rem 0.4rem', minWidth: '200px' }}>Product Name *</th>
+                          <th style={{ width: '70px', textAlign: 'right', padding: '0.35rem 0.4rem' }}>Qty *</th>
+                          <th style={{ width: '90px', textAlign: 'right', padding: '0.35rem 0.4rem' }}>Cost *</th>
+                          <th style={{ width: '85px', textAlign: 'right', padding: '0.35rem 0.4rem' }}>Total</th>
+                          <th style={{ width: '38px', textAlign: 'center', padding: '0.35rem 0.3rem' }}>Del</th>
                         </tr>
                       </thead>
                       <tbody>
                         {purchaseItems.map((item, idx) => (
                           <tr key={idx}>
-                            <td style={{ verticalAlign: 'middle', fontWeight: 600, padding: '0.3rem 0.5rem' }}>{idx + 1}</td>
-                            <td style={{ verticalAlign: 'middle', padding: '0.3rem 0.5rem' }}>
+                            <td style={{ verticalAlign: 'middle', fontWeight: 600, padding: '0.3rem 0.4rem', textAlign: 'center', color: 'var(--text-muted)' }}>
+                              {idx + 1}
+                            </td>
+                            <td style={{ verticalAlign: 'middle', padding: '0.3rem 0.3rem' }}>
                               <input
                                 type="text"
                                 className="input-control"
-                                placeholder="Type or select product..."
-                                value={item.name || ''}
+                                placeholder="Code (opt)"
+                                value={item.code || ''}
+                                readOnly={Boolean(item.productId)}
                                 onChange={(e) => {
+                                  if (item.productId) return;
                                   const val = e.target.value;
                                   const matched = catalogProducts.find(
-                                    (p) => p.name.toLowerCase() === val.toLowerCase() || p.sku.toLowerCase() === val.toLowerCase()
+                                    (p) => p.sku?.toLowerCase() === val.toLowerCase() || p.product_code?.toLowerCase() === val.toLowerCase()
                                   );
                                   if (matched) {
                                     const bPrice = matched.branch_prices?.[selectedBranchId]?.purchase_price;
                                     const effectiveCost = (bPrice !== null && bPrice !== undefined) ? bPrice : matched.purchase_price;
-                                    updateItemRow(idx, { productId: matched.id, name: matched.name, costPrice: effectiveCost });
+                                    updateItemRow(idx, { productId: matched.id, code: matched.sku || matched.product_code || val, name: matched.name, costPrice: effectiveCost });
                                   } else {
-                                    updateItemRow(idx, { productId: '', name: val });
+                                    updateItemField(idx, 'code', val);
                                   }
                                 }}
-                                list={`catalog-prods-${idx}`}
-                                required
-                                style={{ height: '30px', minHeight: '30px', padding: '0.15rem 0.4rem', fontSize: '0.8rem' }}
+                                style={{
+                                  height: '30px',
+                                  minHeight: '30px',
+                                  width: '100%',
+                                  padding: '0.15rem 0.35rem',
+                                  fontSize: '0.8rem',
+                                  fontFamily: 'monospace',
+                                  backgroundColor: item.productId ? '#f1f5f9' : '#ffffff',
+                                  cursor: item.productId ? 'not-allowed' : 'text',
+                                  color: item.productId ? 'var(--text-secondary)' : 'inherit',
+                                }}
+                                title={item.productId ? `Catalog code (locked): ${item.code}` : 'Enter custom product code'}
                               />
-                              <datalist id={`catalog-prods-${idx}`}>
-                                {catalogProducts.map((p) => {
-                                  const bPrice = p.branch_prices?.[selectedBranchId]?.purchase_price;
-                                  const effectiveCost = (bPrice !== null && bPrice !== undefined) ? bPrice : p.purchase_price;
-                                  return (
-                                    <option key={p.id} value={p.name}>
-                                      {p.sku} (Cost: ৳{formatAmount(effectiveCost)})
-                                    </option>
-                                  );
-                                })}
-                              </datalist>
                             </td>
-                            <td style={{ verticalAlign: 'middle', textAlign: 'right', padding: '0.3rem 0.5rem' }}>
+                            <td style={{ verticalAlign: 'middle', padding: '0.3rem 0.3rem' }}>
+                              <div style={{ position: 'relative', display: 'flex', alignItems: 'center', width: '100%' }}>
+                                <input
+                                  type="text"
+                                  className="input-control"
+                                  placeholder="Type or select product..."
+                                  value={item.name || ''}
+                                  readOnly={Boolean(item.productId)}
+                                  onChange={(e) => {
+                                    if (item.productId) return;
+                                    const val = e.target.value;
+                                    const matched = catalogProducts.find(
+                                      (p) => p.name.toLowerCase() === val.toLowerCase() || p.sku?.toLowerCase() === val.toLowerCase()
+                                    );
+                                    if (matched) {
+                                      const bPrice = matched.branch_prices?.[selectedBranchId]?.purchase_price;
+                                      const effectiveCost = (bPrice !== null && bPrice !== undefined) ? bPrice : matched.purchase_price;
+                                      updateItemRow(idx, { productId: matched.id, code: matched.sku || matched.product_code || item.code || '', name: matched.name, costPrice: effectiveCost });
+                                    } else {
+                                      updateItemRow(idx, { productId: '', name: val });
+                                    }
+                                  }}
+                                  list={!item.productId ? `catalog-prods-${idx}` : undefined}
+                                  required
+                                  style={{
+                                    height: '30px',
+                                    minHeight: '30px',
+                                    width: '100%',
+                                    padding: '0.15rem 0.4rem',
+                                    paddingRight: item.productId ? '1.5rem' : '0.4rem',
+                                    fontSize: '0.82rem',
+                                    backgroundColor: item.productId ? '#f1f5f9' : '#ffffff',
+                                    cursor: item.productId ? 'not-allowed' : 'text',
+                                    fontWeight: item.productId ? 600 : 'normal',
+                                  }}
+                                  title={item.productId ? `Catalog product (locked): ${item.name}. Click '✕' to unlock/clear.` : item.name || 'Type or select product'}
+                                />
+                                {item.productId && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      updateItemRow(idx, { productId: '', code: '', name: '', costPrice: 0 });
+                                    }}
+                                    title="Clear selection and enter unlisted item"
+                                    style={{
+                                      position: 'absolute',
+                                      right: '0.3rem',
+                                      background: 'none',
+                                      border: 'none',
+                                      color: 'var(--text-muted)',
+                                      cursor: 'pointer',
+                                      padding: '0.1rem',
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      justifyContent: 'center',
+                                    }}
+                                  >
+                                    <X size={13} />
+                                  </button>
+                                )}
+                              </div>
+                              {!item.productId && (
+                                <datalist id={`catalog-prods-${idx}`}>
+                                  {catalogProducts.map((p) => {
+                                    const bPrice = p.branch_prices?.[selectedBranchId]?.purchase_price;
+                                    const effectiveCost = (bPrice !== null && bPrice !== undefined) ? bPrice : p.purchase_price;
+                                    return (
+                                      <option key={p.id} value={p.name}>
+                                        {p.sku} (Cost: ৳{formatAmount(effectiveCost)})
+                                      </option>
+                                    );
+                                  })}
+                                </datalist>
+                              )}
+                            </td>
+                            <td style={{ verticalAlign: 'middle', textAlign: 'right', padding: '0.3rem 0.3rem' }}>
                               <input
                                 type="number"
                                 min="1"
@@ -990,10 +1144,10 @@ export default function Purchases({ userProfile, branches, addToast }) {
                                 value={item.quantity}
                                 onChange={(e) => updateItemField(idx, 'quantity', parseInt(e.target.value) || 1)}
                                 required
-                                style={{ height: '30px', minHeight: '30px', padding: '0.15rem 0.4rem', fontSize: '0.8rem', textAlign: 'right', width: '75px', marginLeft: 'auto' }}
+                                style={{ height: '30px', minHeight: '30px', padding: '0.15rem 0.3rem', fontSize: '0.8rem', textAlign: 'right', width: '100%' }}
                               />
                             </td>
-                            <td style={{ verticalAlign: 'middle', textAlign: 'right', padding: '0.3rem 0.5rem' }}>
+                            <td style={{ verticalAlign: 'middle', textAlign: 'right', padding: '0.3rem 0.3rem' }}>
                               <input
                                 type="number"
                                 step="0.01"
@@ -1003,13 +1157,13 @@ export default function Purchases({ userProfile, branches, addToast }) {
                                 value={item.costPrice}
                                 onChange={(e) => updateItemField(idx, 'costPrice', parseFloat(e.target.value) || 0.00)}
                                 required
-                                style={{ height: '30px', minHeight: '30px', padding: '0.15rem 0.4rem', fontSize: '0.8rem', textAlign: 'right', width: '95px', marginLeft: 'auto' }}
+                                style={{ height: '30px', minHeight: '30px', padding: '0.15rem 0.3rem', fontSize: '0.8rem', textAlign: 'right', width: '100%' }}
                               />
                             </td>
-                            <td style={{ verticalAlign: 'middle', textAlign: 'right', fontWeight: 700, padding: '0.3rem 0.5rem' }}>
+                            <td style={{ verticalAlign: 'middle', textAlign: 'right', fontWeight: 700, padding: '0.3rem 0.4rem', whiteSpace: 'nowrap' }}>
                               ৳{formatAmount((parseFloat(item.costPrice) || 0) * (parseInt(item.quantity) || 0))}
                             </td>
-                            <td style={{ verticalAlign: 'middle', textAlign: 'center', padding: '0.3rem 0.5rem' }}>
+                            <td style={{ verticalAlign: 'middle', textAlign: 'center', padding: '0.3rem 0.2rem' }}>
                               <button
                                 type="button"
                                 className="btn btn-danger btn-sm btn-icon"
