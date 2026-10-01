@@ -13,6 +13,8 @@ import {
   Building2,
   RotateCcw,
   Truck,
+  Plus,
+  ListFilter,
 } from 'lucide-react';
 import { hasPermission } from '../utils/permissions';
 
@@ -34,6 +36,11 @@ export default function Dashboard({ userProfile, branches }) {
       themeColor: '#1d4ed8',
       path: '/sales',
       perm: 'sales.view',
+      createPath: '/sales',
+      createState: { openNewSale: true },
+      createLabel: 'Create',
+      listPath: '/sales',
+      listLabel: 'List',
     },
     {
       id: 'purchases-new',
@@ -45,6 +52,11 @@ export default function Dashboard({ userProfile, branches }) {
       themeColor: '#0284c7',
       path: '/purchases',
       perm: 'purchases.view',
+      createPath: '/purchases',
+      createState: { openNewPurchase: true },
+      createLabel: 'Create',
+      listPath: '/purchases',
+      listLabel: 'List',
     },
     {
       id: 'inventory-stock',
@@ -56,8 +68,11 @@ export default function Dashboard({ userProfile, branches }) {
       themeColor: '#059669',
       path: '/inventory',
       perm: 'inventory.view',
+      createPath: '/inventory?tab=logs',
+      createLabel: 'Logs',
+      listPath: '/inventory?tab=stock',
+      listLabel: 'Stock',
     },
-
     {
       id: 'returns-manage',
       title: 'Returns',
@@ -68,6 +83,10 @@ export default function Dashboard({ userProfile, branches }) {
       themeColor: '#ea580c',
       path: '/returns',
       perm: 'returns.view',
+      createPath: '/sales',
+      createLabel: 'From Sale',
+      listPath: '/returns',
+      listLabel: 'List',
     },
     {
       id: 'product-catalog',
@@ -79,6 +98,11 @@ export default function Dashboard({ userProfile, branches }) {
       themeColor: '#4338ca',
       path: '/products',
       perm: 'product.view',
+      createPath: '/products',
+      createState: { openCreateProduct: true },
+      createLabel: 'Create',
+      listPath: '/products',
+      listLabel: 'List',
     },
     {
       id: 'payments-manage',
@@ -90,6 +114,10 @@ export default function Dashboard({ userProfile, branches }) {
       themeColor: '#0d9488',
       path: '/payments',
       perm: 'payments.view',
+      createPath: '/payments?tab=ledger',
+      createLabel: 'Ledger',
+      listPath: '/payments?tab=invoices',
+      listLabel: 'Invoices',
     },
     {
       id: 'expenses-new',
@@ -101,6 +129,11 @@ export default function Dashboard({ userProfile, branches }) {
       themeColor: '#d97706',
       path: '/expenses',
       perm: 'expenses.view',
+      createPath: '/expenses',
+      createState: { openCreateExpense: true },
+      createLabel: 'Create',
+      listPath: '/expenses',
+      listLabel: 'List',
     },
     {
       id: 'contacts-directory',
@@ -112,6 +145,11 @@ export default function Dashboard({ userProfile, branches }) {
       themeColor: '#7c3aed',
       path: '/contacts',
       perm: 'contacts.view',
+      createPath: '/contacts',
+      createState: { openCreateContact: true },
+      createLabel: 'Create',
+      listPath: '/contacts',
+      listLabel: 'List',
     },
     {
       id: 'reports-analytics',
@@ -123,6 +161,10 @@ export default function Dashboard({ userProfile, branches }) {
       themeColor: '#e11d48',
       path: '/reports',
       perm: 'reports.view',
+      createPath: '/reports?tab=overall',
+      createLabel: 'Turnover',
+      listPath: '/reports?tab=customer',
+      listLabel: 'Customer',
     },
     {
       id: 'users-manage',
@@ -135,6 +177,10 @@ export default function Dashboard({ userProfile, branches }) {
       path: '/users',
       perm: 'users.manage',
       ownerOnly: true,
+      createPath: '/users',
+      createLabel: 'Staff',
+      listPath: '/branches',
+      listLabel: 'Branches',
     },
   ];
 
@@ -203,9 +249,8 @@ export default function Dashboard({ userProfile, branches }) {
         {visibleActions.map((action) => {
           const Icon = action.icon;
           return (
-            <button
+            <div
               key={action.id}
-              type="button"
               className="quick-action-card"
               style={{
                 '--card-gradient': action.gradient,
@@ -215,11 +260,45 @@ export default function Dashboard({ userProfile, branches }) {
               }}
               onClick={() => handleActionClick(action)}
             >
-              <div className="quick-action-icon-box">
-                <Icon size={24} strokeWidth={2.2} />
+              <div className="quick-action-header">
+                <div className="quick-action-icon-box">
+                  <Icon size={24} strokeWidth={2.2} />
+                </div>
+                <span className="quick-action-title">{action.title}</span>
               </div>
-              <span className="quick-action-title">{action.title}</span>
-            </button>
+
+              <div className="quick-action-btn-group">
+                <button
+                  type="button"
+                  className="quick-action-sub-btn quick-action-btn-create"
+                  title={`${action.createLabel || 'Create'} ${action.title}`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (action.createState) {
+                      navigate(action.createPath || action.path, { state: action.createState });
+                    } else {
+                      navigate(action.createPath || action.path);
+                    }
+                  }}
+                >
+                  <Plus size={12} strokeWidth={2.6} />
+                  <span>{action.createLabel || 'Create'}</span>
+                </button>
+
+                <button
+                  type="button"
+                  className="quick-action-sub-btn quick-action-btn-list"
+                  title={`${action.listLabel || 'List'} ${action.title}`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    navigate(action.listPath || action.path);
+                  }}
+                >
+                  <ListFilter size={12} strokeWidth={2.2} />
+                  <span>{action.listLabel || 'List'}</span>
+                </button>
+              </div>
+            </div>
           );
         })}
       </div>

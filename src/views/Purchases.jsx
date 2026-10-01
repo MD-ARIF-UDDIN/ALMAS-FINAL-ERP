@@ -5,6 +5,7 @@ import { Download, Plus, Search, Trash2, UserPlus, CreditCard, Eye, X, Edit } fr
 import { TableLoading } from '../components/TableLoading';
 import Pagination from '../components/Pagination';
 import { formatAmount } from '../utils/format';
+import { SearchableSelect, SearchableCreatableSelect } from '../components/SearchableSelect';
 
 export default function Purchases({ userProfile, branches, addToast }) {
   const location = useLocation();
@@ -1523,30 +1524,34 @@ export default function Purchases({ userProfile, branches, addToast }) {
                               </span>
                             )}
                           </div>
-                          <select
-                            className="input-control"
-                            value={selectedSupplierId}
-                            onChange={(e) => setSelectedSupplierId(e.target.value)}
-                            disabled={!isFactory && isFactoryChallan}
-                            required={supplierType === 'existing'}
-                            style={{
-                              height: '36px',
-                              minHeight: '36px',
-                              fontSize: '0.85rem',
-                              backgroundColor: (!isFactory && isFactoryChallan) ? '#eff6ff' : '#ffffff',
-                              borderColor: (!isFactory && isFactoryChallan) ? '#93c5fd' : 'var(--border-color)',
-                              color: (!isFactory && isFactoryChallan) ? '#1e3a8a' : 'inherit',
-                              fontWeight: (!isFactory && isFactoryChallan) ? 600 : 'normal',
-                              cursor: (!isFactory && isFactoryChallan) ? 'not-allowed' : 'pointer',
+                          <SearchableSelect
+                            value={
+                              selectedSupplierId
+                                ? {
+                                    value: selectedSupplierId,
+                                    label: `${suppliers.find((s) => s.id === selectedSupplierId)?.name || 'Supplier'} ${suppliers.find((s) => s.id === selectedSupplierId)?.phone ? `(${suppliers.find((s) => s.id === selectedSupplierId)?.phone})` : ''}`,
+                                  }
+                                : null
+                            }
+                            options={suppliers.map((s) => ({
+                              value: s.id,
+                              label: `${s.name} ${s.phone ? `(${s.phone})` : ''}`,
+                            }))}
+                            onChange={(opt) => setSelectedSupplierId(opt ? opt.value : '')}
+                            placeholder="-- Select Supplier --"
+                            isDisabled={!isFactory && isFactoryChallan}
+                            isClearable
+                            styles={{
+                              control: (base) => ({
+                                ...base,
+                                minHeight: '36px',
+                                height: '36px',
+                                fontSize: '0.85rem',
+                                backgroundColor: (!isFactory && isFactoryChallan) ? '#eff6ff' : '#ffffff',
+                                borderColor: (!isFactory && isFactoryChallan) ? '#93c5fd' : '#cbd5e1',
+                              }),
                             }}
-                          >
-                            <option value="">-- Select Supplier --</option>
-                            {suppliers.map((s) => (
-                              <option key={s.id} value={s.id}>
-                                {s.name} {s.phone ? `(${s.phone})` : ''}
-                              </option>
-                            ))}
-                          </select>
+                          />
                         </div>
 
                         <div className="form-group" style={{ marginBottom: 0 }}>
@@ -1637,101 +1642,50 @@ export default function Purchases({ userProfile, branches, addToast }) {
                   </div>
 
                   {/* Search Product Bar */}
-                  <div style={{ position: 'relative' }}>
-                    <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
-                      <input
-                        type="text"
-                        className="input-control"
-                        placeholder="Search product by name or Code..."
-                        value={productSearchQuery}
-                        onChange={(e) => {
-                          setProductSearchQuery(e.target.value);
-                          setShowSearchSuggestions(true);
-                        }}
-                        onFocus={() => setShowSearchSuggestions(true)}
-                        onBlur={() => setTimeout(() => setShowSearchSuggestions(false), 250)}
-                        style={{ height: '36px', minHeight: '36px', fontSize: '0.85rem', padding: '0.3rem 0.65rem' }}
-                      />
-                      {productSearchQuery && (
-                        <button
-                          type="button"
-                          className="btn btn-secondary btn-sm"
-                          onClick={() => {
-                            setProductSearchQuery('');
-                            setShowSearchSuggestions(false);
-                          }}
-                          style={{ padding: '0.3rem 0.6rem', fontSize: '0.8rem', height: '36px' }}
-                        >
-                          Clear
-                        </button>
+                  <div>
+                    <SearchableSelect
+                      options={catalogProducts.map((prod) => {
+                        const bPrice = prod.branch_prices?.[selectedBranchId]?.purchase_price;
+                        const effectiveCost = (bPrice !== null && bPrice !== undefined) ? bPrice : prod.purchase_price;
+                        return {
+                          value: prod.id,
+                          label: prod.name,
+                          code: prod.product_code || prod.sku || '',
+                          costPrice: effectiveCost,
+                          product: prod,
+                        };
+                      })}
+                      value={null}
+                      onChange={(opt) => {
+                        if (!opt) return;
+                        const prod = opt.product;
+                        const effectiveCost = opt.costPrice;
+                        if (purchaseItems.length === 1 && !purchaseItems[0].productId && !purchaseItems[0].name && !purchaseItems[0].code) {
+                          updateItemRow(0, { productId: prod.id, code: prod.product_code || prod.sku || '', name: prod.name, quantity: 1, costPrice: effectiveCost });
+                        } else {
+                          setPurchaseItems((prev) => [...prev, { productId: prod.id, code: prod.product_code || prod.sku || '', name: prod.name, quantity: 1, costPrice: effectiveCost }]);
+                        }
+                        showMessage(`${prod.name} added to list.`, 'success');
+                      }}
+                      placeholder="🔍 Search & add product from catalog to list..."
+                      isClearable={false}
+                      formatOptionLabel={(opt) => (
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <span style={{ fontWeight: 600 }}>{opt.label}</span>
+                          <span style={{ fontSize: '0.74rem', color: '#64748b' }}>
+                            {opt.code ? `Code: ${opt.code} | ` : ''}৳{formatAmount(opt.costPrice || 0)}
+                          </span>
+                        </div>
                       )}
-                    </div>
-
-                    {showSearchSuggestions && (
-                      <div style={{
-                        position: 'absolute',
-                        top: '100%',
-                        left: 0,
-                        right: 0,
-                        backgroundColor: '#ffffff',
-                        border: '1px solid var(--border-color)',
-                        borderRadius: 'var(--border-radius-sm)',
-                        boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)',
-                        maxHeight: '220px',
-                        overflowY: 'auto',
-                        zIndex: 999,
-                        marginTop: '0.2rem'
-                      }}>
-                        {catalogProducts
-                          .filter(p => {
-                            if (!productSearchQuery.trim()) return true;
-                            return (
-                              p.name.toLowerCase().includes(productSearchQuery.toLowerCase()) ||
-                              (p.product_code && p.product_code.toLowerCase().includes(productSearchQuery.toLowerCase())) ||
-                              (p.sku && p.sku.toLowerCase().includes(productSearchQuery.toLowerCase()))
-                            );
-                          })
-                          .map((prod) => (
-                            <div
-                              key={prod.id}
-                              style={{
-                                padding: '0.5rem 0.75rem',
-                                cursor: 'pointer',
-                                borderBottom: '1px solid #f1f5f9',
-                                fontSize: '0.82rem',
-                                textAlign: 'left'
-                              }}
-                              onClick={() => {
-                                if (purchaseItems.length === 1 && !purchaseItems[0].productId && !purchaseItems[0].name && !purchaseItems[0].code) {
-                                  updateItemRow(0, { productId: prod.id, code: prod.product_code || prod.sku || '', name: prod.name, quantity: 1, costPrice: prod.purchase_price });
-                                } else {
-                                  setPurchaseItems([...purchaseItems, { productId: prod.id, code: prod.product_code || prod.sku || '', name: prod.name, quantity: 1, costPrice: prod.purchase_price }]);
-                                }
-                                setProductSearchQuery('');
-                                setShowSearchSuggestions(false);
-                                showMessage(`${prod.name} added to list.`, 'success');
-                              }}
-                            >
-                              <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{prod.name}</div>
-                              <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
-                                Code: {prod.product_code || prod.sku || '—'} | Cost: ৳{formatAmount(prod.purchase_price)}
-                              </div>
-                            </div>
-                          ))}
-                        {catalogProducts.filter(p => {
-                          if (!productSearchQuery.trim()) return true;
-                          return (
-                            p.name.toLowerCase().includes(productSearchQuery.toLowerCase()) ||
-                            (p.product_code && p.product_code.toLowerCase().includes(productSearchQuery.toLowerCase())) ||
-                            (p.sku && p.sku.toLowerCase().includes(productSearchQuery.toLowerCase()))
-                          );
-                        }).length === 0 && (
-                          <div style={{ padding: '0.65rem', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.82rem' }}>
-                            No matching products found.
-                          </div>
-                        )}
-                      </div>
-                    )}
+                      styles={{
+                        control: (base) => ({
+                          ...base,
+                          minHeight: '38px',
+                          height: '38px',
+                          fontSize: '0.85rem',
+                        }),
+                      }}
+                    />
                   </div>
 
                   {/* Desktop Items Table */}
@@ -1790,79 +1744,66 @@ export default function Purchases({ userProfile, branches, addToast }) {
                               />
                             </td>
                             <td style={{ verticalAlign: 'middle', padding: '0.3rem 0.3rem' }}>
-                              <div style={{ position: 'relative', display: 'flex', alignItems: 'center', width: '100%' }}>
-                                <input
-                                  type="text"
-                                  className="input-control"
-                                  placeholder="Type or select product..."
-                                  value={item.name || ''}
-                                  readOnly={Boolean(item.productId)}
-                                  onChange={(e) => {
-                                    if (item.productId) return;
-                                    const val = e.target.value;
-                                    const matched = catalogProducts.find(
-                                      (p) => p.name.toLowerCase() === val.toLowerCase() || p.sku?.toLowerCase() === val.toLowerCase()
-                                    );
-                                    if (matched) {
-                                      const bPrice = matched.branch_prices?.[selectedBranchId]?.purchase_price;
-                                      const effectiveCost = (bPrice !== null && bPrice !== undefined) ? bPrice : matched.purchase_price;
-                                      updateItemRow(idx, { productId: matched.id, code: matched.sku || matched.product_code || item.code || '', name: matched.name, costPrice: effectiveCost });
-                                    } else {
-                                      updateItemRow(idx, { productId: '', name: val });
-                                    }
-                                  }}
-                                  list={!item.productId ? `catalog-prods-${idx}` : undefined}
-                                  required
-                                  style={{
-                                    height: '30px',
-                                    minHeight: '30px',
-                                    width: '100%',
-                                    padding: '0.15rem 0.4rem',
-                                    paddingRight: item.productId ? '1.5rem' : '0.4rem',
-                                    fontSize: '0.82rem',
-                                    backgroundColor: item.productId ? '#f1f5f9' : '#ffffff',
-                                    cursor: item.productId ? 'not-allowed' : 'text',
-                                    fontWeight: item.productId ? 600 : 'normal',
-                                  }}
-                                  title={item.productId ? `Catalog product (locked): ${item.name}. Click '✕' to unlock/clear.` : item.name || 'Type or select product'}
-                                />
-                                {item.productId && (
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      updateItemRow(idx, { productId: '', code: '', name: '', costPrice: 0 });
-                                    }}
-                                    title="Clear selection and enter unlisted item"
-                                    style={{
-                                      position: 'absolute',
-                                      right: '0.3rem',
-                                      background: 'none',
-                                      border: 'none',
-                                      color: 'var(--text-muted)',
-                                      cursor: 'pointer',
-                                      padding: '0.1rem',
-                                      display: 'flex',
-                                      alignItems: 'center',
-                                      justifyContent: 'center',
-                                    }}
-                                  >
-                                    <X size={13} />
-                                  </button>
+                              <SearchableCreatableSelect
+                                value={
+                                  item.productId
+                                    ? { value: item.productId, label: item.name, code: item.code, costPrice: item.costPrice }
+                                    : item.name
+                                    ? { value: item.name, label: item.name, isNew: true, code: item.code, costPrice: item.costPrice }
+                                    : null
+                                }
+                                options={catalogProducts.map((p) => {
+                                  const bPrice = p.branch_prices?.[selectedBranchId]?.purchase_price;
+                                  const effectiveCost = (bPrice !== null && bPrice !== undefined) ? bPrice : p.purchase_price;
+                                  return {
+                                    value: p.id,
+                                    label: p.name,
+                                    code: p.product_code || p.sku || '',
+                                    costPrice: effectiveCost,
+                                  };
+                                })}
+                                onChange={(opt) => {
+                                  if (!opt) {
+                                    updateItemRow(idx, { productId: '', code: '', name: '', costPrice: 0 });
+                                    return;
+                                  }
+                                  if (opt.__isNew__ || opt.isNew) {
+                                    updateItemRow(idx, {
+                                      productId: '',
+                                      name: opt.label || opt.value,
+                                      code: item.code || opt.label || opt.value,
+                                      costPrice: item.costPrice || 0,
+                                    });
+                                  } else {
+                                    updateItemRow(idx, {
+                                      productId: opt.value,
+                                      name: opt.label,
+                                      code: opt.code || '',
+                                      costPrice: opt.costPrice || 0,
+                                    });
+                                  }
+                                }}
+                                formatOptionLabel={(opt) => (
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+                                    <span style={{ fontWeight: 600 }}>{opt.label}</span>
+                                    {opt.costPrice !== undefined && (
+                                      <span style={{ fontSize: '0.74rem', color: '#64748b' }}>
+                                        {opt.code ? `Code: ${opt.code} | ` : ''}৳{formatAmount(opt.costPrice || 0)}
+                                      </span>
+                                    )}
+                                  </div>
                                 )}
-                              </div>
-                              {!item.productId && (
-                                <datalist id={`catalog-prods-${idx}`}>
-                                  {catalogProducts.map((p) => {
-                                    const bPrice = p.branch_prices?.[selectedBranchId]?.purchase_price;
-                                    const effectiveCost = (bPrice !== null && bPrice !== undefined) ? bPrice : p.purchase_price;
-                                    return (
-                                      <option key={p.id} value={p.name}>
-                                        {p.product_code || p.sku ? `(Code: ${p.product_code || p.sku}) ` : ''}(Cost: ৳{formatAmount(effectiveCost)})
-                                      </option>
-                                    );
-                                  })}
-                                </datalist>
-                              )}
+                                placeholder="Type or select product..."
+                                isClearable
+                                styles={{
+                                  control: (base) => ({
+                                    ...base,
+                                    minHeight: '32px',
+                                    height: '32px',
+                                    fontSize: '0.82rem',
+                                  }),
+                                }}
+                              />
                             </td>
                             <td style={{ verticalAlign: 'middle', textAlign: 'right', padding: '0.3rem 0.3rem' }}>
                               <input
@@ -1913,77 +1854,69 @@ export default function Purchases({ userProfile, branches, addToast }) {
                     {purchaseItems.map((item, idx) => (
                       <div key={idx} className="mobile-item-card">
                         <div className="mobile-card-header">
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', flex: 1 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', flex: 1, minWidth: 0 }}>
                             <span style={{ fontSize: '0.8rem', fontWeight: 800, color: '#0284c7' }}>#{idx + 1}</span>
-                            <div style={{ position: 'relative', flex: 1, display: 'flex', alignItems: 'center' }}>
-                              <input
-                                type="text"
-                                className="input-control"
-                                placeholder="Type or select product..."
-                                value={item.name || ''}
-                                readOnly={Boolean(item.productId)}
-                                onChange={(e) => {
-                                  if (item.productId) return;
-                                  const val = e.target.value;
-                                  const matched = catalogProducts.find(
-                                    (p) => p.name.toLowerCase() === val.toLowerCase() || p.sku?.toLowerCase() === val.toLowerCase()
-                                  );
-                                  if (matched) {
-                                    const bPrice = matched.branch_prices?.[selectedBranchId]?.purchase_price;
-                                    const effectiveCost = (bPrice !== null && bPrice !== undefined) ? bPrice : matched.purchase_price;
-                                    updateItemRow(idx, { productId: matched.id, code: matched.sku || matched.product_code || item.code || '', name: matched.name, costPrice: effectiveCost });
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <SearchableCreatableSelect
+                                value={
+                                  item.productId
+                                    ? { value: item.productId, label: item.name, code: item.code, costPrice: item.costPrice }
+                                    : item.name
+                                    ? { value: item.name, label: item.name, isNew: true, code: item.code, costPrice: item.costPrice }
+                                    : null
+                                }
+                                options={catalogProducts.map((p) => {
+                                  const bPrice = p.branch_prices?.[selectedBranchId]?.purchase_price;
+                                  const effectiveCost = (bPrice !== null && bPrice !== undefined) ? bPrice : p.purchase_price;
+                                  return {
+                                    value: p.id,
+                                    label: p.name,
+                                    code: p.product_code || p.sku || '',
+                                    costPrice: effectiveCost,
+                                  };
+                                })}
+                                onChange={(opt) => {
+                                  if (!opt) {
+                                    updateItemRow(idx, { productId: '', code: '', name: '', costPrice: 0 });
+                                    return;
+                                  }
+                                  if (opt.__isNew__ || opt.isNew) {
+                                    updateItemRow(idx, {
+                                      productId: '',
+                                      name: opt.label || opt.value,
+                                      code: item.code || opt.label || opt.value,
+                                      costPrice: item.costPrice || 0,
+                                    });
                                   } else {
-                                    updateItemRow(idx, { productId: '', name: val });
+                                    updateItemRow(idx, {
+                                      productId: opt.value,
+                                      name: opt.label,
+                                      code: opt.code || '',
+                                      costPrice: opt.costPrice || 0,
+                                    });
                                   }
                                 }}
-                                list={!item.productId ? `mob-pur-prods-${idx}` : undefined}
-                                required
-                                style={{
-                                  height: '36px',
-                                  minHeight: '36px',
-                                  width: '100%',
-                                  padding: '0.25rem 0.5rem',
-                                  paddingRight: item.productId ? '1.8rem' : '0.5rem',
-                                  fontSize: '0.88rem',
-                                  backgroundColor: item.productId ? '#f1f5f9' : '#ffffff',
-                                  cursor: item.productId ? 'not-allowed' : 'text',
-                                  fontWeight: item.productId ? 600 : 'normal',
+                                formatOptionLabel={(opt) => (
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+                                    <span style={{ fontWeight: 600 }}>{opt.label}</span>
+                                    {opt.costPrice !== undefined && (
+                                      <span style={{ fontSize: '0.74rem', color: '#64748b' }}>
+                                        {opt.code ? `Code: ${opt.code} | ` : ''}৳{formatAmount(opt.costPrice || 0)}
+                                      </span>
+                                    )}
+                                  </div>
+                                )}
+                                placeholder="Type or select product..."
+                                isClearable
+                                styles={{
+                                  control: (base) => ({
+                                    ...base,
+                                    minHeight: '36px',
+                                    height: '36px',
+                                    fontSize: '0.85rem',
+                                  }),
                                 }}
                               />
-                              {item.productId && (
-                                <button
-                                  type="button"
-                                  onClick={() => updateItemRow(idx, { productId: '', code: '', name: '', costPrice: 0 })}
-                                  title="Clear selection and enter unlisted item"
-                                  style={{
-                                    position: 'absolute',
-                                    right: '0.4rem',
-                                    background: 'none',
-                                    border: 'none',
-                                    color: 'var(--text-muted)',
-                                    cursor: 'pointer',
-                                    padding: '0.2rem',
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    justifyContent: 'center',
-                                  }}
-                                >
-                                  <X size={15} />
-                                </button>
-                              )}
-                              {!item.productId && (
-                                <datalist id={`mob-pur-prods-${idx}`}>
-                                  {catalogProducts.map((p) => {
-                                    const bPrice = p.branch_prices?.[selectedBranchId]?.purchase_price;
-                                    const effectiveCost = (bPrice !== null && bPrice !== undefined) ? bPrice : p.purchase_price;
-                                    return (
-                                      <option key={p.id} value={p.name}>
-                                        {p.sku} (Cost: ৳{formatAmount(effectiveCost)})
-                                      </option>
-                                    );
-                                  })}
-                                </datalist>
-                              )}
                             </div>
                           </div>
                           <button
@@ -2512,30 +2445,34 @@ export default function Purchases({ userProfile, branches, addToast }) {
                                   </span>
                                 )}
                               </div>
-                              <select
-                                className="input-control"
-                                value={editSupplierId}
-                                onChange={(e) => setEditSupplierId(e.target.value)}
-                                disabled={isLocked}
-                                required
-                                style={{
-                                  height: '36px',
-                                  minHeight: '36px',
-                                  fontSize: '0.85rem',
-                                  backgroundColor: isLocked ? '#eff6ff' : '#ffffff',
-                                  borderColor: isLocked ? '#93c5fd' : 'var(--border-color)',
-                                  color: isLocked ? '#1e3a8a' : 'inherit',
-                                  fontWeight: isLocked ? 600 : 'normal',
-                                  cursor: isLocked ? 'not-allowed' : 'pointer',
+                              <SearchableSelect
+                                value={
+                                  editSupplierId
+                                    ? {
+                                        value: editSupplierId,
+                                        label: `${suppliers.find((s) => s.id === editSupplierId)?.name || 'Supplier'} ${suppliers.find((s) => s.id === editSupplierId)?.phone ? `(${suppliers.find((s) => s.id === editSupplierId)?.phone})` : ''}`,
+                                      }
+                                    : null
+                                }
+                                options={suppliers.map((s) => ({
+                                  value: s.id,
+                                  label: `${s.name} ${s.phone ? `(${s.phone})` : ''}`,
+                                }))}
+                                onChange={(opt) => setEditSupplierId(opt ? opt.value : '')}
+                                placeholder="-- Select Supplier --"
+                                isDisabled={isLocked}
+                                isClearable
+                                styles={{
+                                  control: (base) => ({
+                                    ...base,
+                                    minHeight: '36px',
+                                    height: '36px',
+                                    fontSize: '0.85rem',
+                                    backgroundColor: isLocked ? '#eff6ff' : '#ffffff',
+                                    borderColor: isLocked ? '#93c5fd' : '#cbd5e1',
+                                  }),
                                 }}
-                              >
-                                <option value="">-- Select Supplier --</option>
-                                {suppliers.map((s) => (
-                                  <option key={s.id} value={s.id}>
-                                    {s.name} {s.phone ? `(${s.phone})` : ''}
-                                  </option>
-                                ))}
-                              </select>
+                              />
                             </div>
 
                             <div className="form-group" style={{ marginBottom: 0 }}>
@@ -2555,101 +2492,50 @@ export default function Purchases({ userProfile, branches, addToast }) {
                     </div>
 
                     {/* Search Product Bar */}
-                    <div style={{ position: 'relative' }}>
-                      <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
-                        <input
-                          type="text"
-                          className="input-control"
-                          placeholder="Search product by name or Code..."
-                          value={editSearchQuery}
-                          onChange={(e) => {
-                            setEditSearchQuery(e.target.value);
-                            setShowEditSearchSuggestions(true);
-                          }}
-                          onFocus={() => setShowEditSearchSuggestions(true)}
-                          onBlur={() => setTimeout(() => setShowEditSearchSuggestions(false), 250)}
-                          style={{ height: '36px', minHeight: '36px', fontSize: '0.85rem', padding: '0.25rem 0.6rem' }}
-                        />
-                        {editSearchQuery && (
-                          <button
-                            type="button"
-                            className="btn btn-secondary btn-sm"
-                            onClick={() => {
-                              setEditSearchQuery('');
-                              setShowEditSearchSuggestions(false);
-                            }}
-                            style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem', height: '36px' }}
-                          >
-                            Clear
-                          </button>
+                    <div>
+                      <SearchableSelect
+                        options={catalogProducts.map((prod) => {
+                          const bPrice = prod.branch_prices?.[editingPurchase.branch_id]?.purchase_price;
+                          const effectiveCost = (bPrice !== null && bPrice !== undefined) ? bPrice : prod.purchase_price;
+                          return {
+                            value: prod.id,
+                            label: prod.name,
+                            code: prod.product_code || prod.sku || '',
+                            costPrice: effectiveCost,
+                            product: prod,
+                          };
+                        })}
+                        value={null}
+                        onChange={(opt) => {
+                          if (!opt) return;
+                          const prod = opt.product;
+                          const effectiveCost = opt.costPrice;
+                          if (editPurchaseItems.length === 1 && !editPurchaseItems[0].productId && !editPurchaseItems[0].name && !editPurchaseItems[0].code) {
+                            updateEditItemRow(0, { productId: prod.id, code: prod.product_code || prod.sku || '', name: prod.name, quantity: 1, costPrice: effectiveCost });
+                          } else {
+                            setEditPurchaseItems((prev) => [...prev, { productId: prod.id, code: prod.product_code || prod.sku || '', name: prod.name, quantity: 1, costPrice: effectiveCost }]);
+                          }
+                          showMessage(`${prod.name} added to list.`, 'success');
+                        }}
+                        placeholder="🔍 Search & add product from catalog to list..."
+                        isClearable={false}
+                        formatOptionLabel={(opt) => (
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <span style={{ fontWeight: 600 }}>{opt.label}</span>
+                            <span style={{ fontSize: '0.74rem', color: '#64748b' }}>
+                              {opt.code ? `Code: ${opt.code} | ` : ''}৳{formatAmount(opt.costPrice || 0)}
+                            </span>
+                          </div>
                         )}
-                      </div>
-
-                      {showEditSearchSuggestions && (
-                        <div style={{
-                          position: 'absolute',
-                          top: '100%',
-                          left: 0,
-                          right: 0,
-                          backgroundColor: '#ffffff',
-                          border: '1px solid var(--border-color)',
-                          borderRadius: 'var(--border-radius-sm)',
-                          boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)',
-                          maxHeight: '180px',
-                          overflowY: 'auto',
-                          zIndex: 999,
-                          marginTop: '0.2rem'
-                        }}>
-                          {catalogProducts
-                            .filter(p => {
-                              if (!editSearchQuery.trim()) return true;
-                              return (
-                                p.name.toLowerCase().includes(editSearchQuery.toLowerCase()) ||
-                                (p.product_code && p.product_code.toLowerCase().includes(editSearchQuery.toLowerCase())) ||
-                                (p.sku && p.sku.toLowerCase().includes(editSearchQuery.toLowerCase()))
-                              );
-                            })
-                            .map((prod) => (
-                              <div
-                                key={prod.id}
-                                style={{
-                                  padding: '0.4rem 0.65rem',
-                                  cursor: 'pointer',
-                                  borderBottom: '1px solid #f1f5f9',
-                                  fontSize: '0.8rem',
-                                  textAlign: 'left'
-                                }}
-                                onClick={() => {
-                                  if (editPurchaseItems.length === 1 && !editPurchaseItems[0].productId && !editPurchaseItems[0].name && !editPurchaseItems[0].code) {
-                                    updateEditItemRow(0, { productId: prod.id, code: prod.product_code || prod.sku || '', name: prod.name, quantity: 1, costPrice: prod.purchase_price });
-                                  } else {
-                                    setEditPurchaseItems([...editPurchaseItems, { productId: prod.id, code: prod.product_code || prod.sku || '', name: prod.name, quantity: 1, costPrice: prod.purchase_price }]);
-                                  }
-                                  setEditSearchQuery('');
-                                  setShowEditSearchSuggestions(false);
-                                  showMessage(`${prod.name} added to list.`, 'success');
-                                }}
-                              >
-                                <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{prod.name}</div>
-                                <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
-                                  Code: {prod.product_code || prod.sku || '—'} | Cost: ৳{formatAmount(prod.purchase_price)}
-                                </div>
-                              </div>
-                            ))}
-                          {catalogProducts.filter(p => {
-                            if (!editSearchQuery.trim()) return true;
-                            return (
-                              p.name.toLowerCase().includes(editSearchQuery.toLowerCase()) ||
-                              (p.product_code && p.product_code.toLowerCase().includes(editSearchQuery.toLowerCase())) ||
-                              (p.sku && p.sku.toLowerCase().includes(editSearchQuery.toLowerCase()))
-                            );
-                          }).length === 0 && (
-                            <div style={{ padding: '0.5rem', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.8rem' }}>
-                              No matching products found.
-                            </div>
-                          )}
-                        </div>
-                      )}
+                        styles={{
+                          control: (base) => ({
+                            ...base,
+                            minHeight: '38px',
+                            height: '38px',
+                            fontSize: '0.85rem',
+                          }),
+                        }}
+                      />
                     </div>
 
                     {/* Desktop Items Table */}
@@ -2708,79 +2594,66 @@ export default function Purchases({ userProfile, branches, addToast }) {
                                 />
                               </td>
                               <td style={{ verticalAlign: 'middle', padding: '0.3rem 0.3rem' }}>
-                                <div style={{ position: 'relative', display: 'flex', alignItems: 'center', width: '100%' }}>
-                                  <input
-                                    type="text"
-                                    className="input-control"
-                                    placeholder="Type or select product..."
-                                    value={item.name || ''}
-                                    readOnly={Boolean(item.productId)}
-                                    onChange={(e) => {
-                                      if (item.productId) return;
-                                      const val = e.target.value;
-                                      const matched = catalogProducts.find(
-                                        (p) => p.name.toLowerCase() === val.toLowerCase() || p.sku?.toLowerCase() === val.toLowerCase()
-                                      );
-                                      if (matched) {
-                                        const bPrice = matched.branch_prices?.[editingPurchase.branch_id]?.purchase_price;
-                                        const effectiveCost = (bPrice !== null && bPrice !== undefined) ? bPrice : matched.purchase_price;
-                                        updateEditItemRow(idx, { productId: matched.id, code: matched.sku || matched.product_code || item.code || '', name: matched.name, costPrice: effectiveCost });
-                                      } else {
-                                        updateEditItemRow(idx, { productId: '', name: val });
-                                      }
-                                    }}
-                                    list={!item.productId ? `edit-catalog-prods-${idx}` : undefined}
-                                    required
-                                    style={{
-                                      height: '30px',
-                                      minHeight: '30px',
-                                      width: '100%',
-                                      padding: '0.15rem 0.4rem',
-                                      paddingRight: item.productId ? '1.5rem' : '0.4rem',
-                                      fontSize: '0.82rem',
-                                      backgroundColor: item.productId ? '#f1f5f9' : '#ffffff',
-                                      cursor: item.productId ? 'not-allowed' : 'text',
-                                      fontWeight: item.productId ? 600 : 'normal',
-                                    }}
-                                    title={item.productId ? `Catalog product (locked): ${item.name}. Click '✕' to unlock/clear.` : item.name || 'Type or select product'}
-                                  />
-                                  {item.productId && (
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        updateEditItemRow(idx, { productId: '', code: '', name: '', costPrice: 0 });
-                                      }}
-                                      title="Clear selection and enter unlisted item"
-                                      style={{
-                                        position: 'absolute',
-                                        right: '0.3rem',
-                                        background: 'none',
-                                        border: 'none',
-                                        color: 'var(--text-muted)',
-                                        cursor: 'pointer',
-                                        padding: '0.1rem',
-                                        display: 'flex',
-                                        alignItems: 'center',
-                                        justifyContent: 'center',
-                                      }}
-                                    >
-                                      <X size={13} />
-                                    </button>
+                                <SearchableCreatableSelect
+                                  value={
+                                    item.productId
+                                      ? { value: item.productId, label: item.name, code: item.code, costPrice: item.costPrice }
+                                      : item.name
+                                      ? { value: item.name, label: item.name, isNew: true, code: item.code, costPrice: item.costPrice }
+                                      : null
+                                  }
+                                  options={catalogProducts.map((p) => {
+                                    const bPrice = p.branch_prices?.[editingPurchase.branch_id]?.purchase_price;
+                                    const effectiveCost = (bPrice !== null && bPrice !== undefined) ? bPrice : p.purchase_price;
+                                    return {
+                                      value: p.id,
+                                      label: p.name,
+                                      code: p.product_code || p.sku || '',
+                                      costPrice: effectiveCost,
+                                    };
+                                  })}
+                                  onChange={(opt) => {
+                                    if (!opt) {
+                                      updateEditItemRow(idx, { productId: '', code: '', name: '', costPrice: 0 });
+                                      return;
+                                    }
+                                    if (opt.__isNew__ || opt.isNew) {
+                                      updateEditItemRow(idx, {
+                                        productId: '',
+                                        name: opt.label || opt.value,
+                                        code: item.code || opt.label || opt.value,
+                                        costPrice: item.costPrice || 0,
+                                      });
+                                    } else {
+                                      updateEditItemRow(idx, {
+                                        productId: opt.value,
+                                        name: opt.label,
+                                        code: opt.code || '',
+                                        costPrice: opt.costPrice || 0,
+                                      });
+                                    }
+                                  }}
+                                  formatOptionLabel={(opt) => (
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+                                      <span style={{ fontWeight: 600 }}>{opt.label}</span>
+                                      {opt.costPrice !== undefined && (
+                                        <span style={{ fontSize: '0.74rem', color: '#64748b' }}>
+                                          {opt.code ? `Code: ${opt.code} | ` : ''}৳{formatAmount(opt.costPrice || 0)}
+                                        </span>
+                                      )}
+                                    </div>
                                   )}
-                                </div>
-                                {!item.productId && (
-                                  <datalist id={`edit-catalog-prods-${idx}`}>
-                                    {catalogProducts.map((p) => {
-                                      const bPrice = p.branch_prices?.[editingPurchase.branch_id]?.purchase_price;
-                                      const effectiveCost = (bPrice !== null && bPrice !== undefined) ? bPrice : p.purchase_price;
-                                      return (
-                                        <option key={p.id} value={p.name}>
-                                          {p.product_code || p.sku ? `(Code: ${p.product_code || p.sku}) ` : ''}(Cost: ৳{formatAmount(effectiveCost)})
-                                        </option>
-                                      );
-                                    })}
-                                  </datalist>
-                                )}
+                                  placeholder="Type or select product..."
+                                  isClearable
+                                  styles={{
+                                    control: (base) => ({
+                                      ...base,
+                                      minHeight: '32px',
+                                      height: '32px',
+                                      fontSize: '0.82rem',
+                                    }),
+                                  }}
+                                />
                               </td>
                               <td style={{ verticalAlign: 'middle', textAlign: 'right', padding: '0.3rem 0.3rem' }}>
                                 <input
@@ -2831,27 +2704,84 @@ export default function Purchases({ userProfile, branches, addToast }) {
                       {editPurchaseItems.map((item, idx) => (
                         <div key={idx} className="mobile-item-card">
                           <div className="mobile-card-header">
-                            <span className="mobile-card-badge">#{idx + 1}</span>
-                            <div style={{ flex: 1, minWidth: 0, fontWeight: 600, fontSize: '0.85rem' }}>
-                              {item.productId ? (
-                                <span style={{ color: 'var(--primary)' }}>{item.name}</span>
-                              ) : (
-                                <span>Custom / Unlisted Item</span>
-                              )}
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', flex: 1, minWidth: 0 }}>
+                              <span style={{ fontSize: '0.8rem', fontWeight: 800, color: '#0284c7' }}>#{idx + 1}</span>
+                              <div style={{ flex: 1, minWidth: 0 }}>
+                                <SearchableCreatableSelect
+                                  value={
+                                    item.productId
+                                      ? { value: item.productId, label: item.name, code: item.code, costPrice: item.costPrice }
+                                      : item.name
+                                      ? { value: item.name, label: item.name, isNew: true, code: item.code, costPrice: item.costPrice }
+                                      : null
+                                  }
+                                  options={catalogProducts.map((p) => {
+                                    const bPrice = p.branch_prices?.[editingPurchase.branch_id]?.purchase_price;
+                                    const effectiveCost = (bPrice !== null && bPrice !== undefined) ? bPrice : p.purchase_price;
+                                    return {
+                                      value: p.id,
+                                      label: p.name,
+                                      code: p.product_code || p.sku || '',
+                                      costPrice: effectiveCost,
+                                    };
+                                  })}
+                                  onChange={(opt) => {
+                                    if (!opt) {
+                                      updateEditItemRow(idx, { productId: '', code: '', name: '', costPrice: 0 });
+                                      return;
+                                    }
+                                    if (opt.__isNew__ || opt.isNew) {
+                                      updateEditItemRow(idx, {
+                                        productId: '',
+                                        name: opt.label || opt.value,
+                                        code: item.code || opt.label || opt.value,
+                                        costPrice: item.costPrice || 0,
+                                      });
+                                    } else {
+                                      updateEditItemRow(idx, {
+                                        productId: opt.value,
+                                        name: opt.label,
+                                        code: opt.code || '',
+                                        costPrice: opt.costPrice || 0,
+                                      });
+                                    }
+                                  }}
+                                  formatOptionLabel={(opt) => (
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+                                      <span style={{ fontWeight: 600 }}>{opt.label}</span>
+                                      {opt.costPrice !== undefined && (
+                                        <span style={{ fontSize: '0.74rem', color: '#64748b' }}>
+                                          {opt.code ? `Code: ${opt.code} | ` : ''}৳{formatAmount(opt.costPrice || 0)}
+                                        </span>
+                                      )}
+                                    </div>
+                                  )}
+                                  placeholder="Type or select product..."
+                                  isClearable
+                                  styles={{
+                                    control: (base) => ({
+                                      ...base,
+                                      minHeight: '36px',
+                                      height: '36px',
+                                      fontSize: '0.85rem',
+                                    }),
+                                  }}
+                                />
+                              </div>
                             </div>
                             <button
                               type="button"
+                              className="btn btn-danger btn-sm btn-icon"
+                              style={{ border: 'none', background: '#fee2e2', color: 'var(--danger)', display: 'inline-flex', padding: '0.35rem', borderRadius: '6px', minWidth: '32px', height: '32px', alignItems: 'center', justifyContent: 'center' }}
                               onClick={() => removeEditItemRow(idx)}
-                              style={{ border: 'none', background: 'none', color: 'var(--danger)', cursor: 'pointer', padding: '0.2rem' }}
-                              title="Delete Item"
                             >
-                              <Trash2 size={16} />
+                              <Trash2 size={15} />
                             </button>
                           </div>
 
                           <div className="mobile-card-row-2">
                             <div className="form-group" style={{ marginBottom: 0 }}>
-                              <label style={{ fontSize: '0.72rem', color: 'var(--text-secondary)' }}>Code (Optional)</label>
+                              <label className="mobile-card-label">Code (Optional)</label>
                               <input
                                 type="text"
                                 className="input-control"
@@ -2874,74 +2804,27 @@ export default function Purchases({ userProfile, branches, addToast }) {
                                 }}
                                 style={{
                                   height: '34px',
-                                  fontSize: '0.82rem',
-                                  backgroundColor: item.productId ? '#f1f5f9' : '#fff'
+                                  minHeight: '34px',
+                                  width: '100%',
+                                  fontSize: '0.84rem',
+                                  fontFamily: 'monospace',
+                                  backgroundColor: item.productId ? '#f1f5f9' : '#ffffff',
                                 }}
                               />
                             </div>
 
                             <div className="form-group" style={{ marginBottom: 0 }}>
-                              <label style={{ fontSize: '0.72rem', color: 'var(--text-secondary)' }}>Product Name *</label>
-                              <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
-                                <input
-                                  type="text"
-                                  className="input-control"
-                                  placeholder="Product Name"
-                                  value={item.name || ''}
-                                  readOnly={Boolean(item.productId)}
-                                  onChange={(e) => {
-                                    if (item.productId) return;
-                                    const val = e.target.value;
-                                    const matched = catalogProducts.find(
-                                      (p) => p.name.toLowerCase() === val.toLowerCase() || p.sku?.toLowerCase() === val.toLowerCase()
-                                    );
-                                    if (matched) {
-                                      const bPrice = matched.branch_prices?.[editingPurchase.branch_id]?.purchase_price;
-                                      const effectiveCost = (bPrice !== null && bPrice !== undefined) ? bPrice : matched.purchase_price;
-                                      updateEditItemRow(idx, { productId: matched.id, code: matched.sku || matched.product_code || item.code || '', name: matched.name, costPrice: effectiveCost });
-                                    } else {
-                                      updateEditItemRow(idx, { productId: '', name: val });
-                                    }
-                                  }}
-                                  list={!item.productId ? `mob-edit-catalog-prods-${idx}` : undefined}
-                                  required
-                                  style={{
-                                    height: '34px',
-                                    fontSize: '0.82rem',
-                                    backgroundColor: item.productId ? '#f1f5f9' : '#fff',
-                                    paddingRight: item.productId ? '1.5rem' : '0.4rem'
-                                  }}
-                                />
-                                {item.productId && (
-                                  <button
-                                    type="button"
-                                    onClick={() => updateEditItemRow(idx, { productId: '', code: '', name: '', costPrice: 0 })}
-                                    style={{
-                                      position: 'absolute',
-                                      right: '0.3rem',
-                                      background: 'none',
-                                      border: 'none',
-                                      color: 'var(--text-muted)',
-                                      cursor: 'pointer'
-                                    }}
-                                  >
-                                    <X size={14} />
-                                  </button>
-                                )}
-                              </div>
-                              {!item.productId && (
-                                <datalist id={`mob-edit-catalog-prods-${idx}`}>
-                                  {catalogProducts.map((p) => {
-                                    const bPrice = p.branch_prices?.[editingPurchase.branch_id]?.purchase_price;
-                                    const effectiveCost = (bPrice !== null && bPrice !== undefined) ? bPrice : p.purchase_price;
-                                    return (
-                                      <option key={p.id} value={p.name}>
-                                        {p.product_code || p.sku ? `(Code: ${p.product_code || p.sku}) ` : ''}(Cost: ৳{formatAmount(effectiveCost)})
-                                      </option>
-                                    );
-                                  })}
-                                </datalist>
-                              )}
+                              <label className="mobile-card-label">Quantity *</label>
+                              <input
+                                type="number"
+                                min="1"
+                                placeholder="Qty"
+                                className="input-control"
+                                value={item.quantity}
+                                onChange={(e) => updateEditItemField(idx, 'quantity', parseInt(e.target.value) || 1)}
+                                required
+                                style={{ height: '34px', minHeight: '34px', fontSize: '0.88rem', textAlign: 'center', fontWeight: 700 }}
+                              />
                             </div>
                           </div>
 

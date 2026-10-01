@@ -146,7 +146,7 @@ export default function Sales({ userProfile, branches, addToast }) {
   }, []);
 
   useEffect(() => {
-    if (location.state?.openPos) {
+    if (location.state?.openPos || location.state?.openNewSale) {
       resetPosForm();
       setShowPosModal(true);
       window.history.replaceState({}, document.title);

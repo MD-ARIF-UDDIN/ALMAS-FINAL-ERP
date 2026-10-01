@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { useLocation } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
 import { 
   Package, 
@@ -14,6 +15,7 @@ import { hasPermission } from '../utils/permissions';
 import { formatAmount } from '../utils/format';
 
 export default function Product({ userProfile, branches, addToast }) {
+  const location = useLocation();
   const [products, setProducts] = useState([]);
   const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -144,7 +146,7 @@ export default function Product({ userProfile, branches, addToast }) {
     setEditId(null);
   };
 
-  const handleOpenCreate = () => {
+  const handleOpenCreate = useCallback(() => {
     resetForm();
     const initBranchPrices = {};
     (branches || []).forEach((b) => {
@@ -152,7 +154,14 @@ export default function Product({ userProfile, branches, addToast }) {
     });
     setBranchPrices(initBranchPrices);
     setShowModal(true);
-  };
+  }, [branches]);
+
+  useEffect(() => {
+    if (location.state?.openCreateProduct) {
+      handleOpenCreate();
+      window.history.replaceState({}, document.title);
+    }
+  }, [location.state, handleOpenCreate]);
 
   const handleOpenEdit = (prod) => {
     setProductCode(prod.product_code || prod.sku || '');
