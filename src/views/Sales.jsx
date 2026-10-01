@@ -111,6 +111,17 @@ export default function Sales({ userProfile, branches, addToast }) {
   const [showCartSearchSuggestions, setShowCartSearchSuggestions] = useState(false);
   const cartSearchRef = useRef(null);
 
+  // Custom / Unlisted Product (Not from Book) States
+  const [showCustomProdForm, setShowCustomProdForm] = useState(false);
+  const [customProdCode, setCustomProdCode] = useState('');
+  const [customProdName, setCustomProdName] = useState('');
+  const [customProdPrice, setCustomProdPrice] = useState('');
+  const [customProdQty, setCustomProdQty] = useState(1);
+  const [customProdSize, setCustomProdSize] = useState('');
+  const [customProdCarton, setCustomProdCarton] = useState('');
+  const [customProdCategory, setCustomProdCategory] = useState('');
+  const [isCheckingCustomCode, setIsCheckingCustomCode] = useState(false);
+
   // Close search suggestions on outside click
   useEffect(() => {
     const handleClickOutside = (event) => {
@@ -559,6 +570,107 @@ export default function Sales({ userProfile, branches, addToast }) {
     return Math.max(0, subAfterDiscount + tax);
   };
 
+  // Add Unlisted Product (Not from Book) to POS Cart
+  const handleAddCustomProduct = async (e) => {
+    if (e) e.preventDefault();
+    const cleanCode = customProdCode.trim();
+    const cleanName = customProdName.trim();
+    const cleanCategory = customProdCategory.trim();
+
+    if (!cleanCode) {
+      showMessage('Please provide a Product Code for the unlisted item.', 'error');
+      return;
+    }
+
+    // 1. Check if same code is already in current Cart
+    const alreadyInCart = cart.some(
+      (item) =>
+        (item.product?.sku && item.product.sku.toLowerCase() === cleanCode.toLowerCase()) ||
+        (item.product?.product_code && item.product.product_code.toLowerCase() === cleanCode.toLowerCase())
+    );
+    if (alreadyInCart) {
+      showMessage(`Product with code "${cleanCode}" is already in your invoice cart!`, 'error');
+      return;
+    }
+
+    // 2. Check if product exists in local loaded branch products catalog
+    const existsInLocal = products.some(
+      (p) =>
+        (p.products?.sku && p.products.sku.toLowerCase() === cleanCode.toLowerCase()) ||
+        (p.products?.product_code && p.products.product_code.toLowerCase() === cleanCode.toLowerCase())
+    );
+    if (existsInLocal) {
+      showMessage(`Product with code "${cleanCode}" already exists in the product list! Please select it from the catalog.`, 'error');
+      return;
+    }
+
+    // 3. Query Supabase products table to verify globally
+    setIsCheckingCustomCode(true);
+    try {
+      const { data: existingDbProds, error: checkErr } = await supabase
+        .from('products')
+        .select('id, name, sku, product_code')
+        .or(`sku.ilike.${cleanCode},product_code.ilike.${cleanCode}`)
+        .limit(1);
+
+      if (checkErr) throw checkErr;
+
+      if (existingDbProds && existingDbProds.length > 0) {
+        const existingItem = existingDbProds[0];
+        showMessage(
+          `Product with code "${cleanCode}" already exists in the product list (${existingItem.name || existingItem.sku || 'Catalog item'})!`,
+          'error'
+        );
+        setIsCheckingCustomCode(false);
+        return;
+      }
+
+      const parsedPrice = parseFloat(customProdPrice) || 0;
+      const parsedQty = parseFloat(customProdQty) || 1;
+      const displayName = cleanName || cleanCode;
+
+      const customCartItem = {
+        product: {
+          id: `custom_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+          sku: cleanCode,
+          product_code: cleanCode,
+          name: displayName,
+          sale_price: parsedPrice,
+          category: cleanCategory || null,
+          unit: 'pcs',
+          is_custom_unlisted: true,
+        },
+        quantity: parsedQty > 0 ? parsedQty : 1,
+        size: customProdSize.trim(),
+        number_of_carton: customProdCarton !== '' ? customProdCarton : '',
+        unitPrice: parsedPrice,
+        stockLimit: 999999,
+        isCustomUnlisted: true,
+        rawCode: cleanCode,
+        rawName: displayName,
+        rawCategory: cleanCategory,
+      };
+
+      setCart([...cart, customCartItem]);
+      setCustomProdCode('');
+      setCustomProdName('');
+      setCustomProdPrice('');
+      setCustomProdQty(1);
+      setCustomProdSize('');
+      setCustomProdCarton('');
+      setCustomProdCategory('');
+      setShowCustomProdForm(false);
+      setCartSearchQuery('');
+      setShowCartSearchSuggestions(false);
+      showMessage(`Added unlisted item "${displayName}" [${cleanCode}] to invoice cart.`, 'success');
+    } catch (err) {
+      console.error('Error verifying product code:', err);
+      showMessage('Failed to verify product code.', 'error');
+    } finally {
+      setIsCheckingCustomCode(false);
+    }
+  };
+
   const handleCheckoutSubmit = async (e) => {
     e.preventDefault();
     
@@ -596,7 +708,7 @@ export default function Sales({ userProfile, branches, addToast }) {
         showMessage(`Please specify a valid unit price for ${item.product?.name || 'item'}.`, 'error');
         return;
       }
-      if (!isFactory && q > item.stockLimit) {
+      if (!isFactory && !item.isCustomUnlisted && q > item.stockLimit) {
         showMessage(`Quantity for ${item.product?.name || 'item'} exceeds available stock of ${item.stockLimit}.`, 'error');
         return;
       }
@@ -622,6 +734,64 @@ export default function Sales({ userProfile, branches, addToast }) {
 
     setLoading(true);
     try {
+      // 0. Auto-save any Custom / Unlisted products to `products` and `inventory` tables
+      const customProdIdMap = {};
+      for (const item of cart) {
+        if (item.isCustomUnlisted || item.product?.is_custom_unlisted) {
+          const cleanCode = item.product.sku || item.rawCode;
+          const displayName = item.product.name || item.rawName || cleanCode;
+          const price = getItemPrice(item);
+          const cat = item.rawCategory || item.product.category || null;
+
+          // Check if already in DB (in case created concurrently)
+          const { data: existingList } = await supabase
+            .from('products')
+            .select('id, name, sku, product_code')
+            .or(`sku.ilike.${cleanCode},product_code.ilike.${cleanCode}`)
+            .limit(1);
+
+          let realProdId = null;
+          if (existingList && existingList.length > 0) {
+            realProdId = existingList[0].id;
+          } else {
+            const { data: newProd, error: insertProdErr } = await supabase
+              .from('products')
+              .insert([
+                {
+                  sku: cleanCode,
+                  product_code: cleanCode,
+                  name: displayName,
+                  category: cat,
+                  purchase_price: 0,
+                  sale_price: price,
+                  description: 'Added via POS Invoice (Custom / Unlisted item)',
+                },
+              ])
+              .select()
+              .single();
+
+            if (insertProdErr) throw insertProdErr;
+            realProdId = newProd.id;
+
+            if (branches && branches.length > 0) {
+              const invUpserts = branches.map((b) => ({
+                branch_id: b.id,
+                product_id: realProdId,
+                quantity: 0,
+                purchase_price: null,
+                sale_price: price,
+                updated_at: new Date().toISOString(),
+              }));
+              const { error: invErr } = await supabase
+                .from('inventory')
+                .upsert(invUpserts, { onConflict: 'branch_id,product_id', ignoreDuplicates: false });
+              if (invErr) console.warn('Inventory upsert warning for custom product:', invErr);
+            }
+          }
+          customProdIdMap[item.product.id] = realProdId;
+        }
+      }
+
       // Create or link contact if it's a new customer
       if (customerType === 'new') {
         const trimmedCustName = newCustName.trim();
@@ -724,13 +894,14 @@ export default function Sales({ userProfile, branches, addToast }) {
       if (saleError) throw saleError;
       const saleId = saleData[0].id;
 
-      // 2. Insert Sale Items (including size and number_of_carton)
+      // 2. Insert Sale Items (including size, number_of_carton, and resolved custom product_id)
       const saleItemsData = cart.map((item) => {
+        const resolvedProductId = customProdIdMap[item.product.id] || item.product.id;
         const qty = parseFloat(item.quantity) || 1;
         const price = getItemPrice(item);
         const row = {
           sale_id: saleId,
-          product_id: item.product.id,
+          product_id: resolvedProductId,
           quantity: qty,
           unit_price: price,
           total_price: price * qty,
@@ -747,11 +918,12 @@ export default function Sales({ userProfile, branches, addToast }) {
       if (itemsError) {
         if (itemsError.message?.includes('size') || itemsError.message?.includes('number_of_carton')) {
           const fallbackData = cart.map((item) => {
+            const resolvedProductId = customProdIdMap[item.product.id] || item.product.id;
             const qty = parseFloat(item.quantity) || 1;
             const price = getItemPrice(item);
             return {
               sale_id: saleId,
-              product_id: item.product.id,
+              product_id: resolvedProductId,
               quantity: qty,
               unit_price: price,
               total_price: price * qty,
@@ -767,6 +939,7 @@ export default function Sales({ userProfile, branches, addToast }) {
       // 2.1 FIFO deduction on branch_challan_items for this branch (tracks sold vs left on Challans)
       if (!isFactory) {
         for (const item of cart) {
+          if (item.isCustomUnlisted || item.product?.is_custom_unlisted) continue;
           try {
             const { data: openChallanItems } = await supabase
               .from('branch_challan_items')
@@ -863,6 +1036,14 @@ export default function Sales({ userProfile, branches, addToast }) {
       setNewCustName('');
       setNewCustPhone('');
       setNewCustAddress('');
+      setCustomProdCode('');
+      setCustomProdName('');
+      setCustomProdPrice('');
+      setCustomProdQty(1);
+      setCustomProdSize('');
+      setCustomProdCarton('');
+      setCustomProdCategory('');
+      setShowCustomProdForm(false);
       setShowCheckoutModal(false);
       setShowPosModal(false);
       
@@ -2130,12 +2311,36 @@ export default function Sales({ userProfile, branches, addToast }) {
 
                   {/* QUICK SEARCH & ADD PRODUCT (Mobile & Quick-Desktop) */}
                   <div ref={cartSearchRef} style={{ position: 'relative', marginBottom: '0.25rem' }}>
-                    <label style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.25rem', fontWeight: 600, fontSize: '0.82rem' }}>
-                      <span>Search & Add Product</span>
-                      <span style={{ fontSize: '0.72rem', color: '#0284c7', fontWeight: 500 }}>
-                        {cartSearchQuery ? 'Matching items' : 'Click to see all items'}
-                      </span>
-                    </label>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.35rem' }}>
+                      <label style={{ margin: 0, fontWeight: 600, fontSize: '0.82rem' }}>Search & Add Product</label>
+                      <button
+                        type="button"
+                        className="btn btn-sm"
+                        style={{
+                          padding: '0.2rem 0.55rem',
+                          fontSize: '0.74rem',
+                          backgroundColor: showCustomProdForm ? '#fee2e2' : '#f0fdf4',
+                          color: showCustomProdForm ? '#b91c1c' : '#15803d',
+                          border: `1px solid ${showCustomProdForm ? '#fca5a5' : '#86efac'}`,
+                          borderRadius: 'var(--border-radius-sm)',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '0.3rem',
+                          fontWeight: 600,
+                          cursor: 'pointer'
+                        }}
+                        onClick={() => {
+                          setShowCustomProdForm(!showCustomProdForm);
+                          if (!showCustomProdForm && cartSearchQuery.trim()) {
+                            setCustomProdCode(cartSearchQuery.trim());
+                          }
+                        }}
+                      >
+                        <Plus size={13} />
+                        {showCustomProdForm ? 'Cancel Unlisted Item' : '+ Add Item (Not in Book)'}
+                      </button>
+                    </div>
+
                     <div style={{ position: 'relative' }}>
                       <Search size={16} style={{ position: 'absolute', left: '0.75rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
                       <input
@@ -2191,7 +2396,7 @@ export default function Sales({ userProfile, branches, addToast }) {
                           border: '1.5px solid #0284c7',
                           borderRadius: 'var(--border-radius-sm)',
                           boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.2), 0 8px 10px -6px rgba(0, 0, 0, 0.1)',
-                          maxHeight: '260px',
+                          maxHeight: '280px',
                           overflowY: 'auto',
                           zIndex: 1000,
                           marginTop: '0.25rem'
@@ -2205,7 +2410,7 @@ export default function Sales({ userProfile, branches, addToast }) {
                         )}
                         {filteredCartSearchProducts.length === 0 ? (
                           <div style={{ padding: '0.85rem', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.82rem' }}>
-                            No products matching "{cartSearchQuery}"
+                            No products in book matching "{cartSearchQuery}"
                           </div>
                         ) : (
                           filteredCartSearchProducts.map((invItem) => {
@@ -2271,9 +2476,180 @@ export default function Sales({ userProfile, branches, addToast }) {
                             );
                           })
                         )}
+
+                        {/* Direct Option to Add as Unlisted Item (Not from book) */}
+                        {cartSearchQuery.trim() && (
+                          <div
+                            onClick={() => {
+                              setCustomProdCode(cartSearchQuery.trim());
+                              setShowCustomProdForm(true);
+                              setShowCartSearchSuggestions(false);
+                            }}
+                            style={{
+                              padding: '0.75rem 0.85rem',
+                              backgroundColor: '#f0fdf4',
+                              borderTop: '1px solid #bbf7d0',
+                              cursor: 'pointer',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '0.5rem',
+                              color: '#15803d',
+                              fontSize: '0.8rem',
+                              fontWeight: 600,
+                              transition: 'background-color 0.15s ease'
+                            }}
+                            onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#dcfce7'; }}
+                            onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = '#f0fdf4'; }}
+                          >
+                            <Plus size={15} />
+                            <span>Add <strong>"{cartSearchQuery.trim()}"</strong> as New / Unlisted Product (Not in Book)</span>
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
+
+                  {/* UNLISTED PRODUCT QUICK FORM */}
+                  {showCustomProdForm && (
+                    <div
+                      style={{
+                        backgroundColor: '#f8fafc',
+                        border: '1.5px dashed #0284c7',
+                        borderRadius: 'var(--border-radius-sm)',
+                        padding: '0.85rem',
+                        marginBottom: '0.35rem',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '0.5rem'
+                      }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                          <Package size={15} style={{ color: '#0284c7' }} />
+                          <span style={{ fontWeight: 700, fontSize: '0.82rem', color: '#0369a1' }}>
+                            Add Unlisted Product (Not from Book)
+                          </span>
+                        </div>
+                        <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+                          Saves to catalog upon sale
+                        </span>
+                      </div>
+
+                      <form onSubmit={handleAddCustomProduct} style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: '0.45rem' }}>
+                          <div className="form-group" style={{ marginBottom: 0 }}>
+                            <label style={{ fontSize: '0.74rem', fontWeight: 600 }}>Product Code *</label>
+                            <input
+                              type="text"
+                              className="input-control"
+                              placeholder="e.g. ART-1002"
+                              value={customProdCode}
+                              onChange={(e) => setCustomProdCode(e.target.value)}
+                              style={{ fontSize: '0.8rem', padding: '0.3rem 0.45rem' }}
+                              required
+                            />
+                          </div>
+                          <div className="form-group" style={{ marginBottom: 0 }}>
+                            <label style={{ fontSize: '0.74rem', fontWeight: 600 }}>Name (Optional)</label>
+                            <input
+                              type="text"
+                              className="input-control"
+                              placeholder="Defaults to code"
+                              value={customProdName}
+                              onChange={(e) => setCustomProdName(e.target.value)}
+                              style={{ fontSize: '0.8rem', padding: '0.3rem 0.45rem' }}
+                            />
+                          </div>
+                          <div className="form-group" style={{ marginBottom: 0 }}>
+                            <label style={{ fontSize: '0.74rem', fontWeight: 600 }}>Sale Price (৳) *</label>
+                            <input
+                              type="number"
+                              min="0"
+                              step="any"
+                              className="input-control"
+                              placeholder="0.00"
+                              value={customProdPrice}
+                              onChange={(e) => setCustomProdPrice(e.target.value)}
+                              style={{ fontSize: '0.8rem', padding: '0.3rem 0.45rem' }}
+                              required
+                            />
+                          </div>
+                          <div className="form-group" style={{ marginBottom: 0 }}>
+                            <label style={{ fontSize: '0.74rem', fontWeight: 600 }}>Qty *</label>
+                            <input
+                              type="number"
+                              min="0.01"
+                              step="any"
+                              className="input-control"
+                              placeholder="1"
+                              value={customProdQty}
+                              onChange={(e) => setCustomProdQty(e.target.value)}
+                              style={{ fontSize: '0.8rem', padding: '0.3rem 0.45rem' }}
+                              required
+                            />
+                          </div>
+                          <div className="form-group" style={{ marginBottom: 0 }}>
+                            <label style={{ fontSize: '0.74rem', fontWeight: 600 }}>Size (Opt)</label>
+                            <input
+                              type="text"
+                              className="input-control"
+                              placeholder="e.g. XL, 32"
+                              value={customProdSize}
+                              onChange={(e) => setCustomProdSize(e.target.value)}
+                              style={{ fontSize: '0.8rem', padding: '0.3rem 0.45rem' }}
+                            />
+                          </div>
+                          <div className="form-group" style={{ marginBottom: 0 }}>
+                            <label style={{ fontSize: '0.74rem', fontWeight: 600 }}>Cartons (Opt)</label>
+                            <input
+                              type="number"
+                              min="0"
+                              step="1"
+                              className="input-control"
+                              placeholder="0"
+                              value={customProdCarton}
+                              onChange={(e) => setCustomProdCarton(e.target.value)}
+                              style={{ fontSize: '0.8rem', padding: '0.3rem 0.45rem' }}
+                            />
+                          </div>
+                        </div>
+
+                        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.45rem', marginTop: '0.2rem' }}>
+                          <button
+                            type="button"
+                            className="btn btn-secondary btn-sm"
+                            onClick={() => {
+                              setShowCustomProdForm(false);
+                              setCustomProdCode('');
+                              setCustomProdName('');
+                              setCustomProdPrice('');
+                              setCustomProdQty(1);
+                              setCustomProdSize('');
+                              setCustomProdCarton('');
+                            }}
+                            style={{ fontSize: '0.76rem', padding: '0.25rem 0.55rem' }}
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            type="submit"
+                            className="btn btn-primary btn-sm"
+                            disabled={isCheckingCustomCode}
+                            style={{ fontSize: '0.76rem', padding: '0.25rem 0.75rem', display: 'flex', alignItems: 'center', gap: '0.3rem' }}
+                          >
+                            {isCheckingCustomCode ? (
+                              <span>Checking Code...</span>
+                            ) : (
+                              <>
+                                <Plus size={13} />
+                                <span>Add to Invoice</span>
+                              </>
+                            )}
+                          </button>
+                        </div>
+                      </form>
+                    </div>
+                  )}
 
                   {/* Cart Items Table */}
                   <div className="table-container" style={{ maxHeight: '320px', overflowY: 'auto', border: '1px solid var(--border-color)', borderRadius: 'var(--border-radius-sm)', marginTop: '0.4rem' }}>
@@ -2300,11 +2676,28 @@ export default function Sales({ userProfile, branches, addToast }) {
                           cart.map((item) => {
                             const unitPrice = item.unitPrice !== undefined ? item.unitPrice : (item.product.sale_price || 0);
                             const lineTotal = (parseFloat(unitPrice) || 0) * (parseFloat(item.quantity) || 0);
+                            const isUnlisted = item.isCustomUnlisted || item.product?.is_custom_unlisted;
                             return (
                               <tr key={item.product.id} style={{ borderBottom: '1px solid var(--border-color)' }}>
                                 <td style={{ padding: '0.45rem 0.5rem', verticalAlign: 'middle' }}>
-                                  <div style={{ fontWeight: 600, color: 'var(--text-primary)', lineHeight: 1.25 }}>
-                                    {item.product.name}
+                                  <div style={{ fontWeight: 600, color: 'var(--text-primary)', lineHeight: 1.25, display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '0.3rem' }}>
+                                    <span>{item.product.name}</span>
+                                    {isUnlisted && (
+                                      <span
+                                        style={{
+                                          backgroundColor: '#fef3c7',
+                                          color: '#92400e',
+                                          fontSize: '0.64rem',
+                                          fontWeight: 700,
+                                          padding: '0.1rem 0.35rem',
+                                          borderRadius: '3px',
+                                          border: '1px solid #fde68a'
+                                        }}
+                                        title="Unlisted item — will be automatically added to product book on checkout"
+                                      >
+                                        NEW ITEM
+                                      </span>
+                                    )}
                                   </div>
                                   <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '0.15rem' }}>
                                     {item.product.sku || item.product.product_code ? (
