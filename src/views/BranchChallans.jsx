@@ -33,7 +33,7 @@ import { TableLoading } from '../components/TableLoading';
 import Pagination from '../components/Pagination';
 import { formatAmount, formatPlainNumber } from '../utils/format';
 
-export const getChallanStatus = (ch) => {
+const getChallanStatus = (ch) => {
   if (!ch) return 'approved';
   if (ch.status) return ch.status;
   if (ch.notes && typeof ch.notes === 'string') {
@@ -43,7 +43,7 @@ export const getChallanStatus = (ch) => {
   return 'approved';
 };
 
-export const getChallanDiscount = (ch) => {
+const getChallanDiscount = (ch) => {
   if (!ch) return 0;
   if (ch.discount !== undefined && ch.discount !== null && !isNaN(parseFloat(ch.discount))) {
     return parseFloat(ch.discount);
@@ -55,7 +55,7 @@ export const getChallanDiscount = (ch) => {
   return 0;
 };
 
-export const getChallanCleanNotes = (ch) => {
+const getChallanCleanNotes = (ch) => {
   if (!ch || !ch.notes) return '';
   let str = ch.notes;
   str = str.replace(/\[STATUS:PENDING\]\s*/g, '');
@@ -64,7 +64,7 @@ export const getChallanCleanNotes = (ch) => {
   return str.trim();
 };
 
-export const getChallanRejectionReason = (ch) => {
+const getChallanRejectionReason = (ch) => {
   if (!ch || !ch.notes) return '';
   const match = ch.notes.match(/\[STATUS:REJECTED:([^\]]*)\]/);
   return match ? match[1].trim() : '';

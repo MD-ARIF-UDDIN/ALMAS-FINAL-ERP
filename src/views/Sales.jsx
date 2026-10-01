@@ -28,7 +28,7 @@ import { TableLoading, LoadingBlock } from '../components/TableLoading';
 import Pagination from '../components/Pagination';
 import { formatAmount, formatPlainNumber } from '../utils/format';
 
-export const getSaleReceiptNo = (sale) => {
+const getSaleReceiptNo = (sale) => {
   if (!sale) return '';
   if (sale.receipt_no) return String(sale.receipt_no).trim();
   if (sale.receipt_number) return String(sale.receipt_number).trim();
@@ -38,7 +38,7 @@ export const getSaleReceiptNo = (sale) => {
   return match ? match[1].trim() : '';
 };
 
-export const getSaleCleanNotes = (sale) => {
+const getSaleCleanNotes = (sale) => {
   if (!sale || !sale.notes) return '';
   let str = sale.notes;
   str = str.replace(/\[RECEIPT:[^\]]*\]\s*/g, '');
