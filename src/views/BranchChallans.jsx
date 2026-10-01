@@ -32,6 +32,32 @@ import { TableLoading } from '../components/TableLoading';
 import Pagination from '../components/Pagination';
 import { formatAmount, formatPlainNumber } from '../utils/format';
 
+export const getChallanStatus = (ch) => {
+  if (!ch) return 'approved';
+  if (ch.status === 'pending' || ch.status === 'rejected' || ch.status === 'approved') {
+    return ch.status;
+  }
+  if (ch.notes && typeof ch.notes === 'string') {
+    if (ch.notes.startsWith('[STATUS:PENDING]')) return 'pending';
+    if (ch.notes.startsWith('[STATUS:REJECTED')) return 'rejected';
+  }
+  return 'approved';
+};
+
+export const getChallanCleanNotes = (ch) => {
+  if (!ch || !ch.notes) return '';
+  let str = ch.notes;
+  str = str.replace(/\[STATUS:PENDING\]\s*/g, '');
+  str = str.replace(/\[STATUS:REJECTED(:[^\]]*)?\]\s*/g, '');
+  return str.trim();
+};
+
+export const getChallanRejectionReason = (ch) => {
+  if (!ch || !ch.notes) return '';
+  const match = ch.notes.match(/\[STATUS:REJECTED:([^\]]*)\]/);
+  return match ? match[1].trim() : '';
+};
+
 export default function BranchChallans({ userProfile, branches = [], addToast }) {
   const role = userProfile?.role || 'staff';
   const isOwner = role === 'owner';
@@ -54,13 +80,15 @@ export default function BranchChallans({ userProfile, branches = [], addToast })
     (isOwner && selectedBranchId === 'all')
   );
 
+  const isDirectDispatch = isOwner || role === 'factory_manager' || activeBranchObj?.is_factory;
+
   // State lists
   const [challans, setChallans] = useState([]);
   const [branchPayments, setBranchPayments] = useState([]);
   const [catalogProducts, setCatalogProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState('all'); // 'all', 'unpaid', 'partial', 'paid'
+  const [statusFilter, setStatusFilter] = useState('all'); // 'all', 'pending', 'approved', 'unpaid', 'partial', 'paid'
 
   // Pagination states
   const [page, setPage] = useState(1);
@@ -74,16 +102,22 @@ export default function BranchChallans({ userProfile, branches = [], addToast })
   const [showPrintModal, setShowPrintModal] = useState(false);
   const [showDetailModal, setShowDetailModal] = useState(false);
   const [showRejectModal, setShowRejectModal] = useState(false);
+  const [showRejectChallanModal, setShowRejectChallanModal] = useState(false);
   const [activeChallan, setActiveChallan] = useState(null);
   const [selectedPaymentForAction, setSelectedPaymentForAction] = useState(null);
+  const [selectedChallanForReject, setSelectedChallanForReject] = useState(null);
   const [rejectionReason, setRejectionReason] = useState('');
+  const [challanRejectionReason, setChallanRejectionReason] = useState('');
 
   // New Challan Form State
   const [fromBranchId, setFromBranchId] = useState(() => {
     const factory = branches.find((b) => b.is_factory || b.name?.toLowerCase().includes('factory'));
     return factory ? factory.id : (branches.length > 0 ? branches[0].id : '');
   });
-  const [toBranchId, setToBranchId] = useState('');
+  const [toBranchId, setToBranchId] = useState(() => {
+    if (!isOwner && myBranchId) return myBranchId;
+    return '';
+  });
   const [challanDate, setChallanDate] = useState(new Date().toISOString().split('T')[0]);
   const [vehicleNo, setVehicleNo] = useState('');
   const [driverName, setDriverName] = useState('');
@@ -248,8 +282,19 @@ export default function BranchChallans({ userProfile, branches = [], addToast })
     return sum + itemSold;
   }, 0);
 
-  // Filtered list by search query
+  // Pending challans awaiting Owner/Factory approval
+  const pendingChallans = challans.filter((c) => getChallanStatus(c) === 'pending');
+
+  // Filtered list by search query and statusFilter
   const filteredChallans = challans.filter((c) => {
+    const st = getChallanStatus(c);
+    if (statusFilter === 'pending' && st !== 'pending') return false;
+    if (statusFilter === 'approved' && st !== 'approved') return false;
+    if (statusFilter === 'rejected' && st !== 'rejected') return false;
+    if (statusFilter === 'unpaid' && (st !== 'approved' || c.payment_status !== 'unpaid')) return false;
+    if (statusFilter === 'partial' && (st !== 'approved' || c.payment_status !== 'partial')) return false;
+    if (statusFilter === 'paid' && (st !== 'approved' || c.payment_status !== 'paid')) return false;
+
     const q = searchQuery.toLowerCase();
     return (
       c.challan_no?.toLowerCase().includes(q) ||
@@ -298,7 +343,7 @@ export default function BranchChallans({ userProfile, branches = [], addToast })
     return challanItems.reduce((sum, item) => sum + (parseFloat(item.totalPrice) || 0), 0);
   };
 
-  // Submit Create Delivery Challan (Factory ➔ Branch)
+  // Submit Create Delivery Challan / Requisition
   const handleCreateChallan = async (e) => {
     e.preventDefault();
     if (!toBranchId) {
@@ -319,6 +364,8 @@ export default function BranchChallans({ userProfile, branches = [], addToast })
     try {
       const grandTotal = getNewChallanGrandTotal();
       const challanNo = `CHL-${Date.now().toString().slice(-6)}`;
+      const cleanUserNotes = notes.trim();
+      const formattedNotes = isDirectDispatch ? (cleanUserNotes || null) : `[STATUS:PENDING] ${cleanUserNotes}`.trim();
 
       // 1. Insert Challan Header
       const { data: challanData, error: challanErr } = await supabase
@@ -335,7 +382,7 @@ export default function BranchChallans({ userProfile, branches = [], addToast })
             challan_date: challanDate,
             vehicle_no: vehicleNo.trim() || null,
             driver_name: driverName.trim() || null,
-            notes: notes.trim() || null,
+            notes: formattedNotes,
             created_by: userProfile?.id,
           },
         ])
@@ -362,37 +409,146 @@ export default function BranchChallans({ userProfile, branches = [], addToast })
       const { error: itemsErr } = await supabase.from('branch_challan_items').insert(itemsPayload);
       if (itemsErr) throw itemsErr;
 
-      // 3. Increment Destination Branch Inventory
-      for (const it of validItems) {
-        const q = parseInt(it.quantity) || 0;
-        const { data: existingInv } = await supabase
-          .from('inventory')
-          .select('id, quantity')
-          .eq('branch_id', toBranchId)
-          .eq('product_id', it.productId)
-          .maybeSingle();
+      // 3. If Direct Dispatch by Factory/Owner, increment Destination Branch Inventory immediately
+      if (isDirectDispatch) {
+        for (const it of validItems) {
+          const q = parseInt(it.quantity) || 0;
+          const { data: existingInv } = await supabase
+            .from('inventory')
+            .select('id, quantity')
+            .eq('branch_id', toBranchId)
+            .eq('product_id', it.productId)
+            .maybeSingle();
 
-        if (existingInv) {
-          await supabase
-            .from('inventory')
-            .update({ quantity: (existingInv.quantity || 0) + q })
-            .eq('id', existingInv.id);
-        } else {
-          await supabase
-            .from('inventory')
-            .insert([{ branch_id: toBranchId, product_id: it.productId, quantity: q }]);
+          if (existingInv) {
+            await supabase
+              .from('inventory')
+              .update({ quantity: (existingInv.quantity || 0) + q })
+              .eq('id', existingInv.id);
+          } else {
+            await supabase
+              .from('inventory')
+              .insert([{ branch_id: toBranchId, product_id: it.productId, quantity: q }]);
+          }
         }
+        showMessage(`Delivery Challan #${challanNo} created & dispatched successfully!`, 'success');
+      } else {
+        showMessage(`Challan Requisition #${challanNo} submitted! Awaiting Factory approval before dispatch.`, 'success');
       }
 
-      showMessage(`Challan #${challanNo} created & dispatched successfully!`, 'success');
       setShowCreateModal(false);
       resetChallanForm();
       fetchChallans();
     } catch (err) {
       console.error(err);
-      showMessage(err.message || 'Failed to dispatch delivery challan.', 'error');
+      showMessage(err.message || 'Failed to create challan.', 'error');
     } finally {
       setIsSubmittingChallan(false);
+    }
+  };
+
+  // Factory / Owner Action: Approve Pending Challan Requisition
+  const handleApproveChallan = async (challanObj) => {
+    if (!isOwner && role !== 'factory_manager' && !activeBranchObj?.is_factory) {
+      showMessage('Only Factory Managers or Owners can approve challans.', 'error');
+      return;
+    }
+
+    const confirm = window.confirm(
+      `Approve and dispatch Challan #${challanObj.challan_no} to "${challanObj.to_branch?.name || 'Branch'}"?\nThis will immediately credit the items to their branch inventory.`
+    );
+    if (!confirm) return;
+
+    setLoading(true);
+    try {
+      // 1. Fetch line items if not loaded
+      let items = challanObj.items || [];
+      if (items.length === 0) {
+        const { data: fetchedItems, error: fErr } = await supabase
+          .from('branch_challan_items')
+          .select('*')
+          .eq('challan_id', challanObj.id);
+        if (fErr) throw fErr;
+        items = fetchedItems || [];
+      }
+
+      // 2. Increment Destination Branch Inventory
+      for (const it of items) {
+        const q = parseInt(it.dispatched_qty) || 0;
+        if (q > 0) {
+          const { data: existingInv } = await supabase
+            .from('inventory')
+            .select('id, quantity')
+            .eq('branch_id', challanObj.to_branch_id)
+            .eq('product_id', it.product_id)
+            .maybeSingle();
+
+          if (existingInv) {
+            await supabase
+              .from('inventory')
+              .update({ quantity: (existingInv.quantity || 0) + q })
+              .eq('id', existingInv.id);
+          } else {
+            await supabase
+              .from('inventory')
+              .insert([{ branch_id: challanObj.to_branch_id, product_id: it.product_id, quantity: q }]);
+          }
+        }
+      }
+
+      // 3. Update Challan Notes to remove [STATUS:PENDING]
+      const cleanNotes = getChallanCleanNotes(challanObj);
+      const { error: updErr } = await supabase
+        .from('branch_challans')
+        .update({ notes: cleanNotes || null })
+        .eq('id', challanObj.id);
+
+      if (updErr) throw updErr;
+
+      showMessage(`Challan #${challanObj.challan_no} approved & items dispatched to ${challanObj.to_branch?.name || 'Branch'}!`, 'success');
+      fetchChallans();
+    } catch (err) {
+      console.error('Error approving challan:', err);
+      showMessage(err.message || 'Failed to approve challan.', 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Factory / Owner Action: Open Reject Modal for Challan
+  const handleOpenRejectChallanModal = (challanObj) => {
+    setSelectedChallanForReject(challanObj);
+    setChallanRejectionReason('');
+    setShowRejectChallanModal(true);
+  };
+
+  // Factory / Owner Action: Confirm Rejection of Challan
+  const handleConfirmRejectChallan = async (e) => {
+    e.preventDefault();
+    if (!selectedChallanForReject) return;
+
+    setLoading(true);
+    try {
+      const cleanNotes = getChallanCleanNotes(selectedChallanForReject);
+      const reasonText = challanRejectionReason.trim() || 'Request rejected by Factory / Owner';
+      const updatedNotes = `[STATUS:REJECTED:${reasonText}] ${cleanNotes}`.trim();
+
+      const { error: rejErr } = await supabase
+        .from('branch_challans')
+        .update({ notes: updatedNotes })
+        .eq('id', selectedChallanForReject.id);
+
+      if (rejErr) throw rejErr;
+
+      showMessage(`Challan #${selectedChallanForReject.challan_no} marked as rejected.`, 'info');
+      setShowRejectChallanModal(false);
+      setSelectedChallanForReject(null);
+      fetchChallans();
+    } catch (err) {
+      console.error('Error rejecting challan:', err);
+      showMessage(err.message || 'Failed to reject challan.', 'error');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -650,17 +806,24 @@ export default function BranchChallans({ userProfile, branches = [], addToast })
             </span>
           )}
 
-          {isOwner && (
-            <button className="btn btn-primary" onClick={() => setShowCreateModal(true)}>
-              <Plus size={16} />
-              <span>Create Challan</span>
-            </button>
-          )}
+          <button 
+            className="btn btn-primary" 
+            onClick={() => {
+              resetChallanForm();
+              if (!isOwner && myBranchId) {
+                setToBranchId(myBranchId);
+              }
+              setShowCreateModal(true);
+            }}
+          >
+            <Plus size={16} />
+            <span>Create Challan</span>
+          </button>
         </div>
       </div>
 
-      {/* PENDING APPROVAL BANNER (For Owner when requests exist) */}
-      {isOwner && pendingPayments.length > 0 && (
+      {/* PENDING CHALLANS APPROVAL BANNER (For Owner / Factory) */}
+      {(isOwner || isFactoryPerspective) && pendingChallans.length > 0 && (
         <div
           className="no-print"
           style={{
@@ -689,13 +852,65 @@ export default function BranchChallans({ userProfile, branches = [], addToast })
                 flexShrink: 0,
               }}
             >
-              <ShieldCheck size={20} />
+              <Truck size={20} />
             </div>
             <div>
               <div style={{ fontWeight: 700, fontSize: '0.9rem', color: '#92400e' }}>
-                {pendingPayments.length} Payment {pendingPayments.length === 1 ? 'Request' : 'Requests'} Pending Approval
+                {pendingChallans.length} Challan {pendingChallans.length === 1 ? 'Request' : 'Requests'} Awaiting Approval
               </div>
               <div style={{ fontSize: '0.78rem', color: '#b45309' }}>
+                Branches created challans totaling ৳{formatAmount(pendingChallans.reduce((s, c) => s + (parseFloat(c.total_bill_amount) || 0), 0))}.
+              </div>
+            </div>
+          </div>
+          <button
+            type="button"
+            className="btn btn-primary btn-sm"
+            onClick={() => setStatusFilter('pending')}
+            style={{ backgroundColor: '#d97706', borderColor: '#b45309' }}
+          >
+            <span>Review Pending Challans ({pendingChallans.length})</span>
+          </button>
+        </div>
+      )}
+
+      {/* PENDING PAYMENT APPROVAL BANNER (For Owner when requests exist) */}
+      {isOwner && pendingPayments.length > 0 && (
+        <div
+          className="no-print"
+          style={{
+            backgroundColor: '#f0fdf4',
+            border: '1px solid #bbf7d0',
+            borderRadius: 'var(--border-radius)',
+            padding: '0.85rem 1.25rem',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            gap: '1rem',
+            boxShadow: 'var(--shadow-sm)',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+            <div
+              style={{
+                backgroundColor: '#dcfce7',
+                color: '#16a34a',
+                width: '36px',
+                height: '36px',
+                borderRadius: '50%',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexShrink: 0,
+              }}
+            >
+              <ShieldCheck size={20} />
+            </div>
+            <div>
+              <div style={{ fontWeight: 700, fontSize: '0.9rem', color: '#166534' }}>
+                {pendingPayments.length} Payment {pendingPayments.length === 1 ? 'Request' : 'Requests'} Pending Approval
+              </div>
+              <div style={{ fontSize: '0.78rem', color: '#15803d' }}>
                 Total ৳{formatAmount(pendingPayments.reduce((s, p) => s + parseFloat(p.amount), 0))} submitted by branches.
               </div>
             </div>
@@ -708,9 +923,9 @@ export default function BranchChallans({ userProfile, branches = [], addToast })
               const targetCh = challans.find((c) => c.id === firstPending?.challan_id);
               if (targetCh) handleOpenPaymentHistory(targetCh);
             }}
-            style={{ backgroundColor: '#d97706', borderColor: '#b45309' }}
+            style={{ backgroundColor: '#16a34a', borderColor: '#15803d' }}
           >
-            <span>Review & Approve ({pendingPayments.length})</span>
+            <span>Review Payments ({pendingPayments.length})</span>
           </button>
         </div>
       )}
@@ -814,9 +1029,11 @@ export default function BranchChallans({ userProfile, branches = [], addToast })
           </div>
 
           {/* Status Filter Tabs */}
-          <div style={{ display: 'flex', gap: '0.35rem', backgroundColor: 'var(--bg-app)', padding: '0.25rem', borderRadius: '6px' }}>
+          <div style={{ display: 'flex', gap: '0.35rem', backgroundColor: 'var(--bg-app)', padding: '0.25rem', borderRadius: '6px', flexWrap: 'wrap' }}>
             {[
               { id: 'all', label: 'All' },
+              { id: 'pending', label: `Pending (${pendingChallans.length})`, highlight: pendingChallans.length > 0 },
+              { id: 'approved', label: 'Dispatched' },
               { id: 'unpaid', label: 'Unpaid' },
               { id: 'partial', label: 'Partial' },
               { id: 'paid', label: 'Paid' },
@@ -825,7 +1042,13 @@ export default function BranchChallans({ userProfile, branches = [], addToast })
                 key={tab.id}
                 type="button"
                 className={`btn btn-sm ${statusFilter === tab.id ? 'btn-primary' : 'btn-secondary'}`}
-                style={{ padding: '0.3rem 0.65rem', fontSize: '0.78rem' }}
+                style={{ 
+                  padding: '0.3rem 0.65rem', 
+                  fontSize: '0.78rem',
+                  backgroundColor: statusFilter === tab.id ? undefined : (tab.highlight ? '#fef3c7' : undefined),
+                  color: statusFilter === tab.id ? undefined : (tab.highlight ? '#92400e' : undefined),
+                  borderColor: tab.highlight ? '#fde68a' : undefined
+                }}
                 onClick={() => setStatusFilter(tab.id)}
               >
                 {tab.label}
@@ -848,20 +1071,20 @@ export default function BranchChallans({ userProfile, branches = [], addToast })
                 <th style={{ textAlign: 'right' }}>{isFactoryPerspective ? 'Received' : 'Paid'}</th>
                 <th style={{ textAlign: 'right' }}>{isFactoryPerspective ? 'Receivable' : 'Due'}</th>
                 <th style={{ textAlign: 'center' }}>Status</th>
-                <th style={{ width: '210px', textAlign: 'center' }}>Action</th>
+                <th style={{ width: '220px', textAlign: 'center' }}>Action</th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
                 <TableLoading colSpan={10} message="Loading branch challans..." />
-              ) : challans.length === 0 ? (
+              ) : filteredChallans.length === 0 ? (
                 <tr>
                   <td colSpan={10} style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-muted)' }}>
-                    No challans found.
+                    No challans found matching your filter criteria.
                   </td>
                 </tr>
               ) : (
-                challans.map((ch, idx) => {
+                filteredChallans.map((ch, idx) => {
                   const totalBill = parseFloat(ch.total_bill_amount) || 0;
                   const paid = parseFloat(ch.paid_amount) || 0;
                   const due = parseFloat(ch.due_amount) || 0;
@@ -870,6 +1093,11 @@ export default function BranchChallans({ userProfile, branches = [], addToast })
                   const totalQty = (ch.items || []).reduce((s, it) => s + (it.dispatched_qty || 0), 0);
                   const soldQty = (ch.items || []).reduce((s, it) => s + (it.sold_qty || 0), 0);
                   const isPaid = ch.payment_status === 'paid' || due <= 0.01;
+
+                  const challanStatus = getChallanStatus(ch);
+                  const isPending = challanStatus === 'pending';
+                  const isRejected = challanStatus === 'rejected';
+                  const rejectionReasonText = getChallanRejectionReason(ch);
 
                   // Check if there are payments submitted for this challan
                   const paymentsForChallan = branchPayments.filter((p) => p.challan_id === ch.id);
@@ -940,7 +1168,40 @@ export default function BranchChallans({ userProfile, branches = [], addToast })
                         ৳{formatAmount(due)}
                       </td>
                       <td style={{ textAlign: 'center' }}>
-                        {isPaid ? (
+                        {isPending ? (
+                          <span 
+                            className="badge badge-warning" 
+                            style={{ 
+                              backgroundColor: '#fef3c7', 
+                              color: '#b45309', 
+                              border: '1px solid #fde68a', 
+                              fontSize: '0.72rem', 
+                              fontWeight: 700 
+                            }}
+                          >
+                            ⏳ Pending Approval
+                          </span>
+                        ) : isRejected ? (
+                          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.15rem' }}>
+                            <span 
+                              className="badge badge-danger" 
+                              style={{ 
+                                backgroundColor: '#fee2e2', 
+                                color: '#991b1b', 
+                                border: '1px solid #fca5a5', 
+                                fontSize: '0.72rem', 
+                                fontWeight: 700 
+                              }}
+                            >
+                              ✕ Rejected
+                            </span>
+                            {rejectionReasonText && (
+                              <span style={{ fontSize: '0.66rem', color: '#991b1b', maxWidth: '120px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={rejectionReasonText}>
+                                {rejectionReasonText}
+                              </span>
+                            )}
+                          </div>
+                        ) : isPaid ? (
                           <span className="badge badge-success" style={{ fontSize: '0.75rem' }}>
                             Paid
                           </span>
@@ -954,7 +1215,7 @@ export default function BranchChallans({ userProfile, branches = [], addToast })
                           </span>
                         )}
 
-                        {pendingAmount > 0 && (
+                        {!isPending && !isRejected && pendingAmount > 0 && (
                           <div style={{ marginTop: '0.2rem' }}>
                             <span
                               className="badge"
@@ -972,8 +1233,50 @@ export default function BranchChallans({ userProfile, branches = [], addToast })
                       </td>
                       <td style={{ textAlign: 'center' }}>
                         <div style={{ display: 'inline-flex', gap: '0.35rem', justifyContent: 'center', alignItems: 'center' }}>
-                          {/* Payment Button */}
-                          {!isPaid && (
+                          {/* If Challan is Pending Approval */}
+                          {isPending && (
+                            <>
+                              {(isOwner || isFactoryPerspective || role === 'factory_manager') ? (
+                                <div style={{ display: 'inline-flex', gap: '0.3rem' }}>
+                                  <button
+                                    type="button"
+                                    className="btn btn-primary btn-sm"
+                                    onClick={() => handleApproveChallan(ch)}
+                                    style={{ backgroundColor: '#16a34a', borderColor: '#15803d', padding: '0.25rem 0.55rem', fontSize: '0.75rem' }}
+                                    title="Approve Challan & Dispatch Stock"
+                                  >
+                                    <Check size={14} />
+                                    <span>Approve</span>
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="btn btn-secondary btn-sm"
+                                    onClick={() => handleOpenRejectChallanModal(ch)}
+                                    style={{ color: '#dc2626', borderColor: '#fca5a5', padding: '0.25rem 0.45rem', fontSize: '0.75rem' }}
+                                    title="Reject Challan"
+                                  >
+                                    <X size={14} />
+                                  </button>
+                                </div>
+                              ) : (
+                                <span 
+                                  className="badge" 
+                                  style={{ 
+                                    backgroundColor: '#f1f5f9', 
+                                    color: '#64748b', 
+                                    fontSize: '0.72rem',
+                                    border: '1px solid #e2e8f0',
+                                    padding: '0.25rem 0.5rem'
+                                  }}
+                                >
+                                  Awaiting Factory
+                                </span>
+                              )}
+                            </>
+                          )}
+
+                          {/* Payment Button (Only for approved challans) */}
+                          {!isPending && !isRejected && !isPaid && (
                             <button
                               type="button"
                               className="btn btn-primary btn-sm btn-icon"
@@ -985,42 +1288,44 @@ export default function BranchChallans({ userProfile, branches = [], addToast })
                             </button>
                           )}
 
-                          {/* Payment History & Approve Action */}
-                          <button
-                            type="button"
-                            className="btn btn-secondary btn-sm btn-icon"
-                            onClick={() => handleOpenPaymentHistory(ch)}
-                            title="Payment History & Approvals"
-                            style={{
-                              padding: '0.35rem 0.45rem',
-                              position: 'relative',
-                              borderColor: pendingForChallan.length > 0 ? '#f59e0b' : 'var(--border-color)',
-                              backgroundColor: pendingForChallan.length > 0 ? '#fffbeb' : undefined,
-                            }}
-                          >
-                            <History size={15} style={{ color: pendingForChallan.length > 0 ? '#d97706' : '#0284c7' }} />
-                            {pendingForChallan.length > 0 && (
-                              <span
-                                style={{
-                                  position: 'absolute',
-                                  top: '-4px',
-                                  right: '-4px',
-                                  backgroundColor: '#dc2626',
-                                  color: '#ffffff',
-                                  borderRadius: '50%',
-                                  width: '14px',
-                                  height: '14px',
-                                  fontSize: '0.62rem',
-                                  fontWeight: 700,
-                                  display: 'flex',
-                                  alignItems: 'center',
-                                  justifyContent: 'center',
-                                }}
-                              >
-                                {pendingForChallan.length}
-                              </span>
-                            )}
-                          </button>
+                          {/* Payment History & Approve Action (Only for approved challans) */}
+                          {!isPending && !isRejected && (
+                            <button
+                              type="button"
+                              className="btn btn-secondary btn-sm btn-icon"
+                              onClick={() => handleOpenPaymentHistory(ch)}
+                              title="Payment History & Approvals"
+                              style={{
+                                padding: '0.35rem 0.45rem',
+                                position: 'relative',
+                                borderColor: pendingForChallan.length > 0 ? '#f59e0b' : 'var(--border-color)',
+                                backgroundColor: pendingForChallan.length > 0 ? '#fffbeb' : undefined,
+                              }}
+                            >
+                              <History size={15} style={{ color: pendingForChallan.length > 0 ? '#d97706' : '#0284c7' }} />
+                              {pendingForChallan.length > 0 && (
+                                <span
+                                  style={{
+                                    position: 'absolute',
+                                    top: '-4px',
+                                    right: '-4px',
+                                    backgroundColor: '#dc2626',
+                                    color: '#ffffff',
+                                    borderRadius: '50%',
+                                    width: '14px',
+                                    height: '14px',
+                                    fontSize: '0.62rem',
+                                    fontWeight: 700,
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                  }}
+                                >
+                                  {pendingForChallan.length}
+                                </span>
+                              )}
+                            </button>
+                          )}
 
                           {/* Print Challan */}
                           <button
@@ -1623,6 +1928,52 @@ export default function BranchChallans({ userProfile, branches = [], addToast })
         </div>
       )}
 
+      {/* REJECT CHALLAN MODAL (For Owner / Factory) */}
+      {showRejectChallanModal && selectedChallanForReject && (
+        <div className="modal-overlay">
+          <div className="modal-content" style={{ maxWidth: '440px', width: '100%' }}>
+            <div className="modal-header">
+              <h3 className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#dc2626' }}>
+                <AlertTriangle size={18} />
+                <span>Reject Challan</span>
+              </h3>
+              <button className="btn btn-secondary btn-sm" onClick={() => setShowRejectChallanModal(false)} style={{ borderRadius: '50%', padding: '0.4rem', border: 'none' }}>
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleConfirmRejectChallan}>
+              <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                <p style={{ margin: 0, fontSize: '0.85rem' }}>
+                  Are you sure you want to reject Challan <strong>#{selectedChallanForReject.challan_no}</strong> for <strong>{selectedChallanForReject.to_branch?.name || 'Branch'}</strong> (৳{formatAmount(selectedChallanForReject.total_bill_amount)})?
+                </p>
+
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label>Reason for Rejection *</label>
+                  <textarea
+                    className="input-control"
+                    rows="3"
+                    placeholder="e.g. Stock currently unavailable at factory, incorrect item quantities..."
+                    value={challanRejectionReason}
+                    onChange={(e) => setChallanRejectionReason(e.target.value)}
+                    required
+                  />
+                </div>
+              </div>
+
+              <div className="modal-footer">
+                <button type="button" className="btn btn-secondary" onClick={() => setShowRejectChallanModal(false)}>
+                  Cancel
+                </button>
+                <button type="submit" className="btn btn-primary" style={{ backgroundColor: '#dc2626', borderColor: '#b91c1c' }}>
+                  Confirm Rejection
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* ITEMS DETAILS MODAL */}
       {showDetailModal && activeChallan && (
         <div className="modal-overlay">
@@ -1637,6 +1988,22 @@ export default function BranchChallans({ userProfile, branches = [], addToast })
               </button>
             </div>
             <div className="modal-body" style={{ padding: '1.25rem' }}>
+              {/* Status Notice if Pending or Rejected */}
+              {getChallanStatus(activeChallan) === 'pending' && (
+                <div style={{ marginBottom: '1rem', padding: '0.65rem 0.85rem', borderRadius: '6px', background: '#fef3c7', border: '1px solid #fde68a', color: '#92400e', fontSize: '0.84rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <Clock size={16} style={{ flexShrink: 0 }} />
+                  <span><strong>Pending Approval:</strong> Awaiting Factory / Owner approval.</span>
+                </div>
+              )}
+              {getChallanStatus(activeChallan) === 'rejected' && (
+                <div style={{ marginBottom: '1rem', padding: '0.65rem 0.85rem', borderRadius: '6px', background: '#fef2f2', border: '1px solid #fecaca', color: '#991b1b', fontSize: '0.84rem', display: 'flex', alignItems: 'flex-start', gap: '0.5rem' }}>
+                  <AlertTriangle size={16} style={{ flexShrink: 0, marginTop: '2px' }} />
+                  <div>
+                    <strong>Challan Rejected:</strong> {getChallanRejectionReason(activeChallan) || 'Rejected by Factory / Owner'}
+                  </div>
+                </div>
+              )}
+
               <div className="table-container">
                 <table>
                   <thead>
