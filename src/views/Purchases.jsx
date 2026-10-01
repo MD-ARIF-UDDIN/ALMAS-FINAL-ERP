@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useLocation } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
-import { Download, Plus, Search, Trash2, UserPlus, CreditCard, Eye, X } from 'lucide-react';
+import { Download, Plus, Search, Trash2, UserPlus, CreditCard, Eye, X, Edit } from 'lucide-react';
 import { TableLoading } from '../components/TableLoading';
 import Pagination from '../components/Pagination';
 import { formatAmount } from '../utils/format';
@@ -27,6 +27,20 @@ export default function Purchases({ userProfile, branches, addToast }) {
   const [loadingDetails, setLoadingDetails] = useState(false);
   const [showPurchaseModal, setShowPurchaseModal] = useState(false);
   const [loading, setLoading] = useState(true);
+
+  // Edit Purchase States
+  const [showEditPurchaseModal, setShowEditPurchaseModal] = useState(false);
+  const [editingPurchase, setEditingPurchase] = useState(null);
+  const [editSupplierId, setEditSupplierId] = useState('');
+  const [editPurchaseDate, setEditPurchaseDate] = useState('');
+  const [editPurchaseItems, setEditPurchaseItems] = useState([]);
+  const [originalEditItems, setOriginalEditItems] = useState([]);
+  const [editDiscount, setEditDiscount] = useState(0);
+  const [editNotes, setEditNotes] = useState('');
+  const [editSearchQuery, setEditSearchQuery] = useState('');
+  const [showEditSearchSuggestions, setShowEditSearchSuggestions] = useState(false);
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [loadingEditItems, setLoadingEditItems] = useState(false);
 
   useEffect(() => {
     if (location.state?.openNewPurchase) {
@@ -619,6 +633,294 @@ export default function Purchases({ userProfile, branches, addToast }) {
     }
   };
 
+  // --- EDIT PURCHASE METHODS ---
+  const handleOpenEditPurchase = async (purchase) => {
+    setEditingPurchase(purchase);
+    setEditSupplierId(purchase.supplier_id || '');
+    setEditPurchaseDate(purchase.purchase_date || new Date().toISOString().split('T')[0]);
+    setEditDiscount(purchase.discount || 0);
+    setEditNotes(purchase.notes || '');
+    setEditSearchQuery('');
+    setShowEditSearchSuggestions(false);
+    setShowEditPurchaseModal(true);
+    setLoadingEditItems(true);
+
+    try {
+      const { data: items, error } = await supabase
+        .from('purchase_items')
+        .select(`
+          id,
+          purchase_id,
+          product_id,
+          item_name,
+          quantity,
+          unit_price,
+          total_price,
+          products (
+            id,
+            name,
+            sku,
+            product_code
+          )
+        `)
+        .eq('purchase_id', purchase.id);
+
+      if (error) throw error;
+
+      const formattedItems = (items || []).map((it) => ({
+        id: it.id,
+        productId: it.product_id || '',
+        code: it.products?.sku || it.products?.product_code || '',
+        name: it.products?.name || it.item_name || '',
+        quantity: it.quantity || 1,
+        costPrice: it.unit_price || 0,
+      }));
+
+      setEditPurchaseItems(formattedItems.length > 0 ? formattedItems : [{ productId: '', code: '', name: '', quantity: 1, costPrice: 0.00 }]);
+      setOriginalEditItems(JSON.parse(JSON.stringify(formattedItems)));
+    } catch (err) {
+      console.error('Error fetching items for edit:', err);
+      showMessage('Failed to load items for editing.', 'error');
+    } finally {
+      setLoadingEditItems(false);
+    }
+  };
+
+  const updateEditItemRow = (index, updates) => {
+    setEditPurchaseItems((prev) => {
+      const next = [...prev];
+      next[index] = { ...next[index], ...updates };
+      return next;
+    });
+  };
+
+  const updateEditItemField = (index, field, value) => {
+    setEditPurchaseItems((prev) => {
+      const next = [...prev];
+      next[index] = { ...next[index], [field]: value };
+      return next;
+    });
+  };
+
+  const addEditItemRow = () => {
+    setEditPurchaseItems((prev) => [...prev, { productId: '', code: '', name: '', quantity: 1, costPrice: 0.00 }]);
+  };
+
+  const removeEditItemRow = (index) => {
+    if (editPurchaseItems.length === 1) {
+      setEditPurchaseItems([{ productId: '', code: '', name: '', quantity: 1, costPrice: 0.00 }]);
+      return;
+    }
+    setEditPurchaseItems((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const getEditSubtotal = () => {
+    return editPurchaseItems.reduce((sum, item) => {
+      return sum + (parseFloat(item.costPrice) || 0) * (parseInt(item.quantity) || 0);
+    }, 0);
+  };
+
+  const getEditGrandTotal = () => {
+    const sub = getEditSubtotal();
+    return Math.max(0, sub - (parseFloat(editDiscount) || 0));
+  };
+
+  const handleSaveEditPurchase = async (e) => {
+    e?.preventDefault();
+    if (!editingPurchase) return;
+
+    if (!editSupplierId) {
+      showMessage('Please select a supplier.', 'error');
+      return;
+    }
+
+    const validItems = editPurchaseItems.filter((i) => i.name?.trim() && parseFloat(i.quantity) > 0);
+    if (validItems.length === 0) {
+      showMessage('Please enter at least one valid item with name and quantity.', 'error');
+      return;
+    }
+
+    setSavingEdit(true);
+    try {
+      const activeBranch = branches.find((b) => b.id === editingPurchase.branch_id);
+      const isFactoryPurchase = Boolean(activeBranch?.is_factory || activeBranch?.name?.toLowerCase().includes('factory'));
+      const targetBranchId = editingPurchase.branch_id;
+
+      let subtotal = 0;
+      validItems.forEach((i) => {
+        subtotal += (parseFloat(i.costPrice) || 0) * (parseFloat(i.quantity) || 1);
+      });
+      const disc = Math.max(0, parseFloat(editDiscount) || 0);
+      const netTotal = Math.max(0, subtotal - disc);
+
+      const paid = parseFloat(editingPurchase.paid_amount) || 0;
+      let newPaymentStatus = 'unpaid';
+      if (paid >= netTotal && netTotal > 0) {
+        newPaymentStatus = 'paid';
+      } else if (paid > 0) {
+        newPaymentStatus = 'partial';
+      } else {
+        newPaymentStatus = 'unpaid';
+      }
+
+      // 1. Update purchase summary
+      const { error: purUpdateErr } = await supabase
+        .from('purchases')
+        .update({
+          supplier_id: editSupplierId,
+          purchase_date: editPurchaseDate,
+          subtotal: subtotal,
+          discount: disc,
+          net_amount: netTotal,
+          payment_status: newPaymentStatus,
+          notes: editNotes || null,
+        })
+        .eq('id', editingPurchase.id);
+
+      if (purUpdateErr) throw purUpdateErr;
+
+      // 2. Stock adjustments for Branch purchases (!isFactoryPurchase)
+      if (!isFactoryPurchase && targetBranchId) {
+        // Map original item quantities by productId
+        const oldQtyMap = {};
+        originalEditItems.forEach((it) => {
+          if (it.productId) {
+            oldQtyMap[it.productId] = (oldQtyMap[it.productId] || 0) + (parseFloat(it.quantity) || 0);
+          }
+        });
+
+        // Resolve new item product IDs
+        for (const item of validItems) {
+          let finalProdId = item.productId;
+          const cleanName = item.name.trim();
+          const cleanCode = item.code?.trim();
+          const itemQty = parseFloat(item.quantity) || 1;
+          const costVal = parseFloat(item.costPrice) || 0;
+
+          if (!finalProdId) {
+            const autoCode = cleanCode || `PRD-${Math.floor(1000000 + Math.random() * 9000000)}`;
+            let query = supabase.from('products').select('id, name, sku, product_code');
+            if (cleanCode && cleanName) {
+              query = query.or(`sku.ilike.${cleanCode},product_code.ilike.${cleanCode},name.ilike.${cleanName}`);
+            } else if (cleanCode) {
+              query = query.or(`sku.ilike.${cleanCode},product_code.ilike.${cleanCode}`);
+            } else {
+              query = query.ilike('name', cleanName);
+            }
+
+            const { data: matchedProd } = await query.limit(1);
+            if (matchedProd && matchedProd.length > 0) {
+              finalProdId = matchedProd[0].id;
+            } else {
+              const { data: createdProd, error: createProdErr } = await supabase
+                .from('products')
+                .insert([
+                  {
+                    sku: autoCode,
+                    product_code: autoCode,
+                    name: cleanName,
+                    purchase_price: costVal,
+                    sale_price: costVal,
+                    description: 'Added via Branch Purchase Edit',
+                  },
+                ])
+                .select()
+                .single();
+
+              if (createProdErr) throw createProdErr;
+              finalProdId = createdProd.id;
+            }
+            item.productId = finalProdId;
+          }
+        }
+
+        const newQtyMap = {};
+        validItems.forEach((it) => {
+          if (it.productId) {
+            newQtyMap[it.productId] = (newQtyMap[it.productId] || 0) + (parseFloat(it.quantity) || 0);
+          }
+        });
+
+        const allProdIds = Array.from(new Set([...Object.keys(oldQtyMap), ...Object.keys(newQtyMap)]));
+        for (const pId of allProdIds) {
+          const oldQ = oldQtyMap[pId] || 0;
+          const newQ = newQtyMap[pId] || 0;
+          const diff = newQ - oldQ; // positive = stock increased, negative = stock reduced
+
+          if (diff !== 0) {
+            const { data: curInv } = await supabase
+              .from('inventory')
+              .select('id, quantity')
+              .eq('branch_id', targetBranchId)
+              .eq('product_id', pId)
+              .maybeSingle();
+
+            if (curInv) {
+              await supabase
+                .from('inventory')
+                .update({
+                  quantity: Math.max(0, (curInv.quantity || 0) + diff),
+                  updated_at: new Date().toISOString(),
+                })
+                .eq('id', curInv.id);
+            } else if (diff > 0) {
+              await supabase.from('inventory').insert([
+                {
+                  branch_id: targetBranchId,
+                  product_id: pId,
+                  quantity: diff,
+                  updated_at: new Date().toISOString(),
+                },
+              ]);
+            }
+
+            await supabase.from('inventory_movements').insert([
+              {
+                branch_id: targetBranchId,
+                product_id: pId,
+                type: diff > 0 ? 'purchase' : 'adjustment_out',
+                quantity: Math.abs(diff),
+                reference_id: editingPurchase.id,
+                description: `Purchase Bill Edited [${editingPurchase.invoice_number || editingPurchase.id.substring(0, 8)}]: Qty adjusted by ${diff > 0 ? '+' : ''}${diff}`,
+                created_by: userProfile.id,
+              },
+            ]);
+          }
+        }
+      }
+
+      // 3. Delete and re-insert purchase_items
+      await supabase.from('purchase_items').delete().eq('purchase_id', editingPurchase.id);
+
+      const resolvedItems = validItems.map((it) => {
+        const qty = parseFloat(it.quantity) || 1;
+        const price = parseFloat(it.costPrice) || 0;
+        return {
+          purchase_id: editingPurchase.id,
+          product_id: isFactoryPurchase ? null : (it.productId || null),
+          item_name: it.name?.trim() || 'Custom Item',
+          quantity: qty,
+          unit_price: price,
+          total_price: qty * price,
+        };
+      });
+
+      const { error: itemsInsertErr } = await supabase.from('purchase_items').insert(resolvedItems);
+      if (itemsInsertErr) throw itemsInsertErr;
+
+      showMessage('Purchase bill updated successfully!', 'success');
+      setShowEditPurchaseModal(false);
+      setEditingPurchase(null);
+      fetchPurchases();
+      fetchCatalogProducts();
+    } catch (err) {
+      console.error('Error saving purchase edit:', err);
+      showMessage(err.message || 'Failed to update purchase.', 'error');
+    } finally {
+      setSavingEdit(false);
+    }
+  };
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
       <div className="top-bar">
@@ -734,14 +1036,24 @@ export default function Purchases({ userProfile, branches, addToast }) {
                           <span className={`badge badge-${p.payment_status}`}>{p.payment_status}</span>
                         </td>
                         <td style={{ textAlign: 'center' }}>
-                          <button
-                            className="btn btn-secondary btn-sm btn-icon"
-                            onClick={() => handleViewPurchaseDetails(p)}
-                            title="View Purchase Breakdown"
-                            style={{ color: '#0284c7', padding: '0.35rem 0.45rem' }}
-                          >
-                            <Eye size={15} />
-                          </button>
+                          <div style={{ display: 'inline-flex', gap: '0.35rem', alignItems: 'center' }}>
+                            <button
+                              className="btn btn-secondary btn-sm btn-icon"
+                              onClick={() => handleViewPurchaseDetails(p)}
+                              title="View Purchase Breakdown"
+                              style={{ color: '#0284c7', padding: '0.35rem 0.45rem' }}
+                            >
+                              <Eye size={15} />
+                            </button>
+                            <button
+                              className="btn btn-secondary btn-sm btn-icon"
+                              onClick={() => handleOpenEditPurchase(p)}
+                              title="Edit Purchase Bill"
+                              style={{ color: '#059669', padding: '0.35rem 0.45rem' }}
+                            >
+                              <Edit size={15} />
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     );
@@ -762,7 +1074,7 @@ export default function Purchases({ userProfile, branches, addToast }) {
       {/* RECORD NEW PURCHASE MODAL (COMPACT & SLEEK) */}
       {showPurchaseModal && (
         <div className="modal-overlay">
-          <div className="modal-content modal-xl" style={{ maxWidth: '1400px', width: '96vw', maxHeight: '94vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+          <div className="modal-content modal-xl" style={{ maxWidth: '1060px', width: '92vw', maxHeight: '90vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
             <div className="modal-header" style={{ padding: '0.65rem 1.15rem' }}>
               <h3 className="modal-title" style={{ fontSize: '1.05rem', margin: 0 }}>New Purchase</h3>
               <button
@@ -775,7 +1087,7 @@ export default function Purchases({ userProfile, branches, addToast }) {
             </div>
 
             <form onSubmit={handleSavePurchase} style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
-              <div className="modal-body" style={{ flex: 1, overflowY: 'auto', padding: '0.85rem 1.15rem', display: 'grid', gridTemplateColumns: '2.4fr 1fr', gap: '1.25rem' }}>
+              <div className="modal-body" style={{ flex: 1, overflowY: 'auto', padding: '0.85rem 1.15rem', display: 'grid', gridTemplateColumns: '1.75fr 1fr', gap: '1rem' }}>
                 {/* Left Column: Supplier & Items */}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', minWidth: 0 }}>
                   
@@ -1287,22 +1599,39 @@ export default function Purchases({ userProfile, branches, addToast }) {
         return (
           <div className="modal-overlay">
             <div className="modal-content" style={{ maxWidth: '850px', width: '90%', display: 'flex', flexDirection: 'column', maxHeight: '95vh', overflow: 'hidden' }}>
-              <div className="modal-header">
-                <h3 className="modal-title">
+              <div className="modal-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <h3 className="modal-title" style={{ margin: 0 }}>
                   Purchase Invoice: {selectedPurchase.invoice_number || `PUR#${selectedPurchase.id.substring(0, 8).toUpperCase()}`}
                 </h3>
-                <button 
-                  className="btn btn-secondary btn-sm" 
-                  onClick={() => {
-                    setShowDetailModal(false);
-                    setSelectedPurchase(null);
-                    setSelectedPurchaseItems([]);
-                    setSelectedPurchasePayments([]);
-                  }}
-                  style={{ borderRadius: '50%', padding: '0.4rem', border: 'none' }}
-                >
-                  ✕
-                </button>
+                <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => {
+                      const purchaseToEdit = selectedPurchase;
+                      setShowDetailModal(false);
+                      setSelectedPurchase(null);
+                      setSelectedPurchaseItems([]);
+                      setSelectedPurchasePayments([]);
+                      handleOpenEditPurchase(purchaseToEdit);
+                    }}
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.8rem', padding: '0.3rem 0.65rem' }}
+                  >
+                    <Edit size={14} /> Edit Bill
+                  </button>
+                  <button 
+                    className="btn btn-secondary btn-sm" 
+                    onClick={() => {
+                      setShowDetailModal(false);
+                      setSelectedPurchase(null);
+                      setSelectedPurchaseItems([]);
+                      setSelectedPurchasePayments([]);
+                    }}
+                    style={{ borderRadius: '50%', padding: '0.4rem', border: 'none' }}
+                  >
+                    ✕
+                  </button>
+                </div>
               </div>
 
               <div className="modal-body" style={{ flex: 1, overflowY: 'auto', padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
@@ -1486,6 +1815,427 @@ export default function Purchases({ userProfile, branches, addToast }) {
           </div>
         );
       })()}
+
+      {/* EDIT PURCHASE MODAL */}
+      {showEditPurchaseModal && editingPurchase && (
+        <div className="modal-overlay">
+          <div className="modal-content modal-xl" style={{ maxWidth: '1060px', width: '92vw', maxHeight: '90vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+            <div className="modal-header" style={{ padding: '0.65rem 1.15rem' }}>
+              <h3 className="modal-title" style={{ fontSize: '1.05rem', margin: 0 }}>
+                Edit Purchase: {editingPurchase.invoice_number || `PUR#${editingPurchase.id.substring(0, 8).toUpperCase()}`}
+              </h3>
+              <button
+                className="btn btn-secondary btn-sm"
+                onClick={() => {
+                  setShowEditPurchaseModal(false);
+                  setEditingPurchase(null);
+                }}
+                style={{ borderRadius: '50%', padding: '0.3rem 0.45rem', border: 'none' }}
+              >
+                ✕
+              </button>
+            </div>
+
+            {loadingEditItems ? (
+              <div style={{ padding: '3rem', textAlign: 'center' }}>
+                <TableLoading message="Loading purchase items for edit..." />
+              </div>
+            ) : (
+              <form onSubmit={handleSaveEditPurchase} style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
+                <div className="modal-body" style={{ flex: 1, overflowY: 'auto', padding: '0.85rem 1.15rem', display: 'grid', gridTemplateColumns: '1.75fr 1fr', gap: '1rem' }}>
+                  {/* Left Column: Supplier & Items */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', minWidth: 0 }}>
+                    {/* Supplier & Date Bar */}
+                    <div style={{ backgroundColor: '#f8fafc', padding: '0.75rem 0.9rem', borderRadius: '6px', border: '1px solid var(--border-color)' }}>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 145px', gap: '0.75rem', alignItems: 'start' }}>
+                        <div className="form-group" style={{ marginBottom: 0 }}>
+                          <label style={{ fontSize: '0.78rem' }}>Supplier *</label>
+                          <select
+                            className="input-control"
+                            value={editSupplierId}
+                            onChange={(e) => setEditSupplierId(e.target.value)}
+                            required
+                            style={{ height: '36px', minHeight: '36px', fontSize: '0.85rem' }}
+                          >
+                            <option value="">-- Select Supplier --</option>
+                            {suppliers.map((s) => (
+                              <option key={s.id} value={s.id}>
+                                {s.name} {s.phone ? `(${s.phone})` : ''}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <div className="form-group" style={{ marginBottom: 0 }}>
+                          <label style={{ fontSize: '0.78rem' }}>Purchase Date *</label>
+                          <input
+                            type="date"
+                            className="input-control"
+                            value={editPurchaseDate}
+                            onChange={(e) => setEditPurchaseDate(e.target.value)}
+                            required
+                            style={{ height: '36px', minHeight: '36px', fontSize: '0.85rem' }}
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Search & Add Product Bar */}
+                    <div style={{ position: 'relative' }}>
+                      <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
+                        <input
+                          type="text"
+                          className="input-control"
+                          placeholder="Search product by name or SKU..."
+                          value={editSearchQuery}
+                          onChange={(e) => {
+                            setEditSearchQuery(e.target.value);
+                            setShowEditSearchSuggestions(true);
+                          }}
+                          onFocus={() => setShowEditSearchSuggestions(true)}
+                          onBlur={() => setTimeout(() => setShowEditSearchSuggestions(false), 250)}
+                          style={{ height: '32px', minHeight: '32px', fontSize: '0.82rem', padding: '0.25rem 0.6rem' }}
+                        />
+                        {editSearchQuery && (
+                          <button
+                            type="button"
+                            className="btn btn-secondary btn-sm"
+                            onClick={() => {
+                              setEditSearchQuery('');
+                              setShowEditSearchSuggestions(false);
+                            }}
+                            style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem', height: '32px' }}
+                          >
+                            Clear
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          className="btn btn-secondary btn-sm"
+                          onClick={addEditItemRow}
+                          style={{ whiteSpace: 'nowrap', padding: '0.25rem 0.6rem', fontSize: '0.78rem', height: '32px', fontWeight: 600 }}
+                        >
+                          + Add Row
+                        </button>
+                      </div>
+
+                      {showEditSearchSuggestions && (
+                        <div style={{
+                          position: 'absolute',
+                          top: '100%',
+                          left: 0,
+                          right: 0,
+                          backgroundColor: '#ffffff',
+                          border: '1px solid var(--border-color)',
+                          borderRadius: 'var(--border-radius-sm)',
+                          boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)',
+                          maxHeight: '180px',
+                          overflowY: 'auto',
+                          zIndex: 999,
+                          marginTop: '0.2rem'
+                        }}>
+                          {catalogProducts
+                            .filter(p => {
+                              if (!editSearchQuery.trim()) return true;
+                              return (
+                                p.name.toLowerCase().includes(editSearchQuery.toLowerCase()) ||
+                                p.sku.toLowerCase().includes(editSearchQuery.toLowerCase())
+                              );
+                            })
+                            .map((prod) => (
+                              <div
+                                key={prod.id}
+                                style={{
+                                  padding: '0.4rem 0.65rem',
+                                  cursor: 'pointer',
+                                  borderBottom: '1px solid #f1f5f9',
+                                  fontSize: '0.8rem',
+                                  textAlign: 'left'
+                                }}
+                                onClick={() => {
+                                  if (editPurchaseItems.length === 1 && !editPurchaseItems[0].productId && !editPurchaseItems[0].name && !editPurchaseItems[0].code) {
+                                    updateEditItemRow(0, { productId: prod.id, code: prod.sku || prod.product_code || '', name: prod.name, quantity: 1, costPrice: prod.purchase_price });
+                                  } else {
+                                    setEditPurchaseItems([...editPurchaseItems, { productId: prod.id, code: prod.sku || prod.product_code || '', name: prod.name, quantity: 1, costPrice: prod.purchase_price }]);
+                                  }
+                                  setEditSearchQuery('');
+                                  setShowEditSearchSuggestions(false);
+                                  showMessage(`${prod.name} added to list.`, 'success');
+                                }}
+                              >
+                                <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{prod.name}</div>
+                                <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                                  SKU: {prod.sku || prod.product_code || '—'} | Cost: ৳{formatAmount(prod.purchase_price)}
+                                </div>
+                              </div>
+                            ))}
+                          {catalogProducts.filter(p => {
+                            if (!editSearchQuery.trim()) return true;
+                            return (
+                              p.name.toLowerCase().includes(editSearchQuery.toLowerCase()) ||
+                              p.sku.toLowerCase().includes(editSearchQuery.toLowerCase())
+                            );
+                          }).length === 0 && (
+                            <div style={{ padding: '0.5rem', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.8rem' }}>
+                              No matching products found.
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Compact Items Table */}
+                    <div className="table-container" style={{ border: '1px solid var(--border-color)', borderRadius: '6px', maxHeight: '420px', overflowY: 'auto', width: '100%' }}>
+                      <table style={{ width: '100%', minWidth: '640px', fontSize: '0.82rem' }}>
+                        <thead>
+                          <tr>
+                            <th style={{ width: '35px', padding: '0.35rem 0.4rem', textAlign: 'center' }}>SL</th>
+                            <th style={{ width: '110px', padding: '0.35rem 0.4rem' }}>Code / SKU</th>
+                            <th style={{ padding: '0.35rem 0.4rem', minWidth: '200px' }}>Product Name *</th>
+                            <th style={{ width: '70px', textAlign: 'right', padding: '0.35rem 0.4rem' }}>Qty *</th>
+                            <th style={{ width: '90px', textAlign: 'right', padding: '0.35rem 0.4rem' }}>Cost *</th>
+                            <th style={{ width: '85px', textAlign: 'right', padding: '0.35rem 0.4rem' }}>Total</th>
+                            <th style={{ width: '38px', textAlign: 'center', padding: '0.35rem 0.3rem' }}>Del</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {editPurchaseItems.map((item, idx) => (
+                            <tr key={idx}>
+                              <td style={{ verticalAlign: 'middle', fontWeight: 600, padding: '0.3rem 0.4rem', textAlign: 'center', color: 'var(--text-muted)' }}>
+                                {idx + 1}
+                              </td>
+                              <td style={{ verticalAlign: 'middle', padding: '0.3rem 0.3rem' }}>
+                                <input
+                                  type="text"
+                                  className="input-control"
+                                  placeholder="Code (opt)"
+                                  value={item.code || ''}
+                                  readOnly={Boolean(item.productId)}
+                                  onChange={(e) => {
+                                    if (item.productId) return;
+                                    const val = e.target.value;
+                                    const matched = catalogProducts.find(
+                                      (p) => p.sku?.toLowerCase() === val.toLowerCase() || p.product_code?.toLowerCase() === val.toLowerCase()
+                                    );
+                                    if (matched) {
+                                      const bPrice = matched.branch_prices?.[editingPurchase.branch_id]?.purchase_price;
+                                      const effectiveCost = (bPrice !== null && bPrice !== undefined) ? bPrice : matched.purchase_price;
+                                      updateEditItemRow(idx, { productId: matched.id, code: matched.sku || matched.product_code || val, name: matched.name, costPrice: effectiveCost });
+                                    } else {
+                                      updateEditItemField(idx, 'code', val);
+                                    }
+                                  }}
+                                  style={{
+                                    height: '30px',
+                                    minHeight: '30px',
+                                    width: '100%',
+                                    padding: '0.15rem 0.35rem',
+                                    fontSize: '0.8rem',
+                                    fontFamily: 'monospace',
+                                    backgroundColor: item.productId ? '#f1f5f9' : '#ffffff',
+                                    cursor: item.productId ? 'not-allowed' : 'text',
+                                    color: item.productId ? 'var(--text-secondary)' : 'inherit',
+                                  }}
+                                  title={item.productId ? `Catalog code (locked): ${item.code}` : 'Enter custom product code'}
+                                />
+                              </td>
+                              <td style={{ verticalAlign: 'middle', padding: '0.3rem 0.3rem' }}>
+                                <div style={{ position: 'relative', display: 'flex', alignItems: 'center', width: '100%' }}>
+                                  <input
+                                    type="text"
+                                    className="input-control"
+                                    placeholder="Type or select product..."
+                                    value={item.name || ''}
+                                    readOnly={Boolean(item.productId)}
+                                    onChange={(e) => {
+                                      if (item.productId) return;
+                                      const val = e.target.value;
+                                      const matched = catalogProducts.find(
+                                        (p) => p.name.toLowerCase() === val.toLowerCase() || p.sku?.toLowerCase() === val.toLowerCase()
+                                      );
+                                      if (matched) {
+                                        const bPrice = matched.branch_prices?.[editingPurchase.branch_id]?.purchase_price;
+                                        const effectiveCost = (bPrice !== null && bPrice !== undefined) ? bPrice : matched.purchase_price;
+                                        updateEditItemRow(idx, { productId: matched.id, code: matched.sku || matched.product_code || item.code || '', name: matched.name, costPrice: effectiveCost });
+                                      } else {
+                                        updateEditItemRow(idx, { productId: '', name: val });
+                                      }
+                                    }}
+                                    list={!item.productId ? `edit-catalog-prods-${idx}` : undefined}
+                                    required
+                                    style={{
+                                      height: '30px',
+                                      minHeight: '30px',
+                                      width: '100%',
+                                      padding: '0.15rem 0.4rem',
+                                      paddingRight: item.productId ? '1.5rem' : '0.4rem',
+                                      fontSize: '0.82rem',
+                                      backgroundColor: item.productId ? '#f1f5f9' : '#ffffff',
+                                      cursor: item.productId ? 'not-allowed' : 'text',
+                                      fontWeight: item.productId ? 600 : 'normal',
+                                    }}
+                                    title={item.productId ? `Catalog product (locked): ${item.name}. Click '✕' to unlock/clear.` : item.name || 'Type or select product'}
+                                  />
+                                  {item.productId && (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        updateEditItemRow(idx, { productId: '', code: '', name: '', costPrice: 0 });
+                                      }}
+                                      title="Clear selection and enter unlisted item"
+                                      style={{
+                                        position: 'absolute',
+                                        right: '0.3rem',
+                                        background: 'none',
+                                        border: 'none',
+                                        color: 'var(--text-muted)',
+                                        cursor: 'pointer',
+                                        padding: '0.1rem',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                      }}
+                                    >
+                                      <X size={13} />
+                                    </button>
+                                  )}
+                                </div>
+                                {!item.productId && (
+                                  <datalist id={`edit-catalog-prods-${idx}`}>
+                                    {catalogProducts.map((p) => {
+                                      const bPrice = p.branch_prices?.[editingPurchase.branch_id]?.purchase_price;
+                                      const effectiveCost = (bPrice !== null && bPrice !== undefined) ? bPrice : p.purchase_price;
+                                      return (
+                                        <option key={p.id} value={p.name}>
+                                          {p.sku} (Cost: ৳{formatAmount(effectiveCost)})
+                                        </option>
+                                      );
+                                    })}
+                                  </datalist>
+                                )}
+                              </td>
+                              <td style={{ verticalAlign: 'middle', textAlign: 'right', padding: '0.3rem 0.3rem' }}>
+                                <input
+                                  type="number"
+                                  min="1"
+                                  placeholder="Qty"
+                                  className="input-control"
+                                  value={item.quantity}
+                                  onChange={(e) => updateEditItemField(idx, 'quantity', parseInt(e.target.value) || 1)}
+                                  required
+                                  style={{ height: '30px', minHeight: '30px', padding: '0.15rem 0.3rem', fontSize: '0.8rem', textAlign: 'right', width: '100%' }}
+                                />
+                              </td>
+                              <td style={{ verticalAlign: 'middle', textAlign: 'right', padding: '0.3rem 0.3rem' }}>
+                                <input
+                                  type="number"
+                                  step="0.01"
+                                  min="0"
+                                  placeholder="Cost"
+                                  className="input-control"
+                                  value={item.costPrice}
+                                  onChange={(e) => updateEditItemField(idx, 'costPrice', parseFloat(e.target.value) || 0.00)}
+                                  required
+                                  style={{ height: '30px', minHeight: '30px', padding: '0.15rem 0.3rem', fontSize: '0.8rem', textAlign: 'right', width: '100%' }}
+                                />
+                              </td>
+                              <td style={{ verticalAlign: 'middle', textAlign: 'right', fontWeight: 700, padding: '0.3rem 0.4rem', whiteSpace: 'nowrap' }}>
+                                ৳{formatAmount((parseFloat(item.costPrice) || 0) * (parseInt(item.quantity) || 0))}
+                              </td>
+                              <td style={{ verticalAlign: 'middle', textAlign: 'center', padding: '0.3rem 0.2rem' }}>
+                                <button
+                                  type="button"
+                                  className="btn btn-danger btn-sm btn-icon"
+                                  style={{ border: 'none', background: 'none', color: 'var(--danger)', display: 'inline-flex', padding: '0.2rem' }}
+                                  onClick={() => removeEditItemRow(idx)}
+                                >
+                                  <Trash2 size={14} />
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  {/* Right Column: Bill Summary */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem', backgroundColor: '#f8fafc', padding: '0.75rem 0.85rem', borderRadius: '6px', border: '1px solid var(--border-color)' }}>
+                    <div style={{ fontWeight: 700, fontSize: '0.84rem', color: 'var(--text-primary)', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.35rem' }}>
+                      Purchase Summary
+                    </div>
+
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.82rem' }}>
+                      <span style={{ color: 'var(--text-secondary)' }}>Subtotal:</span>
+                      <strong>৳{formatAmount(getEditSubtotal())}</strong>
+                    </div>
+
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.82rem' }}>
+                      <span style={{ color: 'var(--text-secondary)' }}>Discount:</span>
+                      <input
+                        type="number"
+                        min="0"
+                        className="input-control"
+                        style={{ width: '95px', height: '28px', minHeight: '28px', padding: '0.15rem 0.4rem', textAlign: 'right', fontSize: '0.8rem' }}
+                        value={editDiscount}
+                        onChange={(e) => setEditDiscount(Math.max(0, parseFloat(e.target.value) || 0))}
+                      />
+                    </div>
+
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontWeight: 800, fontSize: '0.95rem', borderTop: '1px solid var(--border-color)', paddingTop: '0.4rem', color: 'var(--primary)' }}>
+                      <span>Net Total:</span>
+                      <span>৳{formatAmount(getEditGrandTotal())}</span>
+                    </div>
+
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.82rem', color: 'var(--success-text)', marginTop: '0.2rem' }}>
+                      <span>Paid Amount:</span>
+                      <strong>৳{formatAmount(editingPurchase.paid_amount || 0)}</strong>
+                    </div>
+
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.82rem', color: getEditGrandTotal() - (editingPurchase.paid_amount || 0) > 0 ? 'var(--danger-text)' : 'inherit' }}>
+                      <span>Remaining Due:</span>
+                      <strong>৳{formatAmount(Math.max(0, getEditGrandTotal() - (editingPurchase.paid_amount || 0)))}</strong>
+                    </div>
+
+                    <div className="form-group" style={{ marginBottom: 0, marginTop: '0.3rem' }}>
+                      <label style={{ fontSize: '0.75rem' }}>Notes / Challan No</label>
+                      <input
+                        type="text"
+                        className="input-control"
+                        placeholder="Notes or challan (optional)"
+                        value={editNotes}
+                        onChange={(e) => setEditNotes(e.target.value)}
+                        style={{ height: '30px', minHeight: '30px', fontSize: '0.82rem', padding: '0.2rem 0.5rem' }}
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="modal-footer" style={{ borderTop: '1px solid var(--border-color)', padding: '0.65rem 1.15rem', display: 'flex', justifyContent: 'flex-end', gap: '0.5rem', background: '#f8fafc' }}>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => {
+                      setShowEditPurchaseModal(false);
+                      setEditingPurchase(null);
+                    }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="btn btn-primary btn-sm"
+                    disabled={savingEdit}
+                    style={{ fontWeight: 700 }}
+                  >
+                    {savingEdit ? 'Updating...' : 'Save Changes'}
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
