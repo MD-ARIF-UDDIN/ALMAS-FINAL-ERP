@@ -359,9 +359,14 @@ export function getUserPermissions(userProfile) {
   if (!userProfile) return [];
   if (userProfile.role === 'owner') return [...ALL_PERMISSIONS];
 
-  // 1. Direct profile permissions column in Supabase DB
-  if (userProfile.permissions && Array.isArray(userProfile.permissions) && userProfile.permissions.length > 0) {
-    return userProfile.permissions;
+  // 1. Direct profile permissions column in Supabase DB (supports array or { custom_permissions: [...] })
+  if (userProfile.permissions) {
+    if (Array.isArray(userProfile.permissions) && userProfile.permissions.length > 0) {
+      return userProfile.permissions;
+    }
+    if (typeof userProfile.permissions === 'object' && Array.isArray(userProfile.permissions.custom_permissions) && userProfile.permissions.custom_permissions.length > 0) {
+      return userProfile.permissions.custom_permissions;
+    }
   }
 
   // 2. Local custom override fallback
@@ -379,9 +384,56 @@ export function getUserPermissions(userProfile) {
 }
 
 /**
+ * Helper to get staff monthly base salary from profile
+ */
+export function getStaffSalary(profile) {
+  if (!profile) return 0;
+  if (typeof profile.salary === 'number' && !isNaN(profile.salary)) return profile.salary;
+  if (typeof profile.permissions === 'object' && profile.permissions && profile.permissions.salary !== undefined) {
+    return parseFloat(profile.permissions.salary) || 0;
+  }
+  return 0;
+}
+
+export const STAFF_DESIGNATIONS = [
+  'Sales Executive',
+  'Senior Sales Executive',
+  'Branch Manager',
+  'Assistant Branch Manager',
+  'Cashier',
+  'Store Keeper / Inventory In-charge',
+  'Factory Manager',
+  'Production Supervisor',
+  'Quality Control (QC) Inspector',
+  'Craftsman / Artisan',
+  'Machine Operator',
+  'Tailor / Stitching Master',
+  'Packaging Staff',
+  'Delivery Rider / Messenger',
+  'Accountant',
+  'Office Assistant / Helper',
+  'Other / Custom',
+];
+
+/**
+ * Helper to get staff designation from profile
+ */
+export function getStaffDesignation(profile) {
+  if (!profile) return '';
+  if (profile.designation) return profile.designation;
+  if (typeof profile.permissions === 'object' && profile.permissions && profile.permissions.designation) {
+    return profile.permissions.designation;
+  }
+  if (profile.role) {
+    return profile.role.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase());
+  }
+  return 'Staff Member';
+}
+
+/**
  * Save custom permissions for an individual user (Both Supabase DB & Local Cache)
  */
-export async function saveUserCustomPermissions(userId, permissions) {
+export async function saveUserCustomPermissions(userId, permissions, existingProfile = null) {
   // Update local cache
   try {
     const customUsers = JSON.parse(localStorage.getItem(STORAGE_KEY_USERS) || '{}');
@@ -393,7 +445,14 @@ export async function saveUserCustomPermissions(userId, permissions) {
 
   // Persist to Supabase DB profiles.permissions
   try {
-    await supabase.from('profiles').update({ permissions }).eq('id', userId);
+    let updatedPayload = permissions;
+    if (existingProfile && typeof existingProfile.permissions === 'object' && !Array.isArray(existingProfile.permissions)) {
+      updatedPayload = {
+        ...existingProfile.permissions,
+        custom_permissions: permissions,
+      };
+    }
+    await supabase.from('profiles').update({ permissions: updatedPayload }).eq('id', userId);
   } catch (err) {
     console.error('Error persisting user permissions to profiles table:', err);
   }
@@ -402,7 +461,7 @@ export async function saveUserCustomPermissions(userId, permissions) {
 /**
  * Clear custom overrides for an individual user
  */
-export async function clearUserCustomPermissions(userId) {
+export async function clearUserCustomPermissions(userId, existingProfile = null) {
   try {
     const customUsers = JSON.parse(localStorage.getItem(STORAGE_KEY_USERS) || '{}');
     delete customUsers[userId];
@@ -412,7 +471,15 @@ export async function clearUserCustomPermissions(userId) {
   }
 
   try {
-    await supabase.from('profiles').update({ permissions: null }).eq('id', userId);
+    if (existingProfile && typeof existingProfile.permissions === 'object' && !Array.isArray(existingProfile.permissions)) {
+      const updatedPayload = {
+        ...existingProfile.permissions,
+        custom_permissions: [],
+      };
+      await supabase.from('profiles').update({ permissions: updatedPayload }).eq('id', userId);
+    } else {
+      await supabase.from('profiles').update({ permissions: [] }).eq('id', userId);
+    }
   } catch (err) {
     console.error('Error clearing user permissions in profiles table:', err);
   }

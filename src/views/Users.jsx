@@ -30,14 +30,18 @@ import {
 } from 'lucide-react';
 import { TableLoading } from '../components/TableLoading';
 import Pagination from '../components/Pagination';
+import { formatAmount } from '../utils/format';
 import {
   MODULE_SERIAL_PERMISSIONS,
   ALL_PERMISSIONS,
   DEFAULT_ROLE_PERMISSIONS,
+  STAFF_DESIGNATIONS,
   getRolePermissions,
   saveRolePermissions,
   resetRolePermissionsToDefault,
   getUserPermissions,
+  getStaffSalary,
+  getStaffDesignation,
   saveUserCustomPermissions,
   clearUserCustomPermissions,
 } from '../utils/permissions';
@@ -73,6 +77,26 @@ export default function Users({ userProfile, branches, fetchBranches, addToast, 
   const [activeTab, setActiveTab] = useState(getTabFromPath); // 'users', 'branches', 'permissions'
   const [loading, setLoading] = useState(true);
 
+  // Form states for creating new staff
+  const [fullName, setFullName] = useState('');
+  const [phone, setPhone] = useState('');
+  const [password, setPassword] = useState('');
+  const [role, setRole] = useState('staff');
+  const [selectedBranch, setSelectedBranch] = useState('');
+  const [designation, setDesignation] = useState('Sales Executive');
+  const [customDesignation, setCustomDesignation] = useState('');
+  const [salary, setSalary] = useState('');
+
+  // Form states for editing staff
+  const [editingProfile, setEditingProfile] = useState(null);
+  const [editFullName, setEditFullName] = useState('');
+  const [editPassword, setEditPassword] = useState('');
+  const [editRole, setEditRole] = useState('staff');
+  const [editBranch, setEditBranch] = useState('');
+  const [editDesignation, setEditDesignation] = useState('Sales Executive');
+  const [editCustomDesignation, setEditCustomDesignation] = useState('');
+  const [editSalary, setEditSalary] = useState('');
+
   useEffect(() => {
     if (location.pathname === '/branches') {
       setActiveTab('branches');
@@ -100,20 +124,6 @@ export default function Users({ userProfile, branches, fetchBranches, addToast, 
   const [showBranchModal, setShowBranchModal] = useState(false);
   const [showEditUserModal, setShowEditUserModal] = useState(false);
   const [showUserPermsModal, setShowUserPermsModal] = useState(false);
-
-  // User form states
-  const [fullName, setFullName] = useState('');
-  const [phone, setPhone] = useState('');
-  const [password, setPassword] = useState('');
-  const [role, setRole] = useState('staff');
-  const [selectedBranch, setSelectedBranch] = useState('');
-
-  // Edit user state
-  const [editingProfile, setEditingProfile] = useState(null);
-  const [editFullName, setEditFullName] = useState('');
-  const [editPassword, setEditPassword] = useState('');
-  const [editRole, setEditRole] = useState('staff');
-  const [editBranch, setEditBranch] = useState('');
 
   // Custom User Permissions modal state
   const [selectedUserForPerms, setSelectedUserForPerms] = useState(null);
@@ -166,6 +176,27 @@ export default function Users({ userProfile, branches, fetchBranches, addToast, 
     addToast(text, type === 'error' ? 'error' : type === 'success' ? 'success' : 'info');
   };
 
+  const handleDesignationSelect = (desigVal) => {
+    setDesignation(desigVal);
+    // Auto-suggest matching role based on designation
+    if (['Branch Manager', 'Assistant Branch Manager'].includes(desigVal)) {
+      setRole('branch_manager');
+    } else if (['Factory Manager', 'Production Supervisor', 'Quality Control (QC) Inspector'].includes(desigVal)) {
+      setRole('factory_manager');
+    } else if (role !== 'owner') {
+      setRole('staff');
+    }
+  };
+
+  const handleEditDesignationSelect = (desigVal) => {
+    setEditDesignation(desigVal);
+    if (['Branch Manager', 'Assistant Branch Manager'].includes(desigVal)) {
+      setEditRole('branch_manager');
+    } else if (['Factory Manager', 'Production Supervisor', 'Quality Control (QC) Inspector'].includes(desigVal)) {
+      setEditRole('factory_manager');
+    }
+  };
+
   const handleCreateUser = async (e) => {
     e.preventDefault();
     const cleanPhone = phone.trim().replace(/[^0-9+]/g, '');
@@ -216,13 +247,27 @@ export default function Users({ userProfile, branches, fetchBranches, addToast, 
       const newUserId = data.user?.id;
       if (!newUserId) throw new Error('No user ID returned from auth sign up.');
 
-      // 2. Update their profile with the chosen role and branch
+      // 2. Prepare Designation and Salary metadata inside permissions JSON
+      const finalDesignation = role === 'owner' 
+        ? 'Owner / Director' 
+        : (designation === 'Other / Custom' ? (customDesignation.trim() || 'Staff') : designation);
+      
+      const parsedSalary = role === 'owner' ? 0 : (parseFloat(salary) || 0);
+
+      const permissionsPayload = {
+        designation: finalDesignation,
+        salary: parsedSalary,
+        custom_permissions: [],
+      };
+
+      // 3. Update their profile with the chosen role, branch, and designation/salary
       const { error: profileError } = await supabase
         .from('profiles')
         .update({
           full_name: fullName.trim(),
           role: role,
           branch_id: role === 'owner' ? null : selectedBranch || null,
+          permissions: permissionsPayload,
         })
         .eq('id', newUserId);
 
@@ -248,6 +293,21 @@ export default function Users({ userProfile, branches, fetchBranches, addToast, 
     setEditRole(profile.role || 'staff');
     setEditBranch(profile.branch_id || '');
     setEditPassword('');
+
+    // Load designation & salary
+    const currentDesig = getStaffDesignation(profile);
+    const isKnown = STAFF_DESIGNATIONS.includes(currentDesig);
+    if (isKnown) {
+      setEditDesignation(currentDesig);
+      setEditCustomDesignation('');
+    } else {
+      setEditDesignation(currentDesig ? 'Other / Custom' : 'Sales Executive');
+      setEditCustomDesignation(currentDesig || '');
+    }
+
+    const currentSal = getStaffSalary(profile);
+    setEditSalary(currentSal > 0 ? String(currentSal) : '');
+
     setShowEditUserModal(true);
   };
 
@@ -269,19 +329,36 @@ export default function Users({ userProfile, branches, fetchBranches, addToast, 
 
     setLoading(true);
     try {
-      // 1. Update Profile Information
+      // 1. Prepare Designation and Salary preserving existing custom_permissions
+      const finalDesignation = editRole === 'owner' 
+        ? 'Owner / Director' 
+        : (editDesignation === 'Other / Custom' ? (editCustomDesignation.trim() || 'Staff') : editDesignation);
+      
+      const parsedSalary = editRole === 'owner' ? 0 : (parseFloat(editSalary) || 0);
+
+      let updatedPermissions = {};
+      if (typeof editingProfile.permissions === 'object' && editingProfile.permissions && !Array.isArray(editingProfile.permissions)) {
+        updatedPermissions = { ...editingProfile.permissions };
+      } else if (Array.isArray(editingProfile.permissions)) {
+        updatedPermissions.custom_permissions = editingProfile.permissions;
+      }
+      updatedPermissions.designation = finalDesignation;
+      updatedPermissions.salary = parsedSalary;
+
+      // 2. Update Profile Information
       const { error: profError } = await supabase
         .from('profiles')
         .update({
           full_name: trimmedName,
           role: editRole,
           branch_id: editRole === 'owner' ? null : editBranch || null,
+          permissions: updatedPermissions,
         })
         .eq('id', editingProfile.id);
 
       if (profError) throw profError;
 
-      // 2. Update Password if provided
+      // 3. Update Password if provided
       if (trimmedPassword) {
         const { data: sessionData } = await supabase.auth.getSession();
         const isSelf = sessionData?.session?.user?.id === editingProfile.id;
@@ -380,18 +457,20 @@ export default function Users({ userProfile, branches, fetchBranches, addToast, 
 
   const handleSaveUserCustomPerms = () => {
     if (!selectedUserForPerms) return;
-    saveUserCustomPermissions(selectedUserForPerms.id, userCustomPerms);
+    saveUserCustomPermissions(selectedUserForPerms.id, userCustomPerms, selectedUserForPerms);
     showMessage(`Permissions updated for ${selectedUserForPerms.full_name || 'Staff'}.`, 'success');
     setShowUserPermsModal(false);
+    fetchProfiles();
   };
 
   const handleResetUserToRoleDefaults = () => {
     if (!selectedUserForPerms) return;
-    clearUserCustomPermissions(selectedUserForPerms.id);
+    clearUserCustomPermissions(selectedUserForPerms.id, selectedUserForPerms);
     const defaultPerms = getRolePermissions(selectedUserForPerms.role || 'staff');
     setUserCustomPerms(defaultPerms);
     setIsCustomOverride(false);
     showMessage(`Reset to standard ${selectedUserForPerms.role?.replace('_', ' ')} defaults.`, 'info');
+    fetchProfiles();
   };
 
   const handleCreateBranch = async (e) => {
@@ -523,6 +602,9 @@ export default function Users({ userProfile, branches, fetchBranches, addToast, 
     setPassword('');
     setRole('staff');
     setSelectedBranch('');
+    setDesignation('Sales Executive');
+    setCustomDesignation('');
+    setSalary('');
   };
 
   const resetBranchForm = () => {
@@ -629,20 +711,22 @@ export default function Users({ userProfile, branches, fetchBranches, addToast, 
                 <thead>
                   <tr>
                     <th style={{ width: '40px' }}>SL</th>
-                    <th>Name</th>
+                    <th>Employee Name</th>
+                    <th>Designation</th>
                     <th>Phone Number</th>
                     <th>Role</th>
                     <th>Branch Office</th>
-                    <th style={{ textAlign: 'center', width: '150px' }}>Permissions</th>
-                    <th style={{ textAlign: 'center', width: '190px' }}>Actions</th>
+                    <th>Monthly Salary</th>
+                    <th style={{ textAlign: 'center', width: '130px' }}>Permissions</th>
+                    <th style={{ textAlign: 'center', width: '140px' }}>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {loading ? (
-                    <TableLoading colSpan={7} message="Fetching user profiles..." />
+                    <TableLoading colSpan={9} message="Fetching user profiles..." />
                   ) : profiles.length === 0 ? (
                     <tr>
-                      <td colSpan={7} style={{ textAlign: 'center', padding: '2rem' }}>
+                      <td colSpan={9} style={{ textAlign: 'center', padding: '2rem' }}>
                         No profiles found.
                       </td>
                     </tr>
@@ -651,11 +735,29 @@ export default function Users({ userProfile, branches, fetchBranches, addToast, 
                       const userBranch = branches.find((b) => b.id === p.branch_id);
                       const perms = getUserPermissions(p);
                       const isOwner = p.role === 'owner';
+                      const desig = getStaffDesignation(p);
+                      const baseSalary = getStaffSalary(p);
 
                       return (
                         <tr key={p.id}>
                           <td>{(page - 1) * pageSize + index + 1}</td>
                           <td style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{p.full_name || 'N/A'}</td>
+                          <td>
+                            <span 
+                              style={{ 
+                                fontWeight: 500, 
+                                fontSize: '0.82rem',
+                                color: isOwner ? '#7c3aed' : '#334155',
+                                backgroundColor: isOwner ? '#f5f3ff' : '#f1f5f9',
+                                padding: '0.2rem 0.5rem',
+                                borderRadius: '4px',
+                                border: isOwner ? '1px solid #ddd6fe' : '1px solid #e2e8f0',
+                                display: 'inline-block'
+                              }}
+                            >
+                              {desig}
+                            </span>
+                          </td>
                           <td style={{ fontSize: '0.85rem', fontFamily: 'monospace' }}>
                             {p.phone || (p.email ? p.email.replace('@almas.local', '') : 'N/A')}
                           </td>
@@ -671,6 +773,17 @@ export default function Users({ userProfile, branches, fetchBranches, addToast, 
                               userBranch.name
                             ) : (
                               <span style={{ color: 'var(--danger-text)', fontSize: '0.82rem' }}>Unassigned</span>
+                            )}
+                          </td>
+                          <td>
+                            {isOwner ? (
+                              <span style={{ color: 'var(--text-muted)', fontSize: '0.82rem' }}>-</span>
+                            ) : baseSalary > 0 ? (
+                              <span style={{ fontWeight: 700, fontFamily: 'Outfit, sans-serif', color: '#059669', fontSize: '0.88rem' }}>
+                                ৳{formatAmount(baseSalary)}
+                              </span>
+                            ) : (
+                              <span style={{ color: 'var(--text-muted)', fontSize: '0.78rem', fontStyle: 'italic' }}>Not configured</span>
                             )}
                           </td>
                           <td style={{ textAlign: 'center' }}>
@@ -708,7 +821,7 @@ export default function Users({ userProfile, branches, fetchBranches, addToast, 
                               <button
                                 className="btn btn-secondary btn-sm btn-icon"
                                 onClick={() => handleOpenEditUser(p)}
-                                title="Edit Role & Branch"
+                                title="Edit Role, Salary & Branch"
                                 style={{ color: '#0284c7', padding: '0.35rem 0.45rem' }}
                               >
                                 <Edit size={15} />
@@ -1186,7 +1299,7 @@ export default function Users({ userProfile, branches, fetchBranches, addToast, 
         <div className="modal-overlay">
           <div className="modal-content" style={{ maxWidth: '480px', width: '100%' }}>
             <div className="modal-header">
-              <h3 className="modal-title">Edit User</h3>
+              <h3 className="modal-title">Edit Staff Profile</h3>
               <button 
                 className="btn btn-secondary btn-sm" 
                 onClick={() => setShowEditUserModal(false)} 
@@ -1226,6 +1339,58 @@ export default function Users({ userProfile, branches, fetchBranches, addToast, 
                     />
                   </div>
                 </div>
+
+                {editRole !== 'owner' && (
+                  <>
+                    <div className="form-group">
+                      <label>Staff Designation *</label>
+                      <select
+                        className="input-control"
+                        value={editDesignation}
+                        onChange={(e) => handleEditDesignationSelect(e.target.value)}
+                        required
+                      >
+                        {STAFF_DESIGNATIONS.map((d) => (
+                          <option key={d} value={d}>{d}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {editDesignation === 'Other / Custom' && (
+                      <div className="form-group">
+                        <label>Custom Designation Title *</label>
+                        <input
+                          type="text"
+                          className="input-control"
+                          placeholder="e.g. Master Pattern Designer"
+                          value={editCustomDesignation}
+                          onChange={(e) => setEditCustomDesignation(e.target.value)}
+                          required
+                        />
+                      </div>
+                    )}
+
+                    <div className="form-group">
+                      <label>Monthly Salary (৳)</label>
+                      <div style={{ position: 'relative' }}>
+                        <DollarSign size={14} style={{ position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+                        <input
+                          type="number"
+                          step="1"
+                          min="0"
+                          className="input-control"
+                          style={{ paddingLeft: '2.5rem' }}
+                          placeholder="e.g. 20000"
+                          value={editSalary}
+                          onChange={(e) => setEditSalary(e.target.value)}
+                        />
+                      </div>
+                      <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '0.2rem', display: 'block' }}>
+                        Monthly salary is auto-filled when recording salary expenses for this employee.
+                      </span>
+                    </div>
+                  </>
+                )}
 
                 <div className="form-group">
                   <label>Role *</label>
@@ -1297,7 +1462,7 @@ export default function Users({ userProfile, branches, fetchBranches, addToast, 
                   Cancel
                 </button>
                 <button type="submit" className="btn btn-primary" disabled={loading}>
-                  {loading ? 'Saving...' : 'Update'}
+                  {loading ? 'Saving...' : 'Update Staff'}
                 </button>
               </div>
             </form>
@@ -1310,7 +1475,7 @@ export default function Users({ userProfile, branches, fetchBranches, addToast, 
         <div className="modal-overlay">
           <div className="modal-content" style={{ maxWidth: '500px', width: '100%' }}>
             <div className="modal-header">
-              <h3 className="modal-title">New User</h3>
+              <h3 className="modal-title">New Staff Account</h3>
               <button 
                 className="btn btn-secondary btn-sm" 
                 onClick={() => {
@@ -1323,9 +1488,9 @@ export default function Users({ userProfile, branches, fetchBranches, addToast, 
               </button>
             </div>
             <form onSubmit={handleCreateUser}>
-              <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+              <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '1.1rem' }}>
                 <div className="form-group">
-                  <label>Name *</label>
+                  <label>Full Name *</label>
                   <div style={{ position: 'relative' }}>
                     <User size={14} style={{ position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
                     <input
@@ -1371,6 +1536,58 @@ export default function Users({ userProfile, branches, fetchBranches, addToast, 
                     />
                   </div>
                 </div>
+
+                {role !== 'owner' && (
+                  <>
+                    <div className="form-group">
+                      <label>Staff Designation *</label>
+                      <select
+                        className="input-control"
+                        value={designation}
+                        onChange={(e) => handleDesignationSelect(e.target.value)}
+                        required
+                      >
+                        {STAFF_DESIGNATIONS.map((d) => (
+                          <option key={d} value={d}>{d}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {designation === 'Other / Custom' && (
+                      <div className="form-group">
+                        <label>Custom Designation Title *</label>
+                        <input
+                          type="text"
+                          className="input-control"
+                          placeholder="e.g. Master Pattern Designer"
+                          value={customDesignation}
+                          onChange={(e) => setCustomDesignation(e.target.value)}
+                          required
+                        />
+                      </div>
+                    )}
+
+                    <div className="form-group">
+                      <label>Monthly Salary (৳)</label>
+                      <div style={{ position: 'relative' }}>
+                        <DollarSign size={14} style={{ position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+                        <input
+                          type="number"
+                          step="1"
+                          min="0"
+                          className="input-control"
+                          style={{ paddingLeft: '2.5rem' }}
+                          placeholder="e.g. 20000"
+                          value={salary}
+                          onChange={(e) => setSalary(e.target.value)}
+                        />
+                      </div>
+                      <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '0.2rem', display: 'block' }}>
+                        Monthly salary is auto-filled when recording salary expenses for this employee.
+                      </span>
+                    </div>
+                  </>
+                )}
 
                 <div className="form-group">
                   <label>Role *</label>
@@ -1426,7 +1643,7 @@ export default function Users({ userProfile, branches, fetchBranches, addToast, 
                   Cancel
                 </button>
                 <button type="submit" className="btn btn-primary" disabled={loading}>
-                  {loading ? 'Saving...' : 'Save User'}
+                  {loading ? 'Saving...' : 'Save Staff Account'}
                 </button>
               </div>
             </form>

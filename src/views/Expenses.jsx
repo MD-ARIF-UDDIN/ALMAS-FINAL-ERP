@@ -1,10 +1,11 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useLocation } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
-import { Plus, Search, Trash2, Receipt, CreditCard } from 'lucide-react';
+import { Plus, Search, Trash2, Receipt, CreditCard, Users, User, Calendar, DollarSign } from 'lucide-react';
 import { TableLoading } from '../components/TableLoading';
 import Pagination from '../components/Pagination';
 import { formatAmount } from '../utils/format';
+import { getStaffSalary, getStaffDesignation } from '../utils/permissions';
 
 export default function Expenses({ userProfile, branches, addToast }) {
   const location = useLocation();
@@ -17,6 +18,26 @@ export default function Expenses({ userProfile, branches, addToast }) {
   const [totalCount, setTotalCount] = useState(0);
   const [searchQuery, setSearchQuery] = useState('');
 
+  // Helper for 12 recent months
+  const recentMonths = useMemo(() => {
+    const months = [];
+    const now = new Date();
+    for (let i = 0; i < 12; i++) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const monthName = d.toLocaleString('en-US', { month: 'long', year: 'numeric' });
+      months.push(monthName);
+    }
+    return months;
+  }, []);
+
+  // Staff profiles list for salary payouts
+  const [staffProfiles, setStaffProfiles] = useState([]);
+  const [selectedStaffId, setSelectedStaffId] = useState('');
+  const [salaryMonth, setSalaryMonth] = useState(() => {
+    const now = new Date();
+    return now.toLocaleString('en-US', { month: 'long', year: 'numeric' });
+  });
+
   // Add Expense states
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [category, setCategory] = useState('utilities');
@@ -25,6 +46,23 @@ export default function Expenses({ userProfile, branches, addToast }) {
   const [expenseDate, setExpenseDate] = useState(new Date().toISOString().split('T')[0]);
   const [paymentMethod, setPaymentMethod] = useState('cash');
   const [description, setDescription] = useState('');
+
+  const fetchStaffProfiles = useCallback(async () => {
+    try {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .order('full_name', { ascending: true });
+      if (error) throw error;
+      setStaffProfiles(data || []);
+    } catch (err) {
+      console.error('Error fetching staff profiles for expenses:', err);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchStaffProfiles();
+  }, [fetchStaffProfiles]);
 
   useEffect(() => {
     if (location.state?.openCreateExpense) {
@@ -66,6 +104,28 @@ export default function Expenses({ userProfile, branches, addToast }) {
 
   const showMessage = (text, type) => {
     addToast(text, type === 'error' ? 'error' : type === 'success' ? 'success' : 'info');
+  };
+
+  const handleStaffSelect = (staffId) => {
+    setSelectedStaffId(staffId);
+    const staff = staffProfiles.find((s) => s.id === staffId);
+    if (staff) {
+      const baseSalary = getStaffSalary(staff);
+      if (baseSalary > 0) {
+        setAmount(String(baseSalary));
+      }
+      const desig = getStaffDesignation(staff);
+      setDescription(`Salary for ${staff.full_name || 'Staff'} (${desig}) - Month: ${salaryMonth}`);
+    }
+  };
+
+  const handleSalaryMonthChange = (month) => {
+    setSalaryMonth(month);
+    const staff = staffProfiles.find((s) => s.id === selectedStaffId);
+    if (staff) {
+      const desig = getStaffDesignation(staff);
+      setDescription(`Salary for ${staff.full_name || 'Staff'} (${desig}) - Month: ${month}`);
+    }
   };
 
   const fetchExpenses = useCallback(async () => {
@@ -128,10 +188,22 @@ export default function Expenses({ userProfile, branches, addToast }) {
       return;
     }
 
+    if (category === 'salaries' && !selectedStaffId) {
+      showMessage('Please select an employee for the salary payout.', 'error');
+      return;
+    }
+
     setLoading(true);
     try {
       const finalCategory = category === 'others' && customCategory ? customCategory : category;
       const expenseAmount = parseFloat(amount);
+
+      let finalDescription = description.trim();
+      if (category === 'salaries' && !finalDescription) {
+        const staff = staffProfiles.find((s) => s.id === selectedStaffId);
+        const desig = staff ? getStaffDesignation(staff) : 'Staff';
+        finalDescription = `Salary for ${staff?.full_name || 'Staff'} (${desig}) - Month: ${salaryMonth}`;
+      }
 
       // 1. Insert into expenses table
       const { data: expData, error: expError } = await supabase
@@ -141,7 +213,7 @@ export default function Expenses({ userProfile, branches, addToast }) {
             branch_id: selectedBranchId,
             category: finalCategory,
             amount: expenseAmount,
-            description: description || null,
+            description: finalDescription || null,
             expense_date: expenseDate,
             payment_method: paymentMethod,
             created_by: userProfile.id,
@@ -159,7 +231,7 @@ export default function Expenses({ userProfile, branches, addToast }) {
           amount_in: 0,
           amount_out: expenseAmount,
           reference_id: expenseId,
-          description: `Business Expense [${finalCategory.toUpperCase()}]: ${description || 'No details'} (${paymentMethod})`,
+          description: `Business Expense [${finalCategory.toUpperCase()}]: ${finalDescription || 'No details'} (${paymentMethod})`,
           transaction_date: new Date(expenseDate).toISOString(),
           created_by: userProfile.id,
         },
@@ -221,6 +293,8 @@ export default function Expenses({ userProfile, branches, addToast }) {
     setCategory('utilities');
     setExpenseDate(new Date().toISOString().split('T')[0]);
     setPaymentMethod('cash');
+    setSelectedStaffId('');
+    setSalaryMonth(recentMonths[0] || '');
   };
 
   return (
@@ -371,11 +445,22 @@ export default function Expenses({ userProfile, branches, addToast }) {
             <form onSubmit={handleCreateExpense}>
               <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
                 <div className="form-group">
-                  <label>Category *</label>
+                  <label>Expense Category *</label>
                   <select
                     className="input-control"
                     value={category}
-                    onChange={(e) => setCategory(e.target.value)}
+                    onChange={(e) => {
+                      const newCat = e.target.value;
+                      setCategory(newCat);
+                      if (newCat !== 'salaries') {
+                        setSelectedStaffId('');
+                      } else {
+                        const bStaff = staffProfiles.filter((p) => p.branch_id === selectedBranchId && p.role !== 'owner');
+                        if (bStaff.length > 0) {
+                          handleStaffSelect(bStaff[0].id);
+                        }
+                      }
+                    }}
                     required
                   >
                     {categoriesList.map((cat) => (
@@ -385,6 +470,61 @@ export default function Expenses({ userProfile, branches, addToast }) {
                     ))}
                   </select>
                 </div>
+
+                {category === 'salaries' && (
+                  <div style={{ backgroundColor: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 'var(--border-radius-sm)', padding: '0.85rem', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: '#166534', fontWeight: 700, fontSize: '0.84rem' }}>
+                      <Users size={16} />
+                      <span>Branch Staff Salary Information</span>
+                    </div>
+
+                    <div className="form-group" style={{ marginBottom: 0 }}>
+                      <label style={{ fontSize: '0.82rem', fontWeight: 600 }}>Employee (This Branch Only) *</label>
+                      <select
+                        className="input-control"
+                        value={selectedStaffId}
+                        onChange={(e) => handleStaffSelect(e.target.value)}
+                        required
+                        style={{ backgroundColor: '#fff' }}
+                      >
+                        <option value="">-- Select Employee --</option>
+                        {staffProfiles
+                          .filter((p) => p.branch_id === selectedBranchId && p.role !== 'owner')
+                          .map((s) => {
+                            const sal = getStaffSalary(s);
+                            const desig = getStaffDesignation(s);
+                            return (
+                              <option key={s.id} value={s.id}>
+                                {s.full_name} — {desig} {sal > 0 ? `(৳${formatAmount(sal)})` : ''}
+                              </option>
+                            );
+                          })}
+                      </select>
+                      {staffProfiles.filter((p) => p.branch_id === selectedBranchId && p.role !== 'owner').length === 0 && (
+                        <span style={{ fontSize: '0.75rem', color: '#b91c1c', marginTop: '0.25rem', display: 'block' }}>
+                          ⚠️ No employees registered for this branch. Please assign staff to this branch in Users tab.
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="form-group" style={{ marginBottom: 0 }}>
+                      <label style={{ fontSize: '0.82rem', fontWeight: 600 }}>Salary Month *</label>
+                      <select
+                        className="input-control"
+                        value={salaryMonth}
+                        onChange={(e) => handleSalaryMonthChange(e.target.value)}
+                        required
+                        style={{ backgroundColor: '#fff' }}
+                      >
+                        {recentMonths.map((m) => (
+                          <option key={m} value={m}>
+                            {m}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                )}
 
                 {category === 'others' && (
                   <div className="form-group">
