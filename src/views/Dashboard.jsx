@@ -57,17 +57,7 @@ export default function Dashboard({ userProfile, branches }) {
       path: '/inventory',
       perm: 'inventory.view',
     },
-    {
-      id: 'challans-stock',
-      title: 'Challans',
-      icon: Truck,
-      gradient: 'linear-gradient(135deg, #06b6d4 0%, #0891b2 100%)',
-      glow: 'rgba(6, 182, 212, 0.28)',
-      hoverBorder: '#06b6d4',
-      themeColor: '#0891b2',
-      path: '/challans',
-      perm: 'inventory.view',
-    },
+
     {
       id: 'returns-manage',
       title: 'Returns',

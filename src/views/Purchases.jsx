@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useLocation } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
 import { Download, Plus, Search, Trash2, UserPlus, CreditCard, Eye, X, Edit } from 'lucide-react';
@@ -11,6 +11,12 @@ export default function Purchases({ userProfile, branches, addToast }) {
   const [purchases, setPurchases] = useState([]);
   const [suppliers, setSuppliers] = useState([]);
   const [catalogProducts, setCatalogProducts] = useState([]);
+  
+  // Refs for auto-scrolling on row addition
+  const purchaseTableContainerRef = useRef(null);
+  const purchaseItemsEndRef = useRef(null);
+  const editPurchaseTableContainerRef = useRef(null);
+  const editPurchaseItemsEndRef = useRef(null);
   
   // Pagination & Search states
   const [purchasesPage, setPurchasesPage] = useState(1);
@@ -33,6 +39,7 @@ export default function Purchases({ userProfile, branches, addToast }) {
   const [editingPurchase, setEditingPurchase] = useState(null);
   const [editSupplierId, setEditSupplierId] = useState('');
   const [editPurchaseDate, setEditPurchaseDate] = useState('');
+  const [editIsFactoryChallan, setEditIsFactoryChallan] = useState(false);
   const [editPurchaseItems, setEditPurchaseItems] = useState([]);
   const [originalEditItems, setOriginalEditItems] = useState([]);
   const [editDiscount, setEditDiscount] = useState(0);
@@ -53,6 +60,7 @@ export default function Purchases({ userProfile, branches, addToast }) {
   const [supplierType, setSupplierType] = useState('existing'); // 'existing' or 'new'
   const [selectedSupplierId, setSelectedSupplierId] = useState('');
   const [purchaseDate, setPurchaseDate] = useState(new Date().toISOString().split('T')[0]);
+  const [isFactoryChallan, setIsFactoryChallan] = useState(false);
   const [purchaseItems, setPurchaseItems] = useState([{ productId: '', code: '', name: '', quantity: 1, costPrice: 0.00 }]); // { productId, code, name, quantity, costPrice }
   const [discount, setDiscount] = useState(0);
   const [paidAmount, setPaidAmount] = useState('');
@@ -89,6 +97,12 @@ export default function Purchases({ userProfile, branches, addToast }) {
   const activeBranch = branches.find((b) => b.id === selectedBranchId);
   const isFactory = Boolean(activeBranch?.is_factory || activeBranch?.name?.toLowerCase().includes('factory'));
 
+  useEffect(() => {
+    if (isFactory) {
+      setIsFactoryChallan(false);
+    }
+  }, [selectedBranchId, isFactory]);
+
   // Global lookups: Suppliers and Product catalog are fetched on mount
   useEffect(() => {
     fetchSuppliers();
@@ -97,6 +111,35 @@ export default function Purchases({ userProfile, branches, addToast }) {
 
   const showMessage = (text, type) => {
     addToast(text, type === 'error' ? 'error' : type === 'success' ? 'success' : 'info');
+  };
+
+  const getFactorySupplier = useCallback(() => {
+    return suppliers.find(
+      (s) => s.name?.toLowerCase().trim() === 'chittagong factory' || s.name?.toLowerCase().includes('factory')
+    );
+  }, [suppliers]);
+
+  const handleToggleFactoryChallan = (checked) => {
+    setIsFactoryChallan(checked);
+    if (checked) {
+      const factorySup = getFactorySupplier();
+      if (factorySup) {
+        setSupplierType('existing');
+        setSelectedSupplierId(factorySup.id);
+      }
+    } else {
+      setSelectedSupplierId('');
+    }
+  };
+
+  const handleToggleEditFactoryChallan = (checked) => {
+    setEditIsFactoryChallan(checked);
+    if (checked) {
+      const factorySup = getFactorySupplier();
+      if (factorySup) {
+        setEditSupplierId(factorySup.id);
+      }
+    }
   };
 
   const fetchPurchases = useCallback(async () => {
@@ -115,6 +158,9 @@ export default function Purchases({ userProfile, branches, addToast }) {
             phone,
             address,
             email
+          ),
+          purchase_items (
+            quantity
           )
         `, { count: 'exact' })
         .order('purchase_date', { ascending: false })
@@ -258,7 +304,13 @@ export default function Purchases({ userProfile, branches, addToast }) {
 
 
   const addItemToPurchase = () => {
-    setPurchaseItems([...purchaseItems, { productId: '', code: '', name: '', quantity: 1, costPrice: 0.00 }]);
+    setPurchaseItems((prev) => [...prev, { productId: '', code: '', name: '', quantity: 1, costPrice: 0.00 }]);
+    setTimeout(() => {
+      if (purchaseTableContainerRef.current) {
+        purchaseTableContainerRef.current.scrollTop = purchaseTableContainerRef.current.scrollHeight;
+      }
+      purchaseItemsEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    }, 60);
   };
 
   const updateItemField = (index, field, value) => {
@@ -290,6 +342,10 @@ export default function Purchases({ userProfile, branches, addToast }) {
   };
 
   // Math Calculations
+  const getTotalQuantity = () => {
+    return purchaseItems.reduce((sum, item) => sum + (parseInt(item.quantity) || 0), 0);
+  };
+
   const getSubtotal = () => {
     return purchaseItems.reduce((sum, item) => sum + (parseFloat(item.costPrice) || 0) * (parseInt(item.quantity) || 0), 0);
   };
@@ -424,23 +480,35 @@ export default function Purchases({ userProfile, branches, addToast }) {
       const initialPaid = parseFloat(paidAmount) || 0.00;
 
       // 1. Insert Purchase Invoice
-      const { data: purData, error: purError } = await supabase
+      const factorySup = getFactorySupplier();
+      const isChallan = !isFactory && Boolean(isFactoryChallan || (supplierId === factorySup?.id));
+
+      const purPayload = {
+        branch_id: selectedBranchId,
+        supplier_id: supplierId,
+        purchase_date: purchaseDate,
+        total_amount: subtotal,
+        discount: parseFloat(discount),
+        net_amount: grandTotal,
+        paid_amount: 0.00, // Trigger computes this
+        payment_status: 'unpaid', // Trigger computes this
+        created_by: userProfile.id,
+        notes: notes || null,
+        is_factory_challan: isChallan,
+      };
+
+      let { data: purData, error: purError } = await supabase
         .from('purchases')
-        .insert([
-          {
-            branch_id: selectedBranchId,
-            supplier_id: supplierId,
-            purchase_date: purchaseDate,
-            total_amount: subtotal,
-            discount: parseFloat(discount),
-            net_amount: grandTotal,
-            paid_amount: 0.00, // Trigger computes this
-            payment_status: 'unpaid', // Trigger computes this
-            created_by: userProfile.id,
-            notes: notes || null,
-          },
-        ])
+        .insert([purPayload])
         .select();
+
+      if (purError && purError.message?.includes('is_factory_challan')) {
+        delete purPayload.is_factory_challan;
+        const retry = await supabase.from('purchases').insert([purPayload]).select();
+        if (retry.error) throw retry.error;
+        purData = retry.data;
+        purError = null;
+      }
 
       if (purError) throw purError;
       const purchaseId = purData[0].id;
@@ -471,8 +539,8 @@ export default function Purchases({ userProfile, branches, addToast }) {
           // Branch / Showroom Purchase:
           if (!finalProdId && (cleanName || (item.code || '').trim())) {
             const cleanCode = (item.code || '').trim();
-            const autoCode = cleanCode || ('PRD-' + Date.now().toString().slice(-6) + Math.floor(Math.random() * 100));
             const displayName = cleanName || cleanCode || 'Purchased Item';
+            const autoCode = cleanCode || cleanName || displayName;
 
             // Check if product exists in catalog
             let query = supabase
@@ -609,6 +677,7 @@ export default function Purchases({ userProfile, branches, addToast }) {
       // Reset forms
       setSupplierType('existing');
       setSelectedSupplierId('');
+      setIsFactoryChallan(false);
       setPurchaseItems([{ productId: '', code: '', name: '', quantity: 1, costPrice: 0.00 }]);
       setDiscount(0);
       setPaidAmount('');
@@ -639,6 +708,17 @@ export default function Purchases({ userProfile, branches, addToast }) {
     setEditingPurchase(purchase);
     setEditSupplierId(purchase.supplier_id || '');
     setEditPurchaseDate(purchase.purchase_date || new Date().toISOString().split('T')[0]);
+    
+    const editBranch = branches.find((b) => b.id === purchase.branch_id);
+    const isEditBranchFactory = Boolean(editBranch?.is_factory || editBranch?.name?.toLowerCase().includes('factory'));
+    const factorySup = getFactorySupplier();
+    const isChallan = !isEditBranchFactory && Boolean(
+      purchase.is_factory_challan || 
+      (purchase.supplier_id && purchase.supplier_id === factorySup?.id) || 
+      purchase.contacts?.name?.toLowerCase().includes('factory') ||
+      purchase.contacts?.name === 'Chittagong Factory'
+    );
+    setEditIsFactoryChallan(isChallan);
     setEditDiscount(purchase.discount || 0);
     setEditNotes(purchase.notes || '');
     setEditSearchQuery('');
@@ -668,14 +748,32 @@ export default function Purchases({ userProfile, branches, addToast }) {
 
       if (error) throw error;
 
-      const formattedItems = (items || []).map((it) => ({
-        id: it.id,
-        productId: it.product_id || '',
-        code: it.products?.sku || it.products?.product_code || '',
-        name: it.products?.name || it.item_name || '',
-        quantity: it.quantity || 1,
-        costPrice: it.unit_price || 0,
-      }));
+      const formattedItems = (items || []).map((it) => {
+        let pId = it.product_id || it.products?.id || '';
+        let code = it.products?.sku || it.products?.product_code || '';
+        let name = it.products?.name || it.item_name || '';
+
+        // If product_id was not linked, try to find match in catalog
+        if (!pId && name) {
+          const matched = catalogProducts.find(
+            (p) => p.name?.toLowerCase() === name.toLowerCase() || p.sku?.toLowerCase() === name.toLowerCase()
+          );
+          if (matched) {
+            pId = matched.id;
+            code = matched.sku || matched.product_code || code;
+            name = matched.name;
+          }
+        }
+
+        return {
+          id: it.id,
+          productId: pId,
+          code: code,
+          name: name,
+          quantity: it.quantity || 1,
+          costPrice: it.unit_price || 0,
+        };
+      });
 
       setEditPurchaseItems(formattedItems.length > 0 ? formattedItems : [{ productId: '', code: '', name: '', quantity: 1, costPrice: 0.00 }]);
       setOriginalEditItems(JSON.parse(JSON.stringify(formattedItems)));
@@ -705,6 +803,12 @@ export default function Purchases({ userProfile, branches, addToast }) {
 
   const addEditItemRow = () => {
     setEditPurchaseItems((prev) => [...prev, { productId: '', code: '', name: '', quantity: 1, costPrice: 0.00 }]);
+    setTimeout(() => {
+      if (editPurchaseTableContainerRef.current) {
+        editPurchaseTableContainerRef.current.scrollTop = editPurchaseTableContainerRef.current.scrollHeight;
+      }
+      editPurchaseItemsEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    }, 60);
   };
 
   const removeEditItemRow = (index) => {
@@ -713,6 +817,10 @@ export default function Purchases({ userProfile, branches, addToast }) {
       return;
     }
     setEditPurchaseItems((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const getEditTotalQuantity = () => {
+    return editPurchaseItems.reduce((sum, item) => sum + (parseInt(item.quantity) || 0), 0);
   };
 
   const getEditSubtotal = () => {
@@ -728,7 +836,7 @@ export default function Purchases({ userProfile, branches, addToast }) {
 
   const handleSaveEditPurchase = async (e) => {
     e?.preventDefault();
-    if (!editingPurchase) return;
+    if (!editingPurchase || savingEdit) return;
 
     if (!editSupplierId) {
       showMessage('Please select a supplier.', 'error');
@@ -765,28 +873,68 @@ export default function Purchases({ userProfile, branches, addToast }) {
       }
 
       // 1. Update purchase summary
-      const { error: purUpdateErr } = await supabase
+      const factorySup = getFactorySupplier();
+      const isChallan = !isFactoryPurchase && Boolean(editIsFactoryChallan || (editSupplierId === factorySup?.id));
+
+      const editPayload = {
+        supplier_id: editSupplierId,
+        purchase_date: editPurchaseDate,
+        total_amount: subtotal,
+        discount: disc,
+        net_amount: netTotal,
+        payment_status: newPaymentStatus,
+        notes: editNotes || null,
+        is_factory_challan: isChallan,
+      };
+
+      let { error: purUpdateErr } = await supabase
         .from('purchases')
-        .update({
-          supplier_id: editSupplierId,
-          purchase_date: editPurchaseDate,
-          subtotal: subtotal,
-          discount: disc,
-          net_amount: netTotal,
-          payment_status: newPaymentStatus,
-          notes: editNotes || null,
-        })
+        .update(editPayload)
         .eq('id', editingPurchase.id);
+
+      if (purUpdateErr && purUpdateErr.message?.includes('is_factory_challan')) {
+        delete editPayload.is_factory_challan;
+        const retry = await supabase.from('purchases').update(editPayload).eq('id', editingPurchase.id);
+        if (retry.error) throw retry.error;
+        purUpdateErr = null;
+      }
 
       if (purUpdateErr) throw purUpdateErr;
 
       // 2. Stock adjustments for Branch purchases (!isFactoryPurchase)
       if (!isFactoryPurchase && targetBranchId) {
+        // Fetch current DB purchase items directly to get true previous state
+        const { data: dbItems, error: dbItemsErr } = await supabase
+          .from('purchase_items')
+          .select('id, product_id, item_name, quantity')
+          .eq('purchase_id', editingPurchase.id);
+
+        if (dbItemsErr) throw dbItemsErr;
+
         // Map original item quantities by productId
         const oldQtyMap = {};
+        for (const it of (dbItems || [])) {
+          let pId = it.product_id;
+          if (!pId && it.item_name) {
+            const cleanName = it.item_name.trim();
+            const { data: matched } = await supabase
+              .from('products')
+              .select('id')
+              .ilike('name', cleanName)
+              .limit(1);
+            if (matched && matched.length > 0) {
+              pId = matched[0].id;
+            }
+          }
+          if (pId) {
+            oldQtyMap[pId] = (oldQtyMap[pId] || 0) + (parseFloat(it.quantity) || 0);
+          }
+        }
+
+        // Also incorporate originalEditItems in case DB fetch was partial
         originalEditItems.forEach((it) => {
-          if (it.productId) {
-            oldQtyMap[it.productId] = (oldQtyMap[it.productId] || 0) + (parseFloat(it.quantity) || 0);
+          if (it.productId && !oldQtyMap[it.productId]) {
+            oldQtyMap[it.productId] = parseFloat(it.quantity) || 0;
           }
         });
 
@@ -799,7 +947,8 @@ export default function Purchases({ userProfile, branches, addToast }) {
           const costVal = parseFloat(item.costPrice) || 0;
 
           if (!finalProdId) {
-            const autoCode = cleanCode || `PRD-${Math.floor(1000000 + Math.random() * 9000000)}`;
+            const displayName = cleanName || cleanCode || 'Purchased Item';
+            const autoCode = cleanCode || cleanName || displayName;
             let query = supabase.from('products').select('id, name, sku, product_code');
             if (cleanCode && cleanName) {
               query = query.or(`sku.ilike.${cleanCode},product_code.ilike.${cleanCode},name.ilike.${cleanName}`);
@@ -950,6 +1099,7 @@ export default function Purchases({ userProfile, branches, addToast }) {
             setPurchaseItems([{ productId: '', code: '', name: '', quantity: 1, costPrice: 0.00 }]);
             setSupplierType('existing');
             setSelectedSupplierId('');
+            setIsFactoryChallan(false);
             setDiscount(0);
             setPaidAmount('');
             setReferenceNumber('');
@@ -986,7 +1136,8 @@ export default function Purchases({ userProfile, branches, addToast }) {
               />
             </div>
           </div>
-          <div className="table-container" style={{ borderBottomLeftRadius: 0, borderBottomRightRadius: 0 }}>
+          {/* Desktop Table View */}
+          <div className="table-container hide-on-mobile" style={{ borderBottomLeftRadius: 0, borderBottomRightRadius: 0 }}>
             <table>
               <thead>
                 <tr>
@@ -995,6 +1146,7 @@ export default function Purchases({ userProfile, branches, addToast }) {
                   {userProfile?.role === 'owner' && <th>Branch</th>}
                   <th>Date</th>
                   <th>Supplier</th>
+                  <th style={{ width: '85px', textAlign: 'center' }}>Total Qty</th>
                   <th>Total Bill</th>
                   <th>Paid</th>
                   <th>Status</th>
@@ -1003,16 +1155,25 @@ export default function Purchases({ userProfile, branches, addToast }) {
               </thead>
               <tbody>
                 {loading ? (
-                  <TableLoading colSpan={userProfile?.role === 'owner' ? 9 : 8} message="Fetching purchase records..." />
+                  <TableLoading colSpan={userProfile?.role === 'owner' ? 10 : 9} message="Fetching purchase records..." />
                 ) : purchases.length === 0 ? (
                   <tr>
-                    <td colSpan={userProfile?.role === 'owner' ? 9 : 8} style={{ textAlign: 'center', padding: '2rem' }}>
+                    <td colSpan={userProfile?.role === 'owner' ? 10 : 9} style={{ textAlign: 'center', padding: '2rem' }}>
                       {purchaseSearchQuery.trim() ? `No purchases found matching "${purchaseSearchQuery}".` : 'No purchases logged. Click "New Purchase" to add items to stock.'}
                     </td>
                   </tr>
                 ) : (
                   purchases.map((p, index) => {
                     const rowNumber = (purchasesPage - 1) * purchasesPageSize + index + 1;
+                    const factorySup = getFactorySupplier();
+                    const isChallan = Boolean(
+                      p.is_factory_challan || 
+                      p.supplier_id === factorySup?.id || 
+                      p.contacts?.name?.toLowerCase().includes('factory') ||
+                      p.contacts?.name === 'Chittagong Factory'
+                    );
+                    const totalQty = (p.purchase_items || []).reduce((sum, item) => sum + (parseInt(item.quantity) || 0), 0);
+
                     return (
                       <tr key={p.id}>
                         <td>{rowNumber}</td>
@@ -1024,10 +1185,33 @@ export default function Purchases({ userProfile, branches, addToast }) {
                         )}
                         <td>{new Date(p.purchase_date).toLocaleDateString()}</td>
                         <td style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
-                          <div>{p.contacts?.name || 'Unknown Supplier'}</div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', flexWrap: 'wrap' }}>
+                            <span>{p.contacts?.name || 'Unknown Supplier'}</span>
+                            {isChallan && (
+                              <span
+                                style={{
+                                  backgroundColor: '#eff6ff',
+                                  color: '#1d4ed8',
+                                  border: '1px solid #bfdbfe',
+                                  fontSize: '0.68rem',
+                                  fontWeight: 700,
+                                  padding: '0.1rem 0.35rem',
+                                  borderRadius: '4px',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '0.2rem',
+                                }}
+                              >
+                                🏭 Factory Challan
+                              </span>
+                            )}
+                          </div>
                           {p.contacts?.phone && (
                             <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>{p.contacts.phone}</div>
                           )}
+                        </td>
+                        <td style={{ textAlign: 'center', fontWeight: 700, color: '#0369a1' }}>
+                          {totalQty}
                         </td>
                         <td style={{ fontFamily: 'Outfit, sans-serif' }}>৳{formatAmount(p.net_amount)}</td>
                         <td style={{ fontFamily: 'Outfit, sans-serif', color: 'var(--success-text)' }}>
@@ -1063,6 +1247,190 @@ export default function Purchases({ userProfile, branches, addToast }) {
               </tbody>
             </table>
           </div>
+
+          {/* Mobile Card View (No Horizontal Scroll Required) */}
+          <div className="hide-on-desktop" style={{ padding: '0.75rem', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+            {loading ? (
+              <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>
+                Fetching purchase records...
+              </div>
+            ) : purchases.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>
+                {purchaseSearchQuery.trim() ? `No purchases found matching "${purchaseSearchQuery}".` : 'No purchases logged. Tap "New Purchase" to add items to stock.'}
+              </div>
+            ) : (
+              purchases.map((p, index) => {
+                const rowNumber = (purchasesPage - 1) * purchasesPageSize + index + 1;
+                const factorySup = getFactorySupplier();
+                const isChallan = Boolean(
+                  p.is_factory_challan || 
+                  p.supplier_id === factorySup?.id || 
+                  p.contacts?.name?.toLowerCase().includes('factory') ||
+                  p.contacts?.name === 'Chittagong Factory'
+                );
+                const branchName = branches.find((b) => b.id === p.branch_id)?.name;
+                const totalQty = (p.purchase_items || []).reduce((sum, item) => sum + (parseInt(item.quantity) || 0), 0);
+
+                return (
+                  <div
+                    key={p.id}
+                    style={{
+                      background: '#ffffff',
+                      border: '1px solid var(--border-color)',
+                      borderRadius: '8px',
+                      padding: '0.85rem',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '0.6rem',
+                      boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
+                    }}
+                  >
+                    {/* Header: SL Badge, Purchase ID, Factory Challan Badge, Status */}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '0.5rem', borderBottom: '1px solid #f1f5f9', paddingBottom: '0.45rem' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', flexWrap: 'wrap' }}>
+                        <span style={{
+                          backgroundColor: '#e0f2fe',
+                          color: '#0369a1',
+                          fontWeight: 800,
+                          fontSize: '0.75rem',
+                          padding: '0.15rem 0.45rem',
+                          borderRadius: '4px',
+                        }}>
+                          #{rowNumber}
+                        </span>
+                        <span style={{ fontFamily: 'monospace', fontSize: '0.85rem', fontWeight: 700, color: 'var(--text-primary)' }}>
+                          {p.invoice_number || `PUR#${p.id.substring(0, 8).toUpperCase()}`}
+                        </span>
+                        {isChallan && (
+                          <span
+                            style={{
+                              backgroundColor: '#eff6ff',
+                              color: '#1d4ed8',
+                              border: '1px solid #bfdbfe',
+                              fontSize: '0.68rem',
+                              fontWeight: 700,
+                              padding: '0.1rem 0.35rem',
+                              borderRadius: '4px',
+                            }}
+                          >
+                            🏭 Factory Challan
+                          </span>
+                        )}
+                      </div>
+                      <span className={`badge badge-${p.payment_status}`} style={{ fontSize: '0.72rem', textTransform: 'uppercase' }}>
+                        {p.payment_status}
+                      </span>
+                    </div>
+
+                    {/* Body Info: Supplier, Phone, Date, Branch */}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', fontSize: '0.82rem' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                        <span style={{ fontWeight: 700, color: 'var(--text-primary)', fontSize: '0.88rem' }}>
+                          {p.contacts?.name || 'Unknown Supplier'}
+                        </span>
+                        <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                          {new Date(p.purchase_date).toLocaleDateString()}
+                        </span>
+                      </div>
+                      {p.contacts?.phone && (
+                        <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                          📞 {p.contacts.phone}
+                        </div>
+                      )}
+                      {userProfile?.role === 'owner' && branchName && (
+                        <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', fontWeight: 600 }}>
+                          🏪 Branch: {branchName}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Financials & Qty Strip */}
+                    <div style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      backgroundColor: '#f8fafc',
+                      padding: '0.45rem 0.65rem',
+                      borderRadius: '6px',
+                      border: '1px solid #f1f5f9',
+                      fontSize: '0.82rem',
+                    }}>
+                      <div>
+                        <span style={{ color: 'var(--text-muted)', fontSize: '0.7rem', display: 'block' }}>Total Qty</span>
+                        <span style={{ fontWeight: 800, color: '#0369a1', fontSize: '0.92rem' }}>
+                          {totalQty}
+                        </span>
+                      </div>
+                      <div>
+                        <span style={{ color: 'var(--text-muted)', fontSize: '0.7rem', display: 'block' }}>Total Bill</span>
+                        <span style={{ fontWeight: 800, color: 'var(--text-primary)', fontSize: '0.92rem' }}>
+                          ৳{formatAmount(p.net_amount)}
+                        </span>
+                      </div>
+                      <div style={{ textAlign: 'center' }}>
+                        <span style={{ color: 'var(--text-muted)', fontSize: '0.7rem', display: 'block' }}>Paid</span>
+                        <span style={{ fontWeight: 700, color: 'var(--success-text)', fontSize: '0.92rem' }}>
+                          ৳{formatAmount(p.paid_amount)}
+                        </span>
+                      </div>
+                      {p.net_amount - p.paid_amount > 0 && (
+                        <div style={{ textAlign: 'right' }}>
+                          <span style={{ color: 'var(--danger-text)', fontSize: '0.7rem', display: 'block' }}>Due</span>
+                          <span style={{ fontWeight: 700, color: 'var(--danger-text)', fontSize: '0.92rem' }}>
+                            ৳{formatAmount(p.net_amount - p.paid_amount)}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Actions Bar */}
+                    <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end', paddingTop: '0.15rem' }}>
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm"
+                        onClick={() => handleViewPurchaseDetails(p)}
+                        style={{
+                          flex: 1,
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: '0.35rem',
+                          height: '34px',
+                          fontSize: '0.8rem',
+                          color: '#0284c7',
+                          borderColor: '#bae6fd',
+                          backgroundColor: '#f0f9ff',
+                        }}
+                      >
+                        <Eye size={14} />
+                        <span>View Details</span>
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm"
+                        onClick={() => handleOpenEditPurchase(p)}
+                        style={{
+                          flex: 1,
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: '0.35rem',
+                          height: '34px',
+                          fontSize: '0.8rem',
+                          color: '#059669',
+                          borderColor: '#a7f3d0',
+                          backgroundColor: '#ecfdf5',
+                        }}
+                      >
+                        <Edit size={14} />
+                        <span>Edit</span>
+                      </button>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
           <Pagination
             currentPage={purchasesPage}
             totalCount={purchasesTotalCount}
@@ -1094,6 +1462,36 @@ export default function Purchases({ userProfile, branches, addToast }) {
                   
                   {/* Supplier & Date Bar */}
                   <div className="purchase-supplier-bar">
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.45rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+                      <span style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                        Supplier Information
+                      </span>
+                      {!isFactory && (
+                        <label style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '0.45rem',
+                          cursor: 'pointer',
+                          fontSize: '0.82rem',
+                          fontWeight: 700,
+                          userSelect: 'none',
+                          backgroundColor: isFactoryChallan ? '#eff6ff' : '#ffffff',
+                          border: isFactoryChallan ? '1.5px solid #3b82f6' : '1px solid var(--border-color)',
+                          color: isFactoryChallan ? '#1d4ed8' : 'var(--text-primary)',
+                          padding: '0.25rem 0.65rem',
+                          borderRadius: '6px',
+                          transition: 'all 0.15s ease',
+                        }}>
+                          <input
+                            type="checkbox"
+                            checked={isFactoryChallan}
+                            onChange={(e) => handleToggleFactoryChallan(e.target.checked)}
+                            style={{ width: '15px', height: '15px', cursor: 'pointer', accentColor: '#2563eb' }}
+                          />
+                          <span>🏭 Is Factory Challan</span>
+                        </label>
+                      )}
+                    </div>
                     {supplierType === 'existing' ? (
                       <div className="purchase-supplier-grid">
                         <div className="form-group" style={{ marginBottom: 0 }}>
@@ -1102,7 +1500,14 @@ export default function Purchases({ userProfile, branches, addToast }) {
                             className="input-control"
                             value={supplierType}
                             onChange={(e) => setSupplierType(e.target.value)}
-                            style={{ height: '36px', minHeight: '36px', fontSize: '0.85rem' }}
+                            disabled={!isFactory && isFactoryChallan}
+                            style={{
+                              height: '36px',
+                              minHeight: '36px',
+                              fontSize: '0.85rem',
+                              backgroundColor: (!isFactory && isFactoryChallan) ? '#f1f5f9' : '#ffffff',
+                              cursor: (!isFactory && isFactoryChallan) ? 'not-allowed' : 'pointer',
+                            }}
                           >
                             <option value="existing">Existing</option>
                             <option value="new">New</option>
@@ -1110,13 +1515,30 @@ export default function Purchases({ userProfile, branches, addToast }) {
                         </div>
 
                         <div className="form-group supplier-select-cell" style={{ marginBottom: 0 }}>
-                          <label style={{ fontSize: '0.78rem', fontWeight: 600 }}>Supplier *</label>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <label style={{ fontSize: '0.78rem', fontWeight: 600 }}>Supplier *</label>
+                            {(!isFactory && isFactoryChallan) && (
+                              <span style={{ fontSize: '0.7rem', color: '#1d4ed8', fontWeight: 700 }}>
+                                🔒 Locked to Factory
+                              </span>
+                            )}
+                          </div>
                           <select
                             className="input-control"
                             value={selectedSupplierId}
                             onChange={(e) => setSelectedSupplierId(e.target.value)}
+                            disabled={!isFactory && isFactoryChallan}
                             required={supplierType === 'existing'}
-                            style={{ height: '36px', minHeight: '36px', fontSize: '0.85rem' }}
+                            style={{
+                              height: '36px',
+                              minHeight: '36px',
+                              fontSize: '0.85rem',
+                              backgroundColor: (!isFactory && isFactoryChallan) ? '#eff6ff' : '#ffffff',
+                              borderColor: (!isFactory && isFactoryChallan) ? '#93c5fd' : 'var(--border-color)',
+                              color: (!isFactory && isFactoryChallan) ? '#1e3a8a' : 'inherit',
+                              fontWeight: (!isFactory && isFactoryChallan) ? 600 : 'normal',
+                              cursor: (!isFactory && isFactoryChallan) ? 'not-allowed' : 'pointer',
+                            }}
                           >
                             <option value="">-- Select Supplier --</option>
                             {suppliers.map((s) => (
@@ -1214,13 +1636,13 @@ export default function Purchases({ userProfile, branches, addToast }) {
                     )}
                   </div>
 
-                  {/* Search & Add Product Bar */}
+                  {/* Search Product Bar */}
                   <div style={{ position: 'relative' }}>
                     <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
                       <input
                         type="text"
                         className="input-control"
-                        placeholder="Search product by name or SKU..."
+                        placeholder="Search product by name or Code..."
                         value={productSearchQuery}
                         onChange={(e) => {
                           setProductSearchQuery(e.target.value);
@@ -1243,14 +1665,6 @@ export default function Purchases({ userProfile, branches, addToast }) {
                           Clear
                         </button>
                       )}
-                      <button
-                        type="button"
-                        className="btn btn-secondary btn-sm"
-                        onClick={addItemToPurchase}
-                        style={{ whiteSpace: 'nowrap', padding: '0.3rem 0.75rem', fontSize: '0.82rem', height: '36px', fontWeight: 700 }}
-                      >
-                        + Add Row
-                      </button>
                     </div>
 
                     {showSearchSuggestions && (
@@ -1273,7 +1687,8 @@ export default function Purchases({ userProfile, branches, addToast }) {
                             if (!productSearchQuery.trim()) return true;
                             return (
                               p.name.toLowerCase().includes(productSearchQuery.toLowerCase()) ||
-                              p.sku.toLowerCase().includes(productSearchQuery.toLowerCase())
+                              (p.product_code && p.product_code.toLowerCase().includes(productSearchQuery.toLowerCase())) ||
+                              (p.sku && p.sku.toLowerCase().includes(productSearchQuery.toLowerCase()))
                             );
                           })
                           .map((prod) => (
@@ -1288,9 +1703,9 @@ export default function Purchases({ userProfile, branches, addToast }) {
                               }}
                               onClick={() => {
                                 if (purchaseItems.length === 1 && !purchaseItems[0].productId && !purchaseItems[0].name && !purchaseItems[0].code) {
-                                  updateItemRow(0, { productId: prod.id, code: prod.sku || prod.product_code || '', name: prod.name, quantity: 1, costPrice: prod.purchase_price });
+                                  updateItemRow(0, { productId: prod.id, code: prod.product_code || prod.sku || '', name: prod.name, quantity: 1, costPrice: prod.purchase_price });
                                 } else {
-                                  setPurchaseItems([...purchaseItems, { productId: prod.id, code: prod.sku || prod.product_code || '', name: prod.name, quantity: 1, costPrice: prod.purchase_price }]);
+                                  setPurchaseItems([...purchaseItems, { productId: prod.id, code: prod.product_code || prod.sku || '', name: prod.name, quantity: 1, costPrice: prod.purchase_price }]);
                                 }
                                 setProductSearchQuery('');
                                 setShowSearchSuggestions(false);
@@ -1299,7 +1714,7 @@ export default function Purchases({ userProfile, branches, addToast }) {
                             >
                               <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{prod.name}</div>
                               <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
-                                SKU: {prod.sku || prod.product_code || '—'} | Cost: ৳{formatAmount(prod.purchase_price)}
+                                Code: {prod.product_code || prod.sku || '—'} | Cost: ৳{formatAmount(prod.purchase_price)}
                               </div>
                             </div>
                           ))}
@@ -1307,7 +1722,8 @@ export default function Purchases({ userProfile, branches, addToast }) {
                           if (!productSearchQuery.trim()) return true;
                           return (
                             p.name.toLowerCase().includes(productSearchQuery.toLowerCase()) ||
-                            p.sku.toLowerCase().includes(productSearchQuery.toLowerCase())
+                            (p.product_code && p.product_code.toLowerCase().includes(productSearchQuery.toLowerCase())) ||
+                            (p.sku && p.sku.toLowerCase().includes(productSearchQuery.toLowerCase()))
                           );
                         }).length === 0 && (
                           <div style={{ padding: '0.65rem', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.82rem' }}>
@@ -1319,12 +1735,12 @@ export default function Purchases({ userProfile, branches, addToast }) {
                   </div>
 
                   {/* Desktop Items Table */}
-                  <div className="hide-on-mobile table-container" style={{ border: '1px solid var(--border-color)', borderRadius: '6px', maxHeight: '450px', overflowY: 'auto', width: '100%' }}>
+                  <div ref={purchaseTableContainerRef} className="hide-on-mobile table-container" style={{ border: '1px solid var(--border-color)', borderRadius: '6px', maxHeight: '450px', overflowY: 'auto', width: '100%' }}>
                     <table style={{ width: '100%', minWidth: '640px', fontSize: '0.82rem' }}>
                       <thead>
                         <tr>
                           <th style={{ width: '35px', padding: '0.35rem 0.4rem', textAlign: 'center' }}>SL</th>
-                          <th style={{ width: '110px', padding: '0.35rem 0.4rem' }}>Code / SKU</th>
+                          <th style={{ width: '120px', padding: '0.35rem 0.4rem' }}>Code</th>
                           <th style={{ padding: '0.35rem 0.4rem', minWidth: '200px' }}>Product Name *</th>
                           <th style={{ width: '70px', textAlign: 'right', padding: '0.35rem 0.4rem' }}>Qty *</th>
                           <th style={{ width: '90px', textAlign: 'right', padding: '0.35rem 0.4rem' }}>Cost *</th>
@@ -1441,7 +1857,7 @@ export default function Purchases({ userProfile, branches, addToast }) {
                                     const effectiveCost = (bPrice !== null && bPrice !== undefined) ? bPrice : p.purchase_price;
                                     return (
                                       <option key={p.id} value={p.name}>
-                                        {p.sku} (Cost: ৳{formatAmount(effectiveCost)})
+                                        {p.product_code || p.sku ? `(Code: ${p.product_code || p.sku}) ` : ''}(Cost: ৳{formatAmount(effectiveCost)})
                                       </option>
                                     );
                                   })}
@@ -1582,7 +1998,7 @@ export default function Purchases({ userProfile, branches, addToast }) {
 
                         <div className="mobile-card-row-2">
                           <div className="form-group" style={{ marginBottom: 0 }}>
-                            <label className="mobile-card-label">Code / SKU (Opt)</label>
+                            <label className="mobile-card-label">Code (Optional)</label>
                             <input
                               type="text"
                               className="input-control"
@@ -1655,12 +2071,45 @@ export default function Purchases({ userProfile, branches, addToast }) {
                       </div>
                     ))}
                   </div>
+
+                  {/* Bottom Add Row Bar (Right aligned blue plus button) */}
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '0.4rem' }}>
+                    <button
+                      type="button"
+                      className="btn btn-primary"
+                      onClick={addItemToPurchase}
+                      title="Add New Product Row"
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        height: '32px',
+                        minWidth: '38px',
+                        padding: '0 0.65rem',
+                        borderRadius: '6px',
+                        cursor: 'pointer',
+                        fontWeight: 700,
+                        backgroundColor: '#2563eb',
+                        color: '#ffffff',
+                        border: 'none',
+                        boxShadow: '0 1px 3px rgba(37, 99, 235, 0.3)',
+                      }}
+                    >
+                      <Plus size={18} strokeWidth={2.6} />
+                    </button>
+                  </div>
+                  <div ref={purchaseItemsEndRef} />
                 </div>
 
                 {/* Right Column: Bill Summary & Payment Settlement */}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', backgroundColor: '#f8fafc', padding: '0.9rem 1rem', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
                   <div style={{ fontWeight: 700, fontSize: '0.88rem', color: 'var(--text-primary)', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.45rem' }}>
                     Payment Summary
+                  </div>
+
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.86rem' }}>
+                    <span style={{ color: 'var(--text-secondary)' }}>Total Quantity:</span>
+                    <strong style={{ fontWeight: 700, color: 'var(--text-primary)' }}>{getTotalQuantity()} pcs</strong>
                   </div>
 
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.86rem' }}>
@@ -2012,46 +2461,106 @@ export default function Purchases({ userProfile, branches, addToast }) {
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', minWidth: 0 }}>
                     {/* Supplier & Date Bar */}
                     <div className="purchase-supplier-bar">
-                      <div className="purchase-supplier-grid">
-                        <div className="form-group" style={{ marginBottom: 0 }}>
-                          <label style={{ fontSize: '0.8rem', fontWeight: 600 }}>Supplier *</label>
-                          <select
-                            className="input-control"
-                            value={editSupplierId}
-                            onChange={(e) => setEditSupplierId(e.target.value)}
-                            required
-                            style={{ height: '36px', minHeight: '36px', fontSize: '0.85rem' }}
-                          >
-                            <option value="">-- Select Supplier --</option>
-                            {suppliers.map((s) => (
-                              <option key={s.id} value={s.id}>
-                                {s.name} {s.phone ? `(${s.phone})` : ''}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-
-                        <div className="form-group" style={{ marginBottom: 0 }}>
-                          <label style={{ fontSize: '0.8rem', fontWeight: 600 }}>Purchase Date *</label>
-                          <input
-                            type="date"
-                            className="input-control"
-                            value={editPurchaseDate}
-                            onChange={(e) => setEditPurchaseDate(e.target.value)}
-                            required
-                            style={{ height: '36px', minHeight: '36px', fontSize: '0.85rem' }}
-                          />
-                        </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.45rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+                        <span style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                          Supplier Information
+                        </span>
+                        {(() => {
+                          const editBranch = branches.find((b) => b.id === editingPurchase?.branch_id);
+                          const isEditBranchFactory = Boolean(editBranch?.is_factory || editBranch?.name?.toLowerCase().includes('factory'));
+                          if (isEditBranchFactory) return null;
+                          return (
+                            <label style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '0.45rem',
+                              cursor: 'pointer',
+                              fontSize: '0.82rem',
+                              fontWeight: 700,
+                              userSelect: 'none',
+                              backgroundColor: editIsFactoryChallan ? '#eff6ff' : '#ffffff',
+                              border: editIsFactoryChallan ? '1.5px solid #3b82f6' : '1px solid var(--border-color)',
+                              color: editIsFactoryChallan ? '#1d4ed8' : 'var(--text-primary)',
+                              padding: '0.25rem 0.65rem',
+                              borderRadius: '6px',
+                              transition: 'all 0.15s ease',
+                            }}>
+                              <input
+                                type="checkbox"
+                                checked={editIsFactoryChallan}
+                                onChange={(e) => handleToggleEditFactoryChallan(e.target.checked)}
+                                style={{ width: '15px', height: '15px', cursor: 'pointer', accentColor: '#2563eb' }}
+                              />
+                              <span>🏭 Is Factory Challan</span>
+                            </label>
+                          );
+                        })()}
                       </div>
+                      {(() => {
+                        const editBranch = branches.find((b) => b.id === editingPurchase?.branch_id);
+                        const isEditBranchFactory = Boolean(editBranch?.is_factory || editBranch?.name?.toLowerCase().includes('factory'));
+                        const isLocked = !isEditBranchFactory && editIsFactoryChallan;
+
+                        return (
+                          <div className="purchase-supplier-grid">
+                            <div className="form-group" style={{ marginBottom: 0 }}>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <label style={{ fontSize: '0.8rem', fontWeight: 600 }}>Supplier *</label>
+                                {isLocked && (
+                                  <span style={{ fontSize: '0.7rem', color: '#1d4ed8', fontWeight: 700 }}>
+                                    🔒 Locked to Factory
+                                  </span>
+                                )}
+                              </div>
+                              <select
+                                className="input-control"
+                                value={editSupplierId}
+                                onChange={(e) => setEditSupplierId(e.target.value)}
+                                disabled={isLocked}
+                                required
+                                style={{
+                                  height: '36px',
+                                  minHeight: '36px',
+                                  fontSize: '0.85rem',
+                                  backgroundColor: isLocked ? '#eff6ff' : '#ffffff',
+                                  borderColor: isLocked ? '#93c5fd' : 'var(--border-color)',
+                                  color: isLocked ? '#1e3a8a' : 'inherit',
+                                  fontWeight: isLocked ? 600 : 'normal',
+                                  cursor: isLocked ? 'not-allowed' : 'pointer',
+                                }}
+                              >
+                                <option value="">-- Select Supplier --</option>
+                                {suppliers.map((s) => (
+                                  <option key={s.id} value={s.id}>
+                                    {s.name} {s.phone ? `(${s.phone})` : ''}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+
+                            <div className="form-group" style={{ marginBottom: 0 }}>
+                              <label style={{ fontSize: '0.8rem', fontWeight: 600 }}>Purchase Date *</label>
+                              <input
+                                type="date"
+                                className="input-control"
+                                value={editPurchaseDate}
+                                onChange={(e) => setEditPurchaseDate(e.target.value)}
+                                required
+                                style={{ height: '36px', minHeight: '36px', fontSize: '0.85rem' }}
+                              />
+                            </div>
+                          </div>
+                        );
+                      })()}
                     </div>
 
-                    {/* Search & Add Product Bar */}
+                    {/* Search Product Bar */}
                     <div style={{ position: 'relative' }}>
                       <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
                         <input
                           type="text"
                           className="input-control"
-                          placeholder="Search product by name or SKU..."
+                          placeholder="Search product by name or Code..."
                           value={editSearchQuery}
                           onChange={(e) => {
                             setEditSearchQuery(e.target.value);
@@ -2074,14 +2583,6 @@ export default function Purchases({ userProfile, branches, addToast }) {
                             Clear
                           </button>
                         )}
-                        <button
-                          type="button"
-                          className="btn btn-secondary btn-sm"
-                          onClick={addEditItemRow}
-                          style={{ whiteSpace: 'nowrap', padding: '0.25rem 0.75rem', fontSize: '0.82rem', height: '36px', fontWeight: 600 }}
-                        >
-                          + Add Row
-                        </button>
                       </div>
 
                       {showEditSearchSuggestions && (
@@ -2104,7 +2605,8 @@ export default function Purchases({ userProfile, branches, addToast }) {
                               if (!editSearchQuery.trim()) return true;
                               return (
                                 p.name.toLowerCase().includes(editSearchQuery.toLowerCase()) ||
-                                p.sku.toLowerCase().includes(editSearchQuery.toLowerCase())
+                                (p.product_code && p.product_code.toLowerCase().includes(editSearchQuery.toLowerCase())) ||
+                                (p.sku && p.sku.toLowerCase().includes(editSearchQuery.toLowerCase()))
                               );
                             })
                             .map((prod) => (
@@ -2119,9 +2621,9 @@ export default function Purchases({ userProfile, branches, addToast }) {
                                 }}
                                 onClick={() => {
                                   if (editPurchaseItems.length === 1 && !editPurchaseItems[0].productId && !editPurchaseItems[0].name && !editPurchaseItems[0].code) {
-                                    updateEditItemRow(0, { productId: prod.id, code: prod.sku || prod.product_code || '', name: prod.name, quantity: 1, costPrice: prod.purchase_price });
+                                    updateEditItemRow(0, { productId: prod.id, code: prod.product_code || prod.sku || '', name: prod.name, quantity: 1, costPrice: prod.purchase_price });
                                   } else {
-                                    setEditPurchaseItems([...editPurchaseItems, { productId: prod.id, code: prod.sku || prod.product_code || '', name: prod.name, quantity: 1, costPrice: prod.purchase_price }]);
+                                    setEditPurchaseItems([...editPurchaseItems, { productId: prod.id, code: prod.product_code || prod.sku || '', name: prod.name, quantity: 1, costPrice: prod.purchase_price }]);
                                   }
                                   setEditSearchQuery('');
                                   setShowEditSearchSuggestions(false);
@@ -2130,7 +2632,7 @@ export default function Purchases({ userProfile, branches, addToast }) {
                               >
                                 <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{prod.name}</div>
                                 <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
-                                  SKU: {prod.sku || prod.product_code || '—'} | Cost: ৳{formatAmount(prod.purchase_price)}
+                                  Code: {prod.product_code || prod.sku || '—'} | Cost: ৳{formatAmount(prod.purchase_price)}
                                 </div>
                               </div>
                             ))}
@@ -2138,7 +2640,8 @@ export default function Purchases({ userProfile, branches, addToast }) {
                             if (!editSearchQuery.trim()) return true;
                             return (
                               p.name.toLowerCase().includes(editSearchQuery.toLowerCase()) ||
-                              p.sku.toLowerCase().includes(editSearchQuery.toLowerCase())
+                              (p.product_code && p.product_code.toLowerCase().includes(editSearchQuery.toLowerCase())) ||
+                              (p.sku && p.sku.toLowerCase().includes(editSearchQuery.toLowerCase()))
                             );
                           }).length === 0 && (
                             <div style={{ padding: '0.5rem', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.8rem' }}>
@@ -2150,12 +2653,12 @@ export default function Purchases({ userProfile, branches, addToast }) {
                     </div>
 
                     {/* Desktop Items Table */}
-                    <div className="table-container hide-on-mobile" style={{ border: '1px solid var(--border-color)', borderRadius: '6px', maxHeight: '420px', overflowY: 'auto', width: '100%' }}>
+                    <div ref={editPurchaseTableContainerRef} className="table-container hide-on-mobile" style={{ border: '1px solid var(--border-color)', borderRadius: '6px', maxHeight: '420px', overflowY: 'auto', width: '100%' }}>
                       <table style={{ width: '100%', minWidth: '640px', fontSize: '0.82rem' }}>
                         <thead>
                           <tr>
                             <th style={{ width: '35px', padding: '0.35rem 0.4rem', textAlign: 'center' }}>SL</th>
-                            <th style={{ width: '110px', padding: '0.35rem 0.4rem' }}>Code / SKU</th>
+                            <th style={{ width: '120px', padding: '0.35rem 0.4rem' }}>Code</th>
                             <th style={{ padding: '0.35rem 0.4rem', minWidth: '200px' }}>Product Name *</th>
                             <th style={{ width: '70px', textAlign: 'right', padding: '0.35rem 0.4rem' }}>Qty *</th>
                             <th style={{ width: '90px', textAlign: 'right', padding: '0.35rem 0.4rem' }}>Cost *</th>
@@ -2272,7 +2775,7 @@ export default function Purchases({ userProfile, branches, addToast }) {
                                       const effectiveCost = (bPrice !== null && bPrice !== undefined) ? bPrice : p.purchase_price;
                                       return (
                                         <option key={p.id} value={p.name}>
-                                          {p.sku} (Cost: ৳{formatAmount(effectiveCost)})
+                                          {p.product_code || p.sku ? `(Code: ${p.product_code || p.sku}) ` : ''}(Cost: ৳{formatAmount(effectiveCost)})
                                         </option>
                                       );
                                     })}
@@ -2348,11 +2851,11 @@ export default function Purchases({ userProfile, branches, addToast }) {
 
                           <div className="mobile-card-row-2">
                             <div className="form-group" style={{ marginBottom: 0 }}>
-                              <label style={{ fontSize: '0.72rem', color: 'var(--text-secondary)' }}>Code / SKU</label>
+                              <label style={{ fontSize: '0.72rem', color: 'var(--text-secondary)' }}>Code (Optional)</label>
                               <input
                                 type="text"
                                 className="input-control"
-                                placeholder="Code"
+                                placeholder="Code (optional)"
                                 value={item.code || ''}
                                 readOnly={Boolean(item.productId)}
                                 onChange={(e) => {
@@ -2433,7 +2936,7 @@ export default function Purchases({ userProfile, branches, addToast }) {
                                     const effectiveCost = (bPrice !== null && bPrice !== undefined) ? bPrice : p.purchase_price;
                                     return (
                                       <option key={p.id} value={p.name}>
-                                        {p.sku} (Cost: ৳{formatAmount(effectiveCost)})
+                                        {p.product_code || p.sku ? `(Code: ${p.product_code || p.sku}) ` : ''}(Cost: ৳{formatAmount(effectiveCost)})
                                       </option>
                                     );
                                   })}
@@ -2478,12 +2981,45 @@ export default function Purchases({ userProfile, branches, addToast }) {
                         </div>
                       ))}
                     </div>
+
+                    {/* Bottom Add Row Bar (Right aligned blue plus button) */}
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '0.4rem' }}>
+                      <button
+                        type="button"
+                        className="btn btn-primary"
+                        onClick={addEditItemRow}
+                        title="Add New Product Row"
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          height: '32px',
+                          minWidth: '38px',
+                          padding: '0 0.65rem',
+                          borderRadius: '6px',
+                          cursor: 'pointer',
+                          fontWeight: 700,
+                          backgroundColor: '#2563eb',
+                          color: '#ffffff',
+                          border: 'none',
+                          boxShadow: '0 1px 3px rgba(37, 99, 235, 0.3)',
+                        }}
+                      >
+                        <Plus size={18} strokeWidth={2.6} />
+                      </button>
+                    </div>
+                    <div ref={editPurchaseItemsEndRef} />
                   </div>
 
                   {/* Right Column: Bill Summary */}
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem', backgroundColor: '#f8fafc', padding: '0.75rem 0.85rem', borderRadius: '6px', border: '1px solid var(--border-color)' }}>
                     <div style={{ fontWeight: 700, fontSize: '0.84rem', color: 'var(--text-primary)', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.35rem' }}>
                       Purchase Summary
+                    </div>
+
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.82rem' }}>
+                      <span style={{ color: 'var(--text-secondary)' }}>Total Quantity:</span>
+                      <strong style={{ fontWeight: 700, color: 'var(--text-primary)' }}>{getEditTotalQuantity()} pcs</strong>
                     </div>
 
                     <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.82rem' }}>

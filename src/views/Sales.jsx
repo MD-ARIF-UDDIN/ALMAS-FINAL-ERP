@@ -2215,7 +2215,8 @@ export default function Sales({ userProfile, branches, addToast }) {
             />
           </div>
         </div>
-        <div className="table-container" style={{ borderBottomLeftRadius: 0, borderBottomRightRadius: 0 }}>
+        {/* Desktop Table View */}
+        <div className="table-container hide-on-mobile" style={{ borderBottomLeftRadius: 0, borderBottomRightRadius: 0 }}>
           <table>
             <thead>
               <tr>
@@ -2351,6 +2352,263 @@ export default function Sales({ userProfile, branches, addToast }) {
               )}
             </tbody>
           </table>
+        </div>
+
+        {/* Mobile Card List View for Invoices */}
+        <div className="hide-on-desktop" style={{ padding: '0.75rem', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+          {loading ? (
+            <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>
+              Fetching sales records...
+            </div>
+          ) : salesHistory.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>
+              {historySearchQuery.trim() ? `No sales invoices found matching "${historySearchQuery}".` : 'No sales invoices recorded yet. Tap "Create Invoice (POS)" to sell items.'}
+            </div>
+          ) : (
+            salesHistory.map((sale, index) => {
+              const due = sale.net_amount - sale.paid_amount;
+              const rowNumber = (salesPage - 1) * salesPageSize + index + 1;
+              const receiptNo = getSaleReceiptNo(sale);
+              const branchName = branches.find((b) => b.id === sale.branch_id)?.name;
+
+              return (
+                <div
+                  key={sale.id}
+                  style={{
+                    background: '#ffffff',
+                    border: '1px solid var(--border-color)',
+                    borderRadius: '8px',
+                    padding: '0.85rem',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '0.55rem',
+                    boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
+                  }}
+                >
+                  {/* Header: SL Badge, Invoice ID, Receipt No, Payment Status */}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '0.5rem', borderBottom: '1px solid #f1f5f9', paddingBottom: '0.45rem' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', flexWrap: 'wrap' }}>
+                      <span style={{
+                        backgroundColor: '#e0f2fe',
+                        color: '#0369a1',
+                        fontWeight: 800,
+                        fontSize: '0.75rem',
+                        padding: '0.15rem 0.45rem',
+                        borderRadius: '4px',
+                      }}>
+                        #{rowNumber}
+                      </span>
+                      <span
+                        style={{ fontFamily: 'monospace', fontWeight: 700, fontSize: '0.85rem', color: '#0284c7', cursor: 'pointer' }}
+                        onClick={() => handleOpenSaleDetails(sale)}
+                      >
+                        {sale.invoice_number || `INV#${sale.id.substring(0, 8).toUpperCase()}`}
+                      </span>
+                      {receiptNo && (
+                        <span
+                          style={{
+                            backgroundColor: '#f0fdf4',
+                            color: '#166534',
+                            border: '1px solid #bbf7d0',
+                            padding: '0.1rem 0.35rem',
+                            borderRadius: '4px',
+                            fontWeight: 700,
+                            fontSize: '0.72rem',
+                            fontFamily: 'monospace',
+                          }}
+                        >
+                          {receiptNo}
+                        </span>
+                      )}
+                    </div>
+                    <span className={`badge badge-${sale.payment_status}`} style={{ fontSize: '0.72rem', textTransform: 'uppercase' }}>
+                      {sale.payment_status}
+                    </span>
+                  </div>
+
+                  {/* Buyer & Date & Branch */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem', fontSize: '0.82rem' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                      <span style={{ fontWeight: 700, color: 'var(--text-primary)', fontSize: '0.88rem' }}>
+                        {sale.contacts?.name || 'Walk-in Customer'}
+                      </span>
+                      <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                        {new Date(sale.sale_date).toLocaleDateString()}
+                      </span>
+                    </div>
+                    {sale.contacts?.phone && (
+                      <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                        📞 {sale.contacts.phone}
+                      </div>
+                    )}
+                    {userProfile?.role === 'owner' && branchName && (
+                      <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', fontWeight: 600 }}>
+                        🏪 {branchName}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Financials Strip */}
+                  <div style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    backgroundColor: '#f8fafc',
+                    padding: '0.45rem 0.65rem',
+                    borderRadius: '6px',
+                    border: '1px solid #f1f5f9',
+                    fontSize: '0.82rem',
+                  }}>
+                    <div>
+                      <span style={{ color: 'var(--text-muted)', fontSize: '0.7rem', display: 'block' }}>Net Value</span>
+                      <span style={{ fontWeight: 800, color: 'var(--text-primary)', fontSize: '0.92rem' }}>
+                        ৳{formatAmount(sale.net_amount)}
+                      </span>
+                    </div>
+                    <div style={{ textAlign: 'center' }}>
+                      <span style={{ color: 'var(--text-muted)', fontSize: '0.7rem', display: 'block' }}>Paid</span>
+                      <span style={{ fontWeight: 700, color: 'var(--success-text)', fontSize: '0.92rem' }}>
+                        ৳{formatAmount(sale.paid_amount)}
+                      </span>
+                    </div>
+                    <div style={{ textAlign: 'right' }}>
+                      <span style={{ color: 'var(--text-muted)', fontSize: '0.7rem', display: 'block' }}>Due</span>
+                      <span style={{ fontWeight: 800, color: due > 0 ? 'var(--danger-text)' : 'inherit', fontSize: '0.92rem' }}>
+                        ৳{formatAmount(due)}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Actions Bar */}
+                  <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap', justifyContent: 'flex-end', paddingTop: '0.15rem' }}>
+                    {due > 0.01 && (
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm"
+                        onClick={() => handleOpenPaymentModal(sale)}
+                        style={{
+                          flex: 1,
+                          minWidth: '70px',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: '0.25rem',
+                          height: '32px',
+                          fontSize: '0.78rem',
+                          fontWeight: 700,
+                          color: '#16a34a',
+                          backgroundColor: '#f0fdf4',
+                          border: '1px solid #bbf7d0',
+                        }}
+                      >
+                        <DollarSign size={13} />
+                        <span>Collect</span>
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      onClick={() => handleOpenSaleDetails(sale)}
+                      style={{
+                        flex: 1,
+                        minWidth: '65px',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '0.25rem',
+                        height: '32px',
+                        fontSize: '0.78rem',
+                        color: '#0284c7',
+                        backgroundColor: '#f0f9ff',
+                        border: '1px solid #bae6fd',
+                      }}
+                    >
+                      <Eye size={13} />
+                      <span>View</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      onClick={() => handleOpenEditSale(sale)}
+                      style={{
+                        flex: 1,
+                        minWidth: '60px',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '0.25rem',
+                        height: '32px',
+                        fontSize: '0.78rem',
+                        color: '#4f46e5',
+                        backgroundColor: '#eef2ff',
+                        border: '1px solid #c7d2fe',
+                      }}
+                    >
+                      <Edit size={13} />
+                      <span>Edit</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm btn-icon"
+                      onClick={() => handleRePrint(sale)}
+                      style={{
+                        height: '32px',
+                        minWidth: '32px',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        color: '#334155',
+                        backgroundColor: '#f8fafc',
+                        border: '1px solid #e2e8f0',
+                        borderRadius: '6px',
+                      }}
+                      title="Print"
+                    >
+                      <Printer size={13} />
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm btn-icon"
+                      onClick={() => handleOpenReturnModal(sale)}
+                      style={{
+                        height: '32px',
+                        minWidth: '32px',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        color: '#d97706',
+                        backgroundColor: '#fffbeb',
+                        border: '1px solid #fde68a',
+                        borderRadius: '6px',
+                      }}
+                      title="Return / Credit Note"
+                    >
+                      <RotateCcw size={13} />
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm btn-icon"
+                      onClick={() => handleDeleteSale(sale)}
+                      style={{
+                        height: '32px',
+                        minWidth: '32px',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        color: 'var(--danger)',
+                        backgroundColor: '#fee2e2',
+                        border: '1px solid #fecaca',
+                        borderRadius: '6px',
+                      }}
+                      title="Delete"
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  </div>
+                </div>
+              );
+            })
+          )}
         </div>
         <Pagination
           currentPage={salesPage}

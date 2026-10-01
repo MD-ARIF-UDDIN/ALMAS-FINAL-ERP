@@ -357,7 +357,8 @@ export default function Expenses({ userProfile, branches, addToast }) {
             </div>
           </div>
 
-          <div className="table-container" style={{ borderBottomLeftRadius: 0, borderBottomRightRadius: 0 }}>
+          {/* Desktop Table View */}
+          <div className="table-container hide-on-mobile" style={{ borderBottomLeftRadius: 0, borderBottomRightRadius: 0 }}>
             <table>
               <thead>
                 <tr>
@@ -414,6 +415,106 @@ export default function Expenses({ userProfile, branches, addToast }) {
                 )}
               </tbody>
             </table>
+          </div>
+
+          {/* Mobile Card List View */}
+          <div className="hide-on-desktop" style={{ padding: '0.75rem', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+            {loading ? (
+              <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>
+                Fetching expense records...
+              </div>
+            ) : expenses.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>
+                No expenses logged for this branch.
+              </div>
+            ) : (
+              expenses.map((exp, index) => {
+                const rowNumber = (page - 1) * pageSize + index + 1;
+
+                return (
+                  <div
+                    key={exp.id}
+                    style={{
+                      background: '#ffffff',
+                      border: '1px solid var(--border-color)',
+                      borderRadius: '8px',
+                      padding: '0.85rem',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '0.55rem',
+                      boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
+                    }}
+                  >
+                    {/* Header: SL Badge, Category, Date, Delete Button */}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem', borderBottom: '1px solid #f1f5f9', paddingBottom: '0.45rem' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+                        <span style={{
+                          backgroundColor: '#e0f2fe',
+                          color: '#0369a1',
+                          fontWeight: 800,
+                          fontSize: '0.75rem',
+                          padding: '0.15rem 0.45rem',
+                          borderRadius: '4px',
+                        }}>
+                          #{rowNumber}
+                        </span>
+                        <span style={{ fontWeight: 700, fontSize: '0.88rem', textTransform: 'capitalize', color: 'var(--text-primary)' }}>
+                          {exp.category.replace('_', ' ')}
+                        </span>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                          {new Date(exp.expense_date).toLocaleDateString()}
+                        </span>
+                        <button
+                          type="button"
+                          className="btn btn-secondary btn-sm btn-icon"
+                          style={{
+                            color: 'var(--danger)',
+                            backgroundColor: '#fee2e2',
+                            border: '1px solid #fecaca',
+                            borderRadius: '6px',
+                            minWidth: '30px',
+                            height: '30px',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                          }}
+                          onClick={() => handleDeleteExpense(exp.id, exp.amount, exp.payment_method)}
+                          title="Delete Log"
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Description */}
+                    <div style={{ fontSize: '0.82rem', color: exp.description ? 'var(--text-primary)' : 'var(--text-muted)' }}>
+                      {exp.description || 'No description provided.'}
+                    </div>
+
+                    {/* Footer Strip: Payment Method & Amount */}
+                    <div style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      backgroundColor: '#f8fafc',
+                      padding: '0.45rem 0.65rem',
+                      borderRadius: '6px',
+                      border: '1px solid #f1f5f9',
+                      fontSize: '0.82rem',
+                    }}>
+                      <span style={{ fontSize: '0.75rem', textTransform: 'capitalize', color: 'var(--text-secondary)', fontWeight: 600 }}>
+                        💳 {exp.payment_method.replace('_', ' ')}
+                      </span>
+                      <span style={{ fontWeight: 800, fontFamily: 'Outfit, sans-serif', color: 'var(--danger-text)', fontSize: '0.95rem' }}>
+                        -৳{formatAmount(exp.amount)}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })
+            )}
           </div>
           <Pagination
             currentPage={page}

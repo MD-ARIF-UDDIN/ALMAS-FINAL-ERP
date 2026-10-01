@@ -436,7 +436,8 @@ export default function Payments({ userProfile, branches, addToast }) {
             </div>
           </div>
 
-          <div className="table-container" style={{ borderBottomLeftRadius: 0, borderBottomRightRadius: 0 }}>
+          {/* Desktop Table View */}
+          <div className="table-container hide-on-mobile" style={{ borderBottomLeftRadius: 0, borderBottomRightRadius: 0 }}>
             <table>
               <thead>
                 <tr>
@@ -521,6 +522,168 @@ export default function Payments({ userProfile, branches, addToast }) {
               </tbody>
             </table>
           </div>
+
+          {/* Mobile Card List View for Invoices */}
+          <div className="hide-on-desktop" style={{ padding: '0.75rem', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+            {loading ? (
+              <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>
+                Fetching invoices...
+              </div>
+            ) : invoices.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>
+                No invoices found.
+              </div>
+            ) : (
+              invoices.map((inv, index) => {
+                const due = inv.net_amount - inv.paid_amount;
+                const rowNumber = (invoicePage - 1) * invoicePageSize + index + 1;
+                const branchName = branches.find(b => b.id === inv.branch_id)?.name;
+
+                return (
+                  <div
+                    key={inv.id}
+                    style={{
+                      background: '#ffffff',
+                      border: '1px solid var(--border-color)',
+                      borderRadius: '8px',
+                      padding: '0.85rem',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '0.55rem',
+                      boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
+                    }}
+                  >
+                    {/* Header: SL Badge, Invoice ID, Status */}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem', borderBottom: '1px solid #f1f5f9', paddingBottom: '0.45rem' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+                        <span style={{
+                          backgroundColor: '#e0f2fe',
+                          color: '#0369a1',
+                          fontWeight: 800,
+                          fontSize: '0.75rem',
+                          padding: '0.15rem 0.45rem',
+                          borderRadius: '4px',
+                        }}>
+                          #{rowNumber}
+                        </span>
+                        <span style={{ fontFamily: 'monospace', fontWeight: 700, fontSize: '0.85rem', color: 'var(--text-primary)' }}>
+                          {inv.invoice_number || (invoiceType === 'sales' ? 'INV' : 'PUR') + '#' + inv.id.substring(0, 8).toUpperCase()}
+                        </span>
+                      </div>
+                      <span className={`badge badge-${inv.payment_status}`} style={{ fontSize: '0.72rem', textTransform: 'uppercase' }}>
+                        {inv.payment_status}
+                      </span>
+                    </div>
+
+                    {/* Contact & Date */}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', fontSize: '0.82rem' }}>
+                      <div>
+                        <span style={{ fontWeight: 700, color: 'var(--text-primary)', fontSize: '0.88rem', display: 'block' }}>
+                          {inv.contacts?.name || 'Unknown Contact'}
+                        </span>
+                        {userProfile?.role === 'owner' && branchName && (
+                          <span style={{ fontSize: '0.74rem', color: 'var(--text-secondary)' }}>
+                            🏪 {branchName}
+                          </span>
+                        )}
+                      </div>
+                      <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                        {new Date(inv.sale_date || inv.purchase_date).toLocaleDateString()}
+                      </span>
+                    </div>
+
+                    {/* Financials Strip */}
+                    <div style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      backgroundColor: '#f8fafc',
+                      padding: '0.45rem 0.65rem',
+                      borderRadius: '6px',
+                      border: '1px solid #f1f5f9',
+                      fontSize: '0.82rem',
+                    }}>
+                      <div>
+                        <span style={{ color: 'var(--text-muted)', fontSize: '0.7rem', display: 'block' }}>Net Total</span>
+                        <span style={{ fontWeight: 700, color: 'var(--text-primary)', fontSize: '0.88rem' }}>
+                          ৳{formatAmount(inv.net_amount)}
+                        </span>
+                      </div>
+                      <div style={{ textAlign: 'center' }}>
+                        <span style={{ color: 'var(--text-muted)', fontSize: '0.7rem', display: 'block' }}>Paid</span>
+                        <span style={{ fontWeight: 700, color: 'var(--success-text)', fontSize: '0.88rem' }}>
+                          ৳{formatAmount(inv.paid_amount)}
+                        </span>
+                      </div>
+                      <div style={{ textAlign: 'right' }}>
+                        <span style={{ color: 'var(--text-muted)', fontSize: '0.7rem', display: 'block' }}>Due</span>
+                        <span style={{ fontWeight: 800, color: due > 0 ? 'var(--danger-text)' : 'var(--text-primary)', fontSize: '0.92rem' }}>
+                          ৳{formatAmount(due)}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Actions Bar */}
+                    <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end', paddingTop: '0.15rem' }}>
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm"
+                        onClick={() => handleOpenHistoryModal(inv)}
+                        style={{
+                          flex: 1,
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: '0.35rem',
+                          height: '34px',
+                          fontSize: '0.8rem',
+                          color: '#0284c7',
+                          borderColor: '#bae6fd',
+                          backgroundColor: '#f0f9ff',
+                        }}
+                      >
+                        <History size={14} />
+                        <span>History</span>
+                      </button>
+                      {due > 0 ? (
+                        <button
+                          type="button"
+                          className="btn btn-primary btn-sm"
+                          onClick={() => handleOpenPaymentModal(inv)}
+                          style={{
+                            flex: 1,
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            height: '34px',
+                            fontSize: '0.82rem',
+                            fontWeight: 700,
+                          }}
+                        >
+                          {invoiceType === 'sales' ? 'Collect Payment' : 'Make Payment'}
+                        </button>
+                      ) : (
+                        <div style={{
+                          flex: 1,
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          height: '34px',
+                          fontSize: '0.8rem',
+                          color: 'var(--success-text)',
+                          fontWeight: 700,
+                          backgroundColor: '#ecfdf5',
+                          borderRadius: '6px',
+                        }}>
+                          ✓ Fully Paid
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
           <Pagination
             currentPage={invoicePage}
             totalCount={invoiceTotalCount}
@@ -537,7 +700,8 @@ export default function Payments({ userProfile, branches, addToast }) {
           <div className="card-header" style={{ padding: '1rem 1.25rem' }}>
             <h3 className="card-title" style={{ margin: 0 }}>Payment History</h3>
           </div>
-          <div className="table-container" style={{ borderBottomLeftRadius: 0, borderBottomRightRadius: 0 }}>
+          {/* Desktop Table View */}
+          <div className="table-container hide-on-mobile" style={{ borderBottomLeftRadius: 0, borderBottomRightRadius: 0 }}>
             <table>
               <thead>
                 <tr>
@@ -604,6 +768,116 @@ export default function Payments({ userProfile, branches, addToast }) {
                 )}
               </tbody>
             </table>
+          </div>
+
+          {/* Mobile Card List View for Ledger */}
+          <div className="hide-on-desktop" style={{ padding: '0.75rem', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+            {loadingLedger ? (
+              <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>
+                Fetching payment records...
+              </div>
+            ) : paymentsLog.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>
+                No payments registered yet.
+              </div>
+            ) : (
+              paymentsLog.map((log, index) => {
+                const isRec = log.transaction_type === 'customer_collection';
+                const rowNumber = (ledgerPage - 1) * ledgerPageSize + index + 1;
+                const branchName = branches.find(b => b.id === log.branch_id)?.name;
+
+                return (
+                  <div
+                    key={log.id}
+                    style={{
+                      background: '#ffffff',
+                      border: '1px solid var(--border-color)',
+                      borderRadius: '8px',
+                      padding: '0.85rem',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '0.55rem',
+                      boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
+                    }}
+                  >
+                    {/* Header: SL Badge, Receipt #, Type Badge */}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem', borderBottom: '1px solid #f1f5f9', paddingBottom: '0.45rem' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+                        <span style={{
+                          backgroundColor: '#e0f2fe',
+                          color: '#0369a1',
+                          fontWeight: 800,
+                          fontSize: '0.75rem',
+                          padding: '0.15rem 0.45rem',
+                          borderRadius: '4px',
+                        }}>
+                          #{rowNumber}
+                        </span>
+                        <span style={{ fontFamily: 'monospace', fontWeight: 700, fontSize: '0.84rem' }}>
+                          {log.payment_number || 'N/A'}
+                        </span>
+                      </div>
+                      <span className={`badge ${isRec ? 'badge-paid' : 'badge-unpaid'}`} style={{ fontSize: '0.72rem' }}>
+                        {isRec ? <TrendingUp size={11} /> : <TrendingDown size={11} />}
+                        <span style={{ marginLeft: '0.2rem' }}>
+                          {isRec ? 'Collection' : 'Payout'}
+                        </span>
+                      </span>
+                    </div>
+
+                    {/* Contact, Date, Branch */}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', fontSize: '0.82rem' }}>
+                      <div>
+                        <span style={{ fontWeight: 700, color: 'var(--text-primary)', fontSize: '0.88rem', display: 'block' }}>
+                          {log.contacts?.name || (log.reference_invoice_id ? `REF#${log.reference_invoice_id.substring(0, 8).toUpperCase()}` : 'General Payment')}
+                        </span>
+                        {userProfile?.role === 'owner' && branchName && (
+                          <span style={{ fontSize: '0.74rem', color: 'var(--text-secondary)' }}>
+                            🏪 {branchName}
+                          </span>
+                        )}
+                      </div>
+                      <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                        {new Date(log.payment_date).toLocaleDateString()}
+                      </span>
+                    </div>
+
+                    {/* Amount & Method Strip */}
+                    <div style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      backgroundColor: '#f8fafc',
+                      padding: '0.45rem 0.65rem',
+                      borderRadius: '6px',
+                      border: '1px solid #f1f5f9',
+                      fontSize: '0.82rem',
+                    }}>
+                      <div>
+                        <span style={{ color: 'var(--text-muted)', fontSize: '0.7rem', display: 'block' }}>Method</span>
+                        <span style={{ textTransform: 'capitalize', fontWeight: 600, fontSize: '0.8rem' }}>
+                          💳 {log.payment_method?.replace('_', ' ')}
+                        </span>
+                      </div>
+                      <div style={{ textAlign: 'right' }}>
+                        <span style={{ color: 'var(--text-muted)', fontSize: '0.7rem', display: 'block' }}>Amount</span>
+                        <span style={{ fontWeight: 800, fontFamily: 'Outfit, sans-serif', color: isRec ? 'var(--success-text)' : 'var(--danger-text)', fontSize: '0.95rem' }}>
+                          {isRec ? '+' : '-'}৳{formatAmount(log.amount)}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Footer: Notes & Logged By */}
+                    {(log.notes || log.profiles?.full_name) && (
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.74rem', color: 'var(--text-muted)', paddingTop: '0.1rem' }}>
+                        <span>{log.notes ? `📝 ${log.notes}` : ''}</span>
+                        <span>👤 {log.profiles?.full_name || 'System'}</span>
+                      </div>
+                    )}
+                  </div>
+                );
+              })
+            )}
           </div>
           <Pagination
             currentPage={ledgerPage}

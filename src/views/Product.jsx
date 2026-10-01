@@ -537,8 +537,8 @@ export default function Product({ userProfile, branches, addToast }) {
           </div>
         </div>
 
-        {/* Products Table */}
-        <div className="table-container">
+        {/* Products Table (Desktop View) */}
+        <div className="table-container hide-on-mobile">
           <table>
             <thead>
               {isOwner && branches && branches.length > 1 ? (
@@ -714,6 +714,141 @@ export default function Product({ userProfile, branches, addToast }) {
               )}
             </tbody>
           </table>
+        </div>
+
+        {/* Mobile Card List View for Products */}
+        <div className="hide-on-desktop" style={{ padding: '0.75rem', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+          {loading ? (
+            <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>
+              Loading products...
+            </div>
+          ) : products.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>
+              No products found.
+            </div>
+          ) : (
+            products.map((p, index) => {
+              const rowNumber = (page - 1) * pageSize + index + 1;
+
+              return (
+                <div
+                  key={p.id}
+                  style={{
+                    background: '#ffffff',
+                    border: '1px solid var(--border-color)',
+                    borderRadius: '8px',
+                    padding: '0.85rem',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '0.55rem',
+                    boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
+                  }}
+                >
+                  {/* Header: SL Badge, Product Name, Category */}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '0.5rem', borderBottom: '1px solid #f1f5f9', paddingBottom: '0.45rem' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', flexWrap: 'wrap' }}>
+                      <span style={{
+                        backgroundColor: '#e0f2fe',
+                        color: '#0369a1',
+                        fontWeight: 800,
+                        fontSize: '0.75rem',
+                        padding: '0.15rem 0.45rem',
+                        borderRadius: '4px',
+                      }}>
+                        #{rowNumber}
+                      </span>
+                      <span style={{ fontWeight: 700, fontSize: '0.9rem', color: 'var(--text-primary)' }}>
+                        {p.name || '—'}
+                      </span>
+                    </div>
+                    {p.category && (
+                      <span className="badge badge-secondary" style={{ fontSize: '0.7rem' }}>
+                        {p.category}
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Code & Description */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                    <span style={{ fontFamily: 'monospace', fontWeight: 600, color: 'var(--primary)', backgroundColor: '#f0f9ff', padding: '0.1rem 0.4rem', borderRadius: '4px', width: 'fit-content', fontSize: '0.8rem' }}>
+                      Code: {p.product_code || p.sku || '—'}
+                    </span>
+                    {p.description && (
+                      <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
+                        {p.description}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Pricing Strip */}
+                  <div style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    backgroundColor: '#f8fafc',
+                    padding: '0.45rem 0.65rem',
+                    borderRadius: '6px',
+                    border: '1px solid #f1f5f9',
+                    fontSize: '0.82rem',
+                  }}>
+                    <div>
+                      <span style={{ color: 'var(--text-muted)', fontSize: '0.7rem', display: 'block' }}>Buy Price</span>
+                      <div style={{ fontSize: '0.85rem' }}>{renderBuyPrice(p)}</div>
+                    </div>
+                    <div style={{ textAlign: 'right' }}>
+                      <span style={{ color: 'var(--text-muted)', fontSize: '0.7rem', display: 'block' }}>Sell Price</span>
+                      <div style={{ fontSize: '0.88rem' }}>{renderSellPrice(p)}</div>
+                    </div>
+                  </div>
+
+                  {/* Actions Bar */}
+                  <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end', paddingTop: '0.15rem' }}>
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      onClick={() => handleOpenEdit(p)}
+                      style={{
+                        flex: 1,
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '0.35rem',
+                        height: '34px',
+                        fontSize: '0.8rem',
+                        color: '#059669',
+                        backgroundColor: '#ecfdf5',
+                        border: '1px solid #a7f3d0',
+                      }}
+                    >
+                      <Edit size={14} />
+                      <span>Edit Product</span>
+                    </button>
+                    {canDelete && (
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm btn-icon"
+                        onClick={() => handleDeleteProduct(p.id, p.name)}
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          height: '34px',
+                          minWidth: '34px',
+                          color: 'var(--danger)',
+                          backgroundColor: '#fee2e2',
+                          border: '1px solid #fecaca',
+                          borderRadius: '6px',
+                        }}
+                        title="Delete Product"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            })
+          )}
         </div>
 
         <Pagination 

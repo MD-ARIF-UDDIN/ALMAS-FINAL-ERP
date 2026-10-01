@@ -437,7 +437,8 @@ export default function Inventory({ userProfile, branches, addToast }) {
               </div>
             </div>
 
-            <div className="table-container">
+            {/* Desktop Table View */}
+            <div className="table-container hide-on-mobile">
               <table>
                 <thead>
                   <tr>
@@ -525,6 +526,119 @@ export default function Inventory({ userProfile, branches, addToast }) {
               </table>
             </div>
 
+            {/* Mobile Card List View for Stock */}
+            <div className="hide-on-desktop" style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', padding: '0.75rem' }}>
+              {loadingStock ? (
+                <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>
+                  Loading inventory...
+                </div>
+              ) : stockItems.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>
+                  No product stock records found.
+                </div>
+              ) : (
+                stockItems.map((item, index) => {
+                  const rowNumber = (stockPage - 1) * stockPageSize + index + 1;
+
+                  return (
+                    <div
+                      key={item.id}
+                      style={{
+                        background: '#ffffff',
+                        border: '1px solid var(--border-color)',
+                        borderRadius: '8px',
+                        padding: '0.85rem',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '0.55rem',
+                        boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
+                      }}
+                    >
+                      {/* Header: SL Badge, Name, Status */}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '0.5rem', borderBottom: '1px solid #f1f5f9', paddingBottom: '0.45rem' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', flexWrap: 'wrap' }}>
+                          <span style={{
+                            backgroundColor: '#e0f2fe',
+                            color: '#0369a1',
+                            fontWeight: 800,
+                            fontSize: '0.75rem',
+                            padding: '0.15rem 0.45rem',
+                            borderRadius: '4px',
+                          }}>
+                            #{rowNumber}
+                          </span>
+                          <span style={{ fontWeight: 700, fontSize: '0.9rem', color: 'var(--text-primary)' }}>
+                            {item.name || '—'}
+                          </span>
+                        </div>
+                        {item.isOutOfStock ? (
+                          <span className="badge" style={{ backgroundColor: '#f1f5f9', color: '#64748b', border: '1px solid #e2e8f0', fontSize: '0.7rem' }}>
+                            Out of Stock
+                          </span>
+                        ) : item.isLowStock ? (
+                          <span className="badge badge-unpaid" style={{ fontSize: '0.7rem' }}>
+                            <AlertTriangle size={11} />
+                            <span style={{ marginLeft: '0.2rem' }}>Low Stock</span>
+                          </span>
+                        ) : (
+                          <span className="badge badge-paid" style={{ fontSize: '0.7rem' }}>
+                            In Stock
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Code & Category */}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.8rem' }}>
+                        <span style={{ fontFamily: 'monospace', fontWeight: 600, color: 'var(--primary)', backgroundColor: '#f0f9ff', padding: '0.1rem 0.4rem', borderRadius: '4px' }}>
+                          Code: {item.product_code || item.sku || '—'}
+                        </span>
+                        {item.category && (
+                          <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>
+                            📂 {item.category}
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Financials & Stock Strip */}
+                      <div style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        backgroundColor: '#f8fafc',
+                        padding: '0.45rem 0.65rem',
+                        borderRadius: '6px',
+                        border: '1px solid #f1f5f9',
+                        fontSize: '0.82rem',
+                      }}>
+                        <div>
+                          <span style={{ color: 'var(--text-muted)', fontSize: '0.7rem', display: 'block' }}>Cost Price</span>
+                          <span style={{ fontWeight: 600, fontSize: '0.85rem' }}>
+                            ৳{formatAmount(item.effectiveBuyPrice)}
+                          </span>
+                        </div>
+                        <div style={{ textAlign: 'center' }}>
+                          <span style={{ color: 'var(--text-muted)', fontSize: '0.7rem', display: 'block' }}>Sell Price</span>
+                          <span style={{ fontWeight: 700, color: 'var(--success-text)', fontSize: '0.88rem' }}>
+                            ৳{formatAmount(item.effectiveSalePrice)}
+                          </span>
+                        </div>
+                        <div style={{ textAlign: 'right' }}>
+                          <span style={{ color: 'var(--text-muted)', fontSize: '0.7rem', display: 'block' }}>Stock Qty</span>
+                          <span style={{
+                            fontWeight: 800,
+                            fontSize: '1rem',
+                            color: item.isOutOfStock ? 'var(--text-muted)' : item.isLowStock ? 'var(--danger-text)' : 'var(--text-primary)'
+                          }}>
+                            {item.quantity}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
             <Pagination 
               page={stockPage}
               totalCount={stockTotalCount}
@@ -573,7 +687,8 @@ export default function Inventory({ userProfile, branches, addToast }) {
             </select>
           </div>
 
-          <div className="table-container">
+          {/* Desktop Table View */}
+          <div className="table-container hide-on-mobile">
             <table>
               <thead>
                 <tr>
@@ -629,6 +744,103 @@ export default function Inventory({ userProfile, branches, addToast }) {
                 )}
               </tbody>
             </table>
+          </div>
+
+          {/* Mobile Card List View for Movements */}
+          <div className="hide-on-desktop" style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', padding: '0.75rem' }}>
+            {loadingMovements ? (
+              <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>
+                Loading movement ledger...
+              </div>
+            ) : movements.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>
+                No stock movements recorded for this branch.
+              </div>
+            ) : (
+              movements.map((m, index) => {
+                const isIn = ['purchase', 'adjustment_in', 'transfer_in'].includes(m.type);
+                const rowNumber = (logsPage - 1) * logsPageSize + index + 1;
+
+                return (
+                  <div
+                    key={m.id}
+                    style={{
+                      background: '#ffffff',
+                      border: '1px solid var(--border-color)',
+                      borderRadius: '8px',
+                      padding: '0.85rem',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '0.55rem',
+                      boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
+                    }}
+                  >
+                    {/* Header: SL Badge, Product Name, Type Badge */}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '0.5rem', borderBottom: '1px solid #f1f5f9', paddingBottom: '0.45rem' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', flexWrap: 'wrap' }}>
+                        <span style={{
+                          backgroundColor: '#e0f2fe',
+                          color: '#0369a1',
+                          fontWeight: 800,
+                          fontSize: '0.75rem',
+                          padding: '0.15rem 0.45rem',
+                          borderRadius: '4px',
+                        }}>
+                          #{rowNumber}
+                        </span>
+                        <span style={{ fontWeight: 700, fontSize: '0.88rem', color: 'var(--text-primary)' }}>
+                          {m.products?.name || 'Unknown Product'}
+                        </span>
+                      </div>
+                      <span className={`badge ${isIn ? 'badge-paid' : 'badge-unpaid'}`} style={{ fontSize: '0.7rem' }}>
+                        {isIn ? <TrendingUp size={11} /> : <TrendingDown size={11} />}
+                        <span style={{ marginLeft: '0.2rem' }}>{m.type.replace('_', ' ')}</span>
+                      </span>
+                    </div>
+
+                    {/* Code & Timestamp */}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.78rem' }}>
+                      <span style={{ fontFamily: 'monospace', color: 'var(--text-muted)' }}>
+                        Code: {m.products?.sku || m.products?.product_code || '—'}
+                      </span>
+                      <span style={{ color: 'var(--text-muted)' }}>
+                        {new Date(m.created_at).toLocaleString()}
+                      </span>
+                    </div>
+
+                    {/* Description */}
+                    {m.description && (
+                      <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                        {m.description}
+                      </div>
+                    )}
+
+                    {/* Quantity & Logged By Strip */}
+                    <div style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      backgroundColor: '#f8fafc',
+                      padding: '0.45rem 0.65rem',
+                      borderRadius: '6px',
+                      border: '1px solid #f1f5f9',
+                      fontSize: '0.82rem',
+                    }}>
+                      <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                        👤 {m.profiles?.full_name || 'System'}
+                      </span>
+                      <span style={{
+                        fontWeight: 800,
+                        fontSize: '1rem',
+                        color: isIn ? 'var(--success-text)' : 'var(--danger-text)'
+                      }}>
+                        {isIn ? `+${m.quantity}` : `-${m.quantity}`}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })
+            )}
           </div>
 
           <Pagination 

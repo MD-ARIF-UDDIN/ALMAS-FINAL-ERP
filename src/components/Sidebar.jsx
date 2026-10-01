@@ -106,7 +106,6 @@ export default function Sidebar({ userProfile, onLogout, branches, isOpen, setIs
             { id: 'logs', name: 'Stock Logs', icon: History, path: '/inventory?tab=logs' },
           ],
         },
-        { id: 'challans', name: 'Challans', icon: Truck, perm: 'inventory.view' },
       ],
     },
     {

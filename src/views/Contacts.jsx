@@ -200,8 +200,11 @@ export default function Contacts({ userProfile, branches = [], addToast }) {
         return;
       }
 
+      const editingContact = isEditing ? contacts.find(c => c.id === editingId) : null;
+      const isEditingFactory = isFactoryContact(editingContact);
+
       const payload = {
-        name: trimmedName,
+        name: isEditingFactory ? editingContact.name : trimmedName,
         phone: trimmedPhone,
         email: trimmedEmail || null,
         address: trimmedAddress || null,
@@ -254,6 +257,12 @@ export default function Contacts({ userProfile, branches = [], addToast }) {
     }
   };
 
+  const isFactoryContact = (contact) => {
+    if (!contact) return false;
+    const cName = (contact.name || '').toLowerCase().trim();
+    return cName === 'chittagong factory' || cName.includes('factory');
+  };
+
   const handleEdit = (contact) => {
     setIsEditing(true);
     setEditingId(contact.id);
@@ -269,6 +278,11 @@ export default function Contacts({ userProfile, branches = [], addToast }) {
     const contactId = typeof contact === 'object' ? contact.id : contact;
     const contactName = typeof contact === 'object' ? contact.name : 'this contact';
     const contactType = typeof contact === 'object' ? contact.type : activeTab;
+
+    if (isFactoryContact(typeof contact === 'object' ? contact : contacts.find(c => c.id === contactId))) {
+      showMessage('The Factory supplier contact is a permanent system record and cannot be deleted.', 'error');
+      return;
+    }
 
     // 1. Instant check against in-memory dues for the contact
     const inMemoryDue = typeof contact === 'object' ? getContactBalance(contact) : 0;
@@ -587,8 +601,8 @@ export default function Contacts({ userProfile, branches = [], addToast }) {
           )}
         </div>
 
-        {/* Table list */}
-        <div className="table-container" style={{ borderBottomLeftRadius: 0, borderBottomRightRadius: 0 }}>
+        {/* Table list (Desktop View) */}
+        <div className="table-container hide-on-mobile" style={{ borderBottomLeftRadius: 0, borderBottomRightRadius: 0 }}>
           <table>
             <thead>
               <tr>
@@ -619,7 +633,27 @@ export default function Contacts({ userProfile, branches = [], addToast }) {
                     <tr key={c.id}>
                       <td>{rowNumber}</td>
                       <td>
-                        <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{c.name}</div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
+                          <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{c.name}</span>
+                          {isFactoryContact(c) && (
+                            <span
+                              style={{
+                                backgroundColor: '#eff6ff',
+                                color: '#1d4ed8',
+                                border: '1px solid #bfdbfe',
+                                fontSize: '0.68rem',
+                                fontWeight: 700,
+                                padding: '0.1rem 0.4rem',
+                                borderRadius: '4px',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '0.2rem',
+                              }}
+                            >
+                              🏭 Factory Contact
+                            </span>
+                          )}
+                        </div>
                         <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
                           Added {new Date(c.created_at).toLocaleDateString()}
                         </div>
@@ -744,7 +778,7 @@ export default function Contacts({ userProfile, branches = [], addToast }) {
                           >
                             <Edit size={14} />
                           </button>
-                          {role === 'owner' && (
+                          {role === 'owner' && !isFactoryContact(c) && (
                             <button
                               type="button"
                               className="btn btn-secondary btn-sm btn-icon"
@@ -763,6 +797,274 @@ export default function Contacts({ userProfile, branches = [], addToast }) {
               )}
             </tbody>
           </table>
+        </div>
+
+        {/* Mobile Card List View */}
+        <div className="hide-on-desktop" style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+          {loading ? (
+            <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>
+              Fetching contacts records...
+            </div>
+          ) : contacts.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>
+              No contacts found.
+            </div>
+          ) : (
+            contacts.map((c, index) => {
+              const balance = getContactBalance(c);
+              const isCustomer = c.type === 'customer';
+              const br = getContactBranch(c);
+              const rowNumber = (page - 1) * pageSize + index + 1;
+
+              return (
+                <div
+                  key={c.id}
+                  style={{
+                    background: '#ffffff',
+                    border: '1px solid var(--border-color)',
+                    borderRadius: '8px',
+                    padding: '0.85rem',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '0.6rem',
+                    boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
+                  }}
+                >
+                  {/* Top Bar: SL Badge, Name, Badges */}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '0.5rem', borderBottom: '1px solid #f1f5f9', paddingBottom: '0.45rem' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', flexWrap: 'wrap' }}>
+                      <span style={{
+                        backgroundColor: '#e0f2fe',
+                        color: '#0369a1',
+                        fontWeight: 800,
+                        fontSize: '0.75rem',
+                        padding: '0.15rem 0.45rem',
+                        borderRadius: '4px',
+                      }}>
+                        #{rowNumber}
+                      </span>
+                      <span style={{ fontWeight: 700, fontSize: '0.9rem', color: 'var(--text-primary)' }}>
+                        {c.name}
+                      </span>
+                      {isFactoryContact(c) && (
+                        <span
+                          style={{
+                            backgroundColor: '#eff6ff',
+                            color: '#1d4ed8',
+                            border: '1px solid #bfdbfe',
+                            fontSize: '0.68rem',
+                            fontWeight: 700,
+                            padding: '0.1rem 0.35rem',
+                            borderRadius: '4px',
+                          }}
+                        >
+                          🏭 Factory Contact
+                        </span>
+                      )}
+                    </div>
+                    {br ? (
+                      <span 
+                        className="badge"
+                        style={{ 
+                          backgroundColor: br.is_factory ? '#fef3c7' : '#e0f2fe',
+                          color: br.is_factory ? '#92400e' : '#0369a1',
+                          border: br.is_factory ? '1px solid #fde68a' : '1px solid #bae6fd',
+                          fontSize: '0.72rem',
+                          fontWeight: 600,
+                        }}
+                      >
+                        {br.is_factory ? '🏭' : '🏪'} {br.name}
+                      </span>
+                    ) : (
+                      <span style={{ color: 'var(--text-muted)', fontSize: '0.74rem' }}>Global</span>
+                    )}
+                  </div>
+
+                  {/* Contact Info (Phone, Email, Address) */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', fontSize: '0.82rem' }}>
+                    {c.phone && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                        <Phone size={13} style={{ color: 'var(--text-muted)' }} />
+                        <a href={`tel:${c.phone}`} style={{ color: 'var(--primary)', textDecoration: 'none', fontWeight: 600 }}>
+                          {c.phone}
+                        </a>
+                      </div>
+                    )}
+                    {c.email && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                        <Mail size={13} style={{ color: 'var(--text-muted)' }} />
+                        <span>{c.email}</span>
+                      </div>
+                    )}
+                    {c.address && (
+                      <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                        📍 {c.address}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Balance / Outstanding Strip */}
+                  <div style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '0.4rem',
+                    backgroundColor: '#f8fafc',
+                    padding: '0.55rem 0.75rem',
+                    borderRadius: '6px',
+                    border: '1px solid #f1f5f9',
+                    fontSize: '0.82rem',
+                  }}>
+                    {role === 'owner' && filterBranchId === 'all' ? (
+                      (() => {
+                        const branchList = getContactBranchBreakdown(c).filter((b) => Math.abs(b.due) > 0.001);
+                        if (branchList.length === 0) {
+                          return (
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                              <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>
+                                Outstanding Balance
+                              </span>
+                              <div style={{ textAlign: 'right' }}>
+                                <span style={{ fontWeight: 700, fontFamily: 'Outfit, sans-serif', color: 'var(--text-muted)' }}>
+                                  ৳0
+                                </span>
+                                <span style={{ fontSize: '0.68rem', display: 'block', color: 'var(--text-muted)' }}>
+                                  Cleared
+                                </span>
+                              </div>
+                            </div>
+                          );
+                        }
+
+                        return (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+                            <span style={{ color: 'var(--text-muted)', fontSize: '0.74rem', fontWeight: 600 }}>
+                              {isCustomer ? 'Branch-wise Receivables:' : 'Branch-wise Payables:'}
+                            </span>
+                            <div style={{
+                              display: 'flex',
+                              flexWrap: 'wrap',
+                              gap: '0.35rem',
+                            }}>
+                              {branchList.map((b) => (
+                                <div
+                                  key={b.branchId}
+                                  style={{
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '0.3rem',
+                                    padding: '0.2rem 0.45rem',
+                                    backgroundColor: b.isFactory ? '#fef3c7' : '#f0fdf4',
+                                    borderRadius: '4px',
+                                    border: `1px solid ${b.isFactory ? '#fde68a' : '#bbf7d0'}`,
+                                    fontSize: '0.74rem',
+                                  }}
+                                >
+                                  <span style={{ fontWeight: 600, color: b.isFactory ? '#92400e' : '#166534' }}>
+                                    {b.isFactory ? '🏭' : '🏪'} {b.branchName}:
+                                  </span>
+                                  <span style={{
+                                    fontWeight: 700,
+                                    fontFamily: 'Outfit, sans-serif',
+                                    color: b.due > 0 ? (isCustomer ? 'var(--primary)' : 'var(--danger-text)') : 'var(--text-muted)',
+                                  }}>
+                                    ৳{formatAmount(b.due)}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        );
+                      })()
+                    ) : (
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>
+                          {isCustomer ? 'Receivable Balance' : 'Payable Balance'}
+                        </span>
+                        <div style={{ textAlign: 'right' }}>
+                          <span style={{ 
+                            fontWeight: 800, 
+                            fontFamily: 'Outfit, sans-serif',
+                            fontSize: '0.92rem',
+                            color: balance > 0 ? (isCustomer ? 'var(--primary)' : 'var(--danger-text)') : 'var(--text-muted)'
+                          }}>
+                            ৳{formatAmount(balance)}
+                          </span>
+                          <span style={{ fontSize: '0.68rem', display: 'block', color: 'var(--text-muted)', textTransform: 'capitalize' }}>
+                            {balance > 0 ? (isCustomer ? 'Due from Customer' : 'Due to Supplier') : 'Cleared (৳0)'}
+                          </span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Actions Bar */}
+                  <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end', paddingTop: '0.15rem' }}>
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      onClick={() => handleOpenHistory(c)}
+                      style={{
+                        flex: 1,
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '0.35rem',
+                        height: '34px',
+                        fontSize: '0.8rem',
+                        color: 'var(--primary)',
+                        backgroundColor: 'var(--primary-light)',
+                        border: '1px solid #bae6fd',
+                      }}
+                    >
+                      <History size={14} />
+                      <span>History</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      onClick={() => handleEdit(c)}
+                      style={{
+                        flex: 1,
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '0.35rem',
+                        height: '34px',
+                        fontSize: '0.8rem',
+                        color: '#059669',
+                        backgroundColor: '#ecfdf5',
+                        border: '1px solid #a7f3d0',
+                      }}
+                    >
+                      <Edit size={14} />
+                      <span>Edit</span>
+                    </button>
+                    {role === 'owner' && !isFactoryContact(c) && (
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm btn-icon"
+                        onClick={() => handleDelete(c)}
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          height: '34px',
+                          minWidth: '34px',
+                          color: 'var(--danger)',
+                          backgroundColor: '#fee2e2',
+                          border: '1px solid #fecaca',
+                          borderRadius: '6px',
+                        }}
+                        title="Delete"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            })
+          )}
         </div>
 
         {/* Server-Side Pagination */}
@@ -804,8 +1106,19 @@ export default function Contacts({ userProfile, branches = [], addToast }) {
                     placeholder={activeTab === 'customer' ? 'Enter customer name' : 'Enter supplier name'}
                     value={name}
                     onChange={(e) => setName(e.target.value)}
+                    disabled={isEditing && isFactoryContact(contacts.find(c => c.id === editingId))}
+                    readOnly={isEditing && isFactoryContact(contacts.find(c => c.id === editingId))}
+                    style={{
+                      backgroundColor: (isEditing && isFactoryContact(contacts.find(c => c.id === editingId))) ? '#f1f5f9' : '#ffffff',
+                      cursor: (isEditing && isFactoryContact(contacts.find(c => c.id === editingId))) ? 'not-allowed' : 'text',
+                    }}
                     required
                   />
+                  {isEditing && isFactoryContact(contacts.find(c => c.id === editingId)) && (
+                    <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '0.25rem', display: 'block' }}>
+                      🔒 Permanent Factory Supplier name cannot be modified. Phone number and address can be updated.
+                    </span>
+                  )}
                 </div>
 
                 <div className="form-group">
