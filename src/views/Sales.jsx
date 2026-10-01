@@ -22,6 +22,7 @@ import {
   Calendar,
   User,
   Package,
+  Banknote,
 } from 'lucide-react';
 import { TableLoading, LoadingBlock } from '../components/TableLoading';
 import Pagination from '../components/Pagination';
@@ -88,6 +89,16 @@ export default function Sales({ userProfile, branches, addToast }) {
   // Credit Note Print Preview State
   const [showCreditNotePrint, setShowCreditNotePrint] = useState(false);
   const [activeCreditNote, setActiveCreditNote] = useState(null);
+
+  // Payment Collection Modal State
+  const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [selectedSaleForPayment, setSelectedSaleForPayment] = useState(null);
+  const [collectPaymentAmount, setCollectPaymentAmount] = useState('');
+  const [collectPaymentDate, setCollectPaymentDate] = useState(new Date().toISOString().split('T')[0]);
+  const [collectPaymentMethod, setCollectPaymentMethod] = useState('cash');
+  const [collectPaymentRef, setCollectPaymentRef] = useState('');
+  const [collectPaymentNotes, setCollectPaymentNotes] = useState('');
+  const [isSubmittingPayment, setIsSubmittingPayment] = useState(false);
 
   useEffect(() => {
     if (location.state?.openPos) {
@@ -1628,6 +1639,102 @@ export default function Sales({ userProfile, branches, addToast }) {
   };
 
 
+  // Open Payment Collection Modal
+  const handleOpenPaymentModal = (sale) => {
+    const due = Math.max(0, (parseFloat(sale.net_amount) || 0) - (parseFloat(sale.paid_amount) || 0));
+    setSelectedSaleForPayment(sale);
+    setCollectPaymentAmount(due > 0 ? formatPlainNumber(due) : '');
+    setCollectPaymentDate(new Date().toISOString().split('T')[0]);
+    setCollectPaymentMethod('cash');
+    setCollectPaymentRef('');
+    setCollectPaymentNotes('');
+    setShowPaymentModal(true);
+  };
+
+  // Submit Payment Collection
+  const handleCollectPayment = async (e) => {
+    if (e) e.preventDefault();
+    if (!selectedSaleForPayment || !collectPaymentAmount) return;
+
+    const amountNum = parseFloat(collectPaymentAmount);
+    const currentNet = parseFloat(selectedSaleForPayment.net_amount || 0);
+    const currentPaid = parseFloat(selectedSaleForPayment.paid_amount || 0);
+    const currentDue = Math.max(0, currentNet - currentPaid);
+
+    if (isNaN(amountNum) || amountNum <= 0) {
+      showMessage('Please enter a valid payment amount greater than zero.', 'error');
+      return;
+    }
+
+    if (amountNum > currentDue + 0.01) {
+      showMessage(`Payment amount (৳${formatAmount(amountNum)}) cannot exceed the remaining due of ৳${formatAmount(currentDue)}.`, 'error');
+      return;
+    }
+
+    setIsSubmittingPayment(true);
+    try {
+      const sale = selectedSaleForPayment;
+      const targetBranchId = sale.branch_id || selectedBranchId;
+      const paymentIsoDate = new Date(collectPaymentDate).toISOString();
+
+      // 1. Insert payment record
+      const { error: payErr } = await supabase.from('payments').insert([{
+        branch_id: targetBranchId,
+        contact_id: sale.customer_id,
+        payment_date: paymentIsoDate,
+        amount: amountNum,
+        payment_method: collectPaymentMethod,
+        transaction_type: 'customer_collection',
+        reference_invoice_id: sale.id,
+        notes: collectPaymentRef
+          ? `Ref: ${collectPaymentRef}${collectPaymentNotes ? ` - ${collectPaymentNotes}` : ''}`
+          : (collectPaymentNotes || null),
+        created_by: userProfile?.id,
+      }]);
+
+      if (payErr) throw payErr;
+
+      // 2. Insert record into cash_ledger
+      const { error: ledgerErr } = await supabase.from('cash_ledger').insert([{
+        branch_id: targetBranchId,
+        amount_in: amountNum,
+        amount_out: 0,
+        reference_id: sale.id,
+        description: `Customer Due Collection: Invoice #${sale.invoice_number || sale.id.substring(0, 8).toUpperCase()} (${collectPaymentMethod})`,
+        transaction_date: paymentIsoDate,
+        created_by: userProfile?.id,
+      }]);
+
+      if (ledgerErr) throw ledgerErr;
+
+      // 3. Update sale record with updated paid_amount & payment_status
+      const newPaid = currentPaid + amountNum;
+      const newDue = Math.max(0, currentNet - newPaid);
+      const newStatus = newDue <= 0.01 ? 'paid' : 'partial';
+
+      const noteEntry = `[Collected ৳${formatAmount(amountNum)} on ${new Date(collectPaymentDate).toLocaleDateString()} via ${collectPaymentMethod}${collectPaymentRef ? ` (Ref: ${collectPaymentRef})` : ''}]`;
+      const updatedNotes = sale.notes ? `${sale.notes}\n${noteEntry}` : noteEntry;
+
+      const { error: saleErr } = await supabase.from('sales').update({
+        paid_amount: newPaid,
+        payment_status: newStatus,
+        notes: updatedNotes,
+      }).eq('id', sale.id);
+
+      if (saleErr) throw saleErr;
+
+      showMessage(`Payment of ৳${formatAmount(amountNum)} collected successfully!`, 'success');
+      setShowPaymentModal(false);
+      setSelectedSaleForPayment(null);
+      fetchSalesHistory();
+    } catch (err) {
+      console.error('Error collecting payment:', err);
+      showMessage(err.message || 'Failed to collect payment.', 'error');
+    } finally {
+      setIsSubmittingPayment(false);
+    }
+  };
+
   // Open Sales Return Modal for a specific invoice
   const handleOpenReturnModal = async (sale) => {
     setSelectedSaleForReturn(sale);
@@ -2136,6 +2243,26 @@ export default function Sales({ userProfile, branches, addToast }) {
                         </td>
                         <td style={{ textAlign: 'center' }}>
                           <div style={{ display: 'inline-flex', gap: '0.35rem', justifyContent: 'center', alignItems: 'center' }}>
+                            {due > 0.01 && (
+                              <button
+                                className="btn btn-secondary btn-sm btn-icon"
+                                onClick={() => handleOpenPaymentModal(sale)}
+                                title={`Collect Due Payment (Due: ৳${formatAmount(due)})`}
+                                style={{
+                                  color: '#15803d',
+                                  background: 'rgba(22, 163, 74, 0.09)',
+                                  border: '1px solid rgba(22, 163, 74, 0.35)',
+                                  padding: '0.35rem 0.45rem',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  gap: '1px'
+                                }}
+                              >
+                                <Plus size={10} strokeWidth={3.5} />
+                                <Banknote size={15} strokeWidth={2.2} />
+                              </button>
+                            )}
                             <button
                               className="btn btn-secondary btn-sm btn-icon"
                               onClick={() => handleOpenSaleDetails(sale)}
@@ -4651,6 +4778,29 @@ export default function Sales({ userProfile, branches, addToast }) {
             {/* Modal Footer */}
             <div className="modal-footer" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem', padding: '0.75rem 1.25rem' }}>
               <div style={{ display: 'flex', gap: '0.4rem' }}>
+                {selectedSaleForDetails && ((selectedSaleForDetails.net_amount || 0) - (selectedSaleForDetails.paid_amount || 0)) > 0.01 && (
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => {
+                      setShowSaleDetailsModal(false);
+                      handleOpenPaymentModal(selectedSaleForDetails);
+                    }}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.35rem',
+                      color: '#15803d',
+                      background: 'rgba(22, 163, 74, 0.08)',
+                      borderColor: 'rgba(22, 163, 74, 0.35)',
+                      fontWeight: 700
+                    }}
+                  >
+                    <Plus size={11} strokeWidth={3} />
+                    <Banknote size={14} />
+                    <span>Collect Due</span>
+                  </button>
+                )}
                 <button
                   type="button"
                   className="btn btn-secondary btn-sm"
@@ -5212,6 +5362,244 @@ export default function Sales({ userProfile, branches, addToast }) {
                 {isSubmittingEdit ? 'Saving...' : 'Yes, Save Changes'}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* COLLECT PAYMENT MODAL */}
+      {/* ========================================================================= */}
+      {showPaymentModal && selectedSaleForPayment && (
+        <div className="modal-overlay">
+          <div className="modal-content modal-md" style={{ maxWidth: '520px' }}>
+            <div className="modal-header" style={{ padding: '0.85rem 1.25rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <div style={{
+                  width: '34px',
+                  height: '34px',
+                  borderRadius: '50%',
+                  background: 'rgba(22, 163, 74, 0.12)',
+                  color: '#16a34a',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}>
+                  <Banknote size={19} />
+                </div>
+                <div>
+                  <h3 className="modal-title" style={{ fontSize: '1.05rem', margin: 0, fontWeight: 700 }}>
+                    Collect Due Payment
+                  </h3>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                    Invoice: <span style={{ fontFamily: 'monospace', fontWeight: 600 }}>{selectedSaleForPayment.invoice_number || `INV#${selectedSaleForPayment.id.substring(0, 8).toUpperCase()}`}</span>
+                    {' • '}
+                    Customer: <span style={{ fontWeight: 600 }}>{selectedSaleForPayment.contacts?.name || 'Walk-in Customer'}</span>
+                  </div>
+                </div>
+              </div>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => setShowPaymentModal(false)}
+                disabled={isSubmittingPayment}
+                style={{ borderRadius: '50%', padding: '0.35rem', border: 'none' }}
+              >
+                <X size={15} />
+              </button>
+            </div>
+
+            <form onSubmit={handleCollectPayment}>
+              <div className="modal-body" style={{ padding: '1.25rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                {/* Due Breakdown Cards */}
+                {(() => {
+                  const bill = parseFloat(selectedSaleForPayment.net_amount || 0);
+                  const paid = parseFloat(selectedSaleForPayment.paid_amount || 0);
+                  const due = Math.max(0, bill - paid);
+                  const entered = parseFloat(collectPaymentAmount) || 0;
+                  const newPaid = paid + entered;
+                  const newRemainingDue = Math.max(0, due - entered);
+
+                  return (
+                    <>
+                      <div style={{
+                        display: 'grid',
+                        gridTemplateColumns: 'repeat(3, 1fr)',
+                        gap: '0.5rem',
+                        background: '#f8fafc',
+                        padding: '0.75rem',
+                        borderRadius: 'var(--radius-md)',
+                        border: '1px solid var(--border-color)',
+                        textAlign: 'center'
+                      }}>
+                        <div>
+                          <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 600 }}>Total Bill</div>
+                          <div style={{ fontWeight: 700, fontSize: '0.95rem' }}>৳{formatAmount(bill)}</div>
+                        </div>
+                        <div>
+                          <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 600 }}>Paid So Far</div>
+                          <div style={{ fontWeight: 700, fontSize: '0.95rem', color: 'var(--success-text)' }}>৳{formatAmount(paid)}</div>
+                        </div>
+                        <div>
+                          <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 600 }}>Current Due</div>
+                          <div style={{ fontWeight: 800, fontSize: '1rem', color: 'var(--danger-text)' }}>৳{formatAmount(due)}</div>
+                        </div>
+                      </div>
+
+                      {/* Payment Inputs */}
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                        <div className="form-group" style={{ marginBottom: 0 }}>
+                          <label style={{ display: 'block', fontWeight: 600, fontSize: '0.84rem', marginBottom: '0.35rem' }}>
+                            Collection Date <span style={{ color: 'red' }}>*</span>
+                          </label>
+                          <input
+                            type="date"
+                            className="input-control"
+                            value={collectPaymentDate}
+                            onChange={(e) => setCollectPaymentDate(e.target.value)}
+                            required
+                          />
+                        </div>
+
+                        <div className="form-group" style={{ marginBottom: 0 }}>
+                          <label style={{ display: 'block', fontWeight: 600, fontSize: '0.84rem', marginBottom: '0.35rem' }}>
+                            Payment Method <span style={{ color: 'red' }}>*</span>
+                          </label>
+                          <select
+                            className="input-control"
+                            value={collectPaymentMethod}
+                            onChange={(e) => setCollectPaymentMethod(e.target.value)}
+                          >
+                            <option value="cash">Cash</option>
+                            <option value="bkash">bKash</option>
+                            <option value="nagad">Nagad</option>
+                            <option value="rocket">Rocket</option>
+                            <option value="bank">Bank Transfer</option>
+                            <option value="card">Card Payment</option>
+                          </select>
+                        </div>
+                      </div>
+
+                      {/* Amount to collect */}
+                      <div className="form-group" style={{ marginBottom: 0 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.35rem' }}>
+                          <label style={{ fontWeight: 600, fontSize: '0.84rem', margin: 0 }}>
+                            Amount to Collect (৳) <span style={{ color: 'red' }}>*</span>
+                          </label>
+                          <div style={{ display: 'flex', gap: '0.35rem' }}>
+                            <button
+                              type="button"
+                              className="btn btn-secondary btn-sm"
+                              style={{ padding: '0.15rem 0.5rem', fontSize: '0.72rem', fontWeight: 600 }}
+                              onClick={() => setCollectPaymentAmount(formatPlainNumber(due))}
+                            >
+                              Full Due (৳{formatAmount(due)})
+                            </button>
+                            {due > 1 && (
+                              <button
+                                type="button"
+                                className="btn btn-secondary btn-sm"
+                                style={{ padding: '0.15rem 0.5rem', fontSize: '0.72rem', fontWeight: 600 }}
+                                onClick={() => setCollectPaymentAmount(formatPlainNumber(Math.round(due / 2)))}
+                              >
+                                Half Due
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                        <input
+                          type="number"
+                          step="any"
+                          min="0.01"
+                          max={due}
+                          className="input-control"
+                          placeholder="Enter collection amount..."
+                          value={collectPaymentAmount}
+                          onChange={(e) => setCollectPaymentAmount(e.target.value)}
+                          style={{ fontSize: '1.05rem', fontWeight: 700, color: '#15803d' }}
+                          required
+                          autoFocus
+                        />
+                      </div>
+
+                      {/* Reference & Notes */}
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                        <div className="form-group" style={{ marginBottom: 0 }}>
+                          <label style={{ display: 'block', fontWeight: 600, fontSize: '0.84rem', marginBottom: '0.35rem' }}>
+                            Trx ID / Ref (Optional)
+                          </label>
+                          <input
+                            type="text"
+                            className="input-control"
+                            placeholder="e.g. Trx# 9X4812"
+                            value={collectPaymentRef}
+                            onChange={(e) => setCollectPaymentRef(e.target.value)}
+                          />
+                        </div>
+
+                        <div className="form-group" style={{ marginBottom: 0 }}>
+                          <label style={{ display: 'block', fontWeight: 600, fontSize: '0.84rem', marginBottom: '0.35rem' }}>
+                            Notes (Optional)
+                          </label>
+                          <input
+                            type="text"
+                            className="input-control"
+                            placeholder="Payment notes..."
+                            value={collectPaymentNotes}
+                            onChange={(e) => setCollectPaymentNotes(e.target.value)}
+                          />
+                        </div>
+                      </div>
+
+                      {/* Settlement Preview */}
+                      {entered > 0 && (
+                        <div style={{
+                          padding: '0.75rem 1rem',
+                          background: 'rgba(22, 163, 74, 0.06)',
+                          border: '1px solid rgba(22, 163, 74, 0.25)',
+                          borderRadius: 'var(--radius-md)',
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          fontSize: '0.86rem'
+                        }}>
+                          <div>
+                            <span style={{ color: 'var(--text-secondary)' }}>New Paid Total: </span>
+                            <strong>৳{formatAmount(newPaid)}</strong>
+                          </div>
+                          <div>
+                            <span style={{ color: 'var(--text-secondary)' }}>Remaining Due: </span>
+                            <strong style={{ color: newRemainingDue <= 0.01 ? '#15803d' : '#ea580c' }}>
+                              {newRemainingDue <= 0.01 ? '৳0 (Paid in Full ✓)' : `৳${formatAmount(newRemainingDue)}`}
+                            </strong>
+                          </div>
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
+              </div>
+
+              <div className="modal-footer" style={{ padding: '0.75rem 1.25rem', display: 'flex', justifyContent: 'flex-end', gap: '0.5rem' }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => setShowPaymentModal(false)}
+                  disabled={isSubmittingPayment}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="btn btn-primary"
+                  disabled={isSubmittingPayment || !collectPaymentAmount || parseFloat(collectPaymentAmount) <= 0}
+                  style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontWeight: 700, background: '#16a34a', borderColor: '#16a34a' }}
+                >
+                  <Plus size={14} strokeWidth={3} />
+                  <Banknote size={16} />
+                  <span>{isSubmittingPayment ? 'Collecting...' : `Collect ৳${formatAmount(parseFloat(collectPaymentAmount) || 0)}`}</span>
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
