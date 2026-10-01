@@ -28,6 +28,23 @@ import { TableLoading, LoadingBlock } from '../components/TableLoading';
 import Pagination from '../components/Pagination';
 import { formatAmount, formatPlainNumber } from '../utils/format';
 
+export const getSaleReceiptNo = (sale) => {
+  if (!sale) return '';
+  if (sale.receipt_no) return String(sale.receipt_no).trim();
+  if (sale.receipt_number) return String(sale.receipt_number).trim();
+  if (sale.manual_receipt_no) return String(sale.manual_receipt_no).trim();
+  if (!sale.notes) return '';
+  const match = sale.notes.match(/\[RECEIPT:([^\]]*)\]/);
+  return match ? match[1].trim() : '';
+};
+
+export const getSaleCleanNotes = (sale) => {
+  if (!sale || !sale.notes) return '';
+  let str = sale.notes;
+  str = str.replace(/\[RECEIPT:[^\]]*\]\s*/g, '');
+  return str.trim();
+};
+
 export default function Sales({ userProfile, branches, addToast }) {
   const location = useLocation();
   const [products, setProducts] = useState([]);
@@ -35,7 +52,7 @@ export default function Sales({ userProfile, branches, addToast }) {
   const [cart, setCart] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadingInventory, setLoadingInventory] = useState(false);
-  
+
   // Sales History List & Modal state
   const [salesHistory, setSalesHistory] = useState([]);
   const [showPosModal, setShowPosModal] = useState(false);
@@ -61,6 +78,7 @@ export default function Sales({ userProfile, branches, addToast }) {
   const [editingSale, setEditingSale] = useState(null);
   const [editCustomerId, setEditCustomerId] = useState('');
   const [editSaleDate, setEditSaleDate] = useState('');
+  const [editStoredReceiptNo, setEditStoredReceiptNo] = useState('');
   const [editCart, setEditCart] = useState([]);
   const [originalSaleItems, setOriginalSaleItems] = useState([]);
   const [editDiscount, setEditDiscount] = useState(0);
@@ -100,19 +118,40 @@ export default function Sales({ userProfile, branches, addToast }) {
   const [collectPaymentNotes, setCollectPaymentNotes] = useState('');
   const [isSubmittingPayment, setIsSubmittingPayment] = useState(false);
 
+  const resetPosForm = useCallback(() => {
+    setCart([]);
+    setSelectedCustomerId('');
+    setDiscount(0);
+    setTaxRate(0);
+    setPaidAmount('');
+    setCustomerGivenCash('');
+    setPaymentMethod('cash');
+    setReferenceNumber('');
+    setStoredReceiptNo('');
+    setNotes('');
+    setCustomerType('existing');
+    setNewCustName('');
+    setNewCustPhone('');
+    setNewCustAddress('');
+    setCustomProdCode('');
+    setCustomProdName('');
+    setCustomProdPrice('');
+    setCustomProdQty(1);
+    setCustomProdSize('');
+    setCustomProdCarton('');
+    setCustomProdCategory('');
+    setShowCustomProdForm(false);
+    setCartSearchQuery('');
+    setShowCartSearchSuggestions(false);
+  }, []);
+
   useEffect(() => {
     if (location.state?.openPos) {
-      setCart([]);
-      setSelectedCustomerId('');
-      setDiscount(0);
-      setTaxRate(0);
-      setPaidAmount('');
-      setReferenceNumber('');
-      setNotes('');
+      resetPosForm();
       setShowPosModal(true);
       window.history.replaceState({}, document.title);
     }
-  }, [location.state]);
+  }, [location.state, resetPosForm]);
 
   // POS Search/Select
   const [customerType, setCustomerType] = useState('existing'); // 'existing' or 'new'
@@ -158,6 +197,7 @@ export default function Sales({ userProfile, branches, addToast }) {
   const [paidAmount, setPaidAmount] = useState('');
   const [customerGivenCash, setCustomerGivenCash] = useState('');
   const [paymentMethod, setPaymentMethod] = useState('cash');
+  const [storedReceiptNo, setStoredReceiptNo] = useState('');
   const [referenceNumber, setReferenceNumber] = useState('');
   const [notes, setNotes] = useState('');
 
@@ -319,7 +359,9 @@ export default function Sales({ userProfile, branches, addToast }) {
       }
 
       if (historySearchQuery.trim()) {
-        const clean = historySearchQuery.trim();
+        const rawClean = historySearchQuery.trim();
+        const cleanNoHash = rawClean.replace(/^#+/, '').trim();
+        const clean = cleanNoHash || rawClean;
         const { data: matchedContacts } = await supabase
           .from('contacts')
           .select('id')
@@ -328,9 +370,9 @@ export default function Sales({ userProfile, branches, addToast }) {
 
         if (matchedContacts && matchedContacts.length > 0) {
           const contactIds = matchedContacts.map((c) => c.id).join(',');
-          query = query.or(`invoice_number.ilike.%${clean}%,notes.ilike.%${clean}%,customer_id.in.(${contactIds})`);
+          query = query.or(`invoice_number.ilike.%${clean}%,receipt_number.ilike.%${clean}%,receipt_number.ilike.%${rawClean}%,notes.ilike.%${clean}%,customer_id.in.(${contactIds})`);
         } else {
-          query = query.or(`invoice_number.ilike.%${clean}%,notes.ilike.%${clean}%`);
+          query = query.or(`invoice_number.ilike.%${clean}%,receipt_number.ilike.%${clean}%,receipt_number.ilike.%${rawClean}%,notes.ilike.%${clean}%`);
         }
       }
 
@@ -684,9 +726,9 @@ export default function Sales({ userProfile, branches, addToast }) {
 
   const handleCheckoutSubmit = async (e) => {
     e.preventDefault();
-    
+
     let customerId = selectedCustomerId;
-    
+
     if (customerType === 'new') {
       if (!newCustName.trim()) {
         showMessage('Please enter a Customer Name.', 'error');
@@ -884,6 +926,9 @@ export default function Sales({ userProfile, branches, addToast }) {
       const rawPaid = parseFloat(paidAmount) || 0.00;
       const initialPaid = Math.min(rawPaid, grandTotal);
 
+      const cleanUserNotes = notes.trim();
+      const cleanReceipt = storedReceiptNo.trim();
+
       // 1. Insert Sales Invoice
       const { data: saleData, error: saleError } = await supabase
         .from('sales')
@@ -897,7 +942,8 @@ export default function Sales({ userProfile, branches, addToast }) {
             paid_amount: 0.00, // Trigger will compute this from payments
             payment_status: 'unpaid', // Trigger will compute this
             created_by: userProfile.id,
-            notes: notes || null,
+            receipt_number: cleanReceipt || null,
+            notes: cleanUserNotes || null,
           },
         ])
         .select();
@@ -996,7 +1042,8 @@ export default function Sales({ userProfile, branches, addToast }) {
             payment_method: paymentMethod,
             transaction_type: 'customer_collection',
             reference_invoice_id: saleId,
-            notes: referenceNumber ? `Trx Ref: ${referenceNumber}` : (notes || null),
+            reference_number: referenceNumber ? referenceNumber.trim() : null,
+            notes: cleanUserNotes || null,
             created_by: userProfile.id,
           },
         ]);
@@ -1037,27 +1084,10 @@ export default function Sales({ userProfile, branches, addToast }) {
 
       // Reset state
       setCustomerType('existing');
-      setCart([]);
-      setSelectedCustomerId('');
-      setDiscount(0);
-      setTaxRate(0);
-      setPaidAmount('');
-      setReferenceNumber('');
-      setNotes('');
-      setNewCustName('');
-      setNewCustPhone('');
-      setNewCustAddress('');
-      setCustomProdCode('');
-      setCustomProdName('');
-      setCustomProdPrice('');
-      setCustomProdQty(1);
-      setCustomProdSize('');
-      setCustomProdCarton('');
-      setCustomProdCategory('');
-      setShowCustomProdForm(false);
+      resetPosForm();
       setShowCheckoutModal(false);
       setShowPosModal(false);
-      
+
       // Refresh inventory stock display
       fetchBranchInventory();
       fetchSalesHistory();
@@ -1116,7 +1146,7 @@ export default function Sales({ userProfile, branches, addToast }) {
       // Fetch returned and exchange replacement products logged for this invoice
       const invNumber = sale.invoice_number || '';
       const saleIdSub = sale.id ? sale.id.substring(0, 8) : '';
-      
+
       let movementsQuery = supabase
         .from('inventory_movements')
         .select(`
@@ -1204,7 +1234,8 @@ export default function Sales({ userProfile, branches, addToast }) {
     const taxAmt = parseFloat(sale.tax || 0);
     const computedTaxRate = subAfterDisc > 0 ? (taxAmt / subAfterDisc) * 100 : 0;
     setEditTaxRate(Math.round(computedTaxRate * 100) / 100);
-    setEditNotes(sale.notes || '');
+    setEditStoredReceiptNo(getSaleReceiptNo(sale));
+    setEditNotes(getSaleCleanNotes(sale));
     setEditProductSearch('');
     setShowEditSearchDropdown(false);
     setShowEditSaleModal(true);
@@ -1443,6 +1474,9 @@ export default function Sales({ userProfile, branches, addToast }) {
       const newStatus = currentPaid >= grandTotal - 0.01 ? 'paid' : (currentPaid > 0 ? 'partial' : 'unpaid');
 
       // 4. Update Sales Table
+      const cleanUserNotes = editNotes.trim();
+      const cleanReceipt = editStoredReceiptNo.trim();
+
       const { error: saleErr } = await supabase
         .from('sales')
         .update({
@@ -1453,7 +1487,8 @@ export default function Sales({ userProfile, branches, addToast }) {
           tax: taxAmt,
           net_amount: grandTotal,
           payment_status: newStatus,
-          notes: editNotes || null,
+          receipt_number: cleanReceipt || null,
+          notes: cleanUserNotes || null,
         })
         .eq('id', editingSale.id);
 
@@ -1622,7 +1657,7 @@ export default function Sales({ userProfile, branches, addToast }) {
       if (delErr) throw delErr;
 
       showMessage(`Invoice ${invNum} was deleted successfully and stock has been restored.`, 'success');
-      
+
       if (showSaleDetailsModal) {
         setShowSaleDetailsModal(false);
       }
@@ -1686,9 +1721,8 @@ export default function Sales({ userProfile, branches, addToast }) {
         payment_method: collectPaymentMethod,
         transaction_type: 'customer_collection',
         reference_invoice_id: sale.id,
-        notes: collectPaymentRef
-          ? `Ref: ${collectPaymentRef}${collectPaymentNotes ? ` - ${collectPaymentNotes}` : ''}`
-          : (collectPaymentNotes || null),
+        reference_number: collectPaymentRef ? collectPaymentRef.trim() : null,
+        notes: collectPaymentNotes ? collectPaymentNotes.trim() : null,
         created_by: userProfile?.id,
       }]);
 
@@ -1999,7 +2033,8 @@ export default function Sales({ userProfile, branches, addToast }) {
             payment_method: exchangePaymentMethod,
             transaction_type: 'customer_collection',
             reference_invoice_id: sale.id,
-            notes: `Exchange Extra Difference [${creditNoteNumber}]`,
+            reference_number: creditNoteNumber,
+            notes: 'Exchange Extra Difference',
             created_by: userProfile.id,
           }]);
 
@@ -2151,13 +2186,7 @@ export default function Sales({ userProfile, branches, addToast }) {
           )}
           {!showInvoicePrint && (
             <button className="btn btn-primary" onClick={() => {
-              setCart([]);
-              setSelectedCustomerId('');
-              setDiscount(0);
-              setTaxRate(0);
-              setPaidAmount('');
-              setReferenceNumber('');
-              setNotes('');
+              resetPosForm();
               setShowPosModal(true);
             }}>
               <Plus size={16} />
@@ -2177,7 +2206,7 @@ export default function Sales({ userProfile, branches, addToast }) {
               type="text"
               className="input-control"
               style={{ paddingLeft: '2.25rem', padding: '0.35rem 0.6rem 0.35rem 2.25rem', fontSize: '0.82rem' }}
-              placeholder="Search by invoice #, customer, phone..."
+              placeholder="Search by invoice #, receipt #, buyer, phone..."
               value={historySearchQuery}
               onChange={(e) => {
                 setHistorySearchQuery(e.target.value);
@@ -2187,129 +2216,150 @@ export default function Sales({ userProfile, branches, addToast }) {
           </div>
         </div>
         <div className="table-container" style={{ borderBottomLeftRadius: 0, borderBottomRightRadius: 0 }}>
-            <table>
-              <thead>
+          <table>
+            <thead>
+              <tr>
+                <th>SL</th>
+                <th>Invoice ID</th>
+                <th>Receipt No</th>
+                {userProfile?.role === 'owner' && <th>Branch</th>}
+                <th>Sale Date</th>
+                <th>Buyer Name</th>
+                <th>Net Value</th>
+                <th>Paid Amount</th>
+                <th>Dues</th>
+                <th>Payment Status</th>
+                <th style={{ minWidth: '240px', textAlign: 'center' }}>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {loading ? (
+                <TableLoading colSpan={userProfile?.role === 'owner' ? 11 : 10} message="Fetching sales records..." />
+              ) : salesHistory.length === 0 ? (
                 <tr>
-                  <th>SL</th>
-                  <th>Invoice ID</th>
-                  {userProfile?.role === 'owner' && <th>Branch</th>}
-                  <th>Sale Date</th>
-                  <th>Buyer Name</th>
-                  <th>Net Value</th>
-                  <th>Paid Amount</th>
-                  <th>Dues</th>
-                  <th>Payment Status</th>
-                  <th style={{ minWidth: '240px', textAlign: 'center' }}>Actions</th>
+                  <td colSpan={userProfile?.role === 'owner' ? 11 : 10} style={{ textAlign: 'center', padding: '2rem' }}>
+                    {historySearchQuery.trim() ? `No sales invoices found matching "${historySearchQuery}".` : 'No sales invoices recorded yet. Click "Create Invoice (POS)" to sell items.'}
+                  </td>
                 </tr>
-              </thead>
-              <tbody>
-                {loading ? (
-                  <TableLoading colSpan={userProfile?.role === 'owner' ? 10 : 9} message="Fetching sales records..." />
-                ) : salesHistory.length === 0 ? (
-                  <tr>
-                    <td colSpan={userProfile?.role === 'owner' ? 10 : 9} style={{ textAlign: 'center', padding: '2rem' }}>
-                      {historySearchQuery.trim() ? `No sales invoices found matching "${historySearchQuery}".` : 'No sales invoices recorded yet. Click "Create Invoice (POS)" to sell items.'}
-                    </td>
-                  </tr>
-                ) : (
-                  salesHistory.map((sale, index) => {
-                    const due = sale.net_amount - sale.paid_amount;
-                    const rowNumber = (salesPage - 1) * salesPageSize + index + 1;
-                    return (
-                      <tr key={sale.id}>
-                        <td>{rowNumber}</td>
-                        <td 
-                          style={{ fontFamily: 'monospace', fontWeight: 700, fontSize: '0.82rem', color: '#0284c7', cursor: 'pointer' }}
-                          onClick={() => handleOpenSaleDetails(sale)}
-                          title="Click to view full invoice breakdown"
-                        >
-                          {sale.invoice_number || `INV#${sale.id.substring(0, 8).toUpperCase()}`}
-                        </td>
-                        {userProfile?.role === 'owner' && (
-                          <td style={{ fontWeight: 600 }}>{branches.find(b => b.id === sale.branch_id)?.name || 'Unknown'}</td>
+              ) : (
+                salesHistory.map((sale, index) => {
+                  const due = sale.net_amount - sale.paid_amount;
+                  const rowNumber = (salesPage - 1) * salesPageSize + index + 1;
+                  const receiptNo = getSaleReceiptNo(sale);
+                  return (
+                    <tr key={sale.id}>
+                      <td>{rowNumber}</td>
+                      <td
+                        style={{ fontFamily: 'monospace', fontWeight: 700, fontSize: '0.82rem', color: '#0284c7', cursor: 'pointer' }}
+                        onClick={() => handleOpenSaleDetails(sale)}
+                        title="Click to view full invoice breakdown"
+                      >
+                        {sale.invoice_number || `INV#${sale.id.substring(0, 8).toUpperCase()}`}
+                      </td>
+                      <td style={{ fontFamily: 'monospace', fontSize: '0.82rem' }}>
+                        {receiptNo ? (
+                          <span
+                            style={{
+                              backgroundColor: '#f0f9ff',
+                              color: '#0369a1',
+                              border: '1px solid #bae6fd',
+                              padding: '0.15rem 0.45rem',
+                              borderRadius: '4px',
+                              fontWeight: 700,
+                              display: 'inline-block'
+                            }}
+                          >
+                            {receiptNo}
+                          </span>
+                        ) : (
+                          <span style={{ color: 'var(--text-muted)' }}>—</span>
                         )}
-                        <td>{new Date(sale.sale_date).toLocaleDateString()}</td>
-                        <td>
-                          <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{sale.contacts?.name || 'Walk-in Customer'}</div>
-                          {sale.contacts?.phone && (
-                            <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>{sale.contacts.phone}</div>
+                      </td>
+                      {userProfile?.role === 'owner' && (
+                        <td style={{ fontWeight: 600 }}>{branches.find(b => b.id === sale.branch_id)?.name || 'Unknown'}</td>
+                      )}
+                      <td>{new Date(sale.sale_date).toLocaleDateString()}</td>
+                      <td>
+                        <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{sale.contacts?.name || 'Walk-in Customer'}</div>
+                        {sale.contacts?.phone && (
+                          <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>{sale.contacts.phone}</div>
+                        )}
+                      </td>
+                      <td style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 600 }}>৳{formatAmount(sale.net_amount)}</td>
+                      <td style={{ fontFamily: 'Outfit, sans-serif', color: 'var(--success-text)' }}>৳{formatAmount(sale.paid_amount)}</td>
+                      <td style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 700, color: due > 0 ? 'var(--danger-text)' : 'inherit' }}>৳{formatAmount(due)}</td>
+                      <td>
+                        <span className={`badge badge-${sale.payment_status}`}>{sale.payment_status}</span>
+                      </td>
+                      <td style={{ textAlign: 'center' }}>
+                        <div style={{ display: 'inline-flex', gap: '0.35rem', justifyContent: 'center', alignItems: 'center' }}>
+                          {due > 0.01 && (
+                            <button
+                              className="btn btn-secondary btn-sm btn-icon"
+                              onClick={() => handleOpenPaymentModal(sale)}
+                              title={`Collect Payment (Due: ৳${formatAmount(due)})`}
+                              style={{ color: '#16a34a', padding: '0.35rem 0.45rem' }}
+                            >
+                              <DollarSign size={15} />
+                            </button>
                           )}
-                        </td>
-                        <td style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 600 }}>৳{formatAmount(sale.net_amount)}</td>
-                        <td style={{ fontFamily: 'Outfit, sans-serif', color: 'var(--success-text)' }}>৳{formatAmount(sale.paid_amount)}</td>
-                        <td style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 700, color: due > 0 ? 'var(--danger-text)' : 'inherit' }}>৳{formatAmount(due)}</td>
-                        <td>
-                          <span className={`badge badge-${sale.payment_status}`}>{sale.payment_status}</span>
-                        </td>
-                        <td style={{ textAlign: 'center' }}>
-                          <div style={{ display: 'inline-flex', gap: '0.35rem', justifyContent: 'center', alignItems: 'center' }}>
-                            {due > 0.01 && (
-                              <button
-                                className="btn btn-secondary btn-sm btn-icon"
-                                onClick={() => handleOpenPaymentModal(sale)}
-                                title={`Collect Payment (Due: ৳${formatAmount(due)})`}
-                                style={{ color: '#16a34a', padding: '0.35rem 0.45rem' }}
-                              >
-                                <DollarSign size={15} />
-                              </button>
-                            )}
-                            <button
-                              className="btn btn-secondary btn-sm btn-icon"
-                              onClick={() => handleOpenSaleDetails(sale)}
-                              title="View Invoice Details"
-                              style={{ color: '#0284c7', padding: '0.35rem 0.45rem' }}
-                            >
-                              <Eye size={15} />
-                            </button>
-                            <button
-                              className="btn btn-secondary btn-sm btn-icon"
-                              onClick={() => handleOpenEditSale(sale)}
-                              title="Edit Invoice"
-                              style={{ color: '#4f46e5', padding: '0.35rem 0.45rem' }}
-                            >
-                              <Edit size={15} />
-                            </button>
-                            <button
-                              className="btn btn-secondary btn-sm btn-icon"
-                              onClick={() => handleRePrint(sale)}
-                              title="Print Invoice / Challan"
-                              style={{ color: '#334155', padding: '0.35rem 0.45rem' }}
-                            >
-                              <Printer size={15} />
-                            </button>
-                            <button
-                              className="btn btn-secondary btn-sm btn-icon"
-                              onClick={() => handleOpenReturnModal(sale)}
-                              title="Process Sales Return / Credit Note"
-                              style={{ color: 'var(--warning-text, #d97706)', padding: '0.35rem 0.45rem' }}
-                            >
-                              <RotateCcw size={15} />
-                            </button>
-                            <button
-                              className="btn btn-secondary btn-sm btn-icon"
-                              onClick={() => handleDeleteSale(sale)}
-                              title="Delete Invoice (Restores Inventory Stock)"
-                              style={{ color: 'var(--danger, #ef4444)', padding: '0.35rem 0.45rem' }}
-                            >
-                              <Trash2 size={15} />
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
-          </div>
-          <Pagination
-            currentPage={salesPage}
-            totalCount={salesTotalCount}
-            pageSize={salesPageSize}
-            onPageChange={setSalesPage}
-            onPageSizeChange={setSalesPageSize}
-          />
+                          <button
+                            className="btn btn-secondary btn-sm btn-icon"
+                            onClick={() => handleOpenSaleDetails(sale)}
+                            title="View Invoice Details"
+                            style={{ color: '#0284c7', padding: '0.35rem 0.45rem' }}
+                          >
+                            <Eye size={15} />
+                          </button>
+                          <button
+                            className="btn btn-secondary btn-sm btn-icon"
+                            onClick={() => handleOpenEditSale(sale)}
+                            title="Edit Invoice"
+                            style={{ color: '#4f46e5', padding: '0.35rem 0.45rem' }}
+                          >
+                            <Edit size={15} />
+                          </button>
+                          <button
+                            className="btn btn-secondary btn-sm btn-icon"
+                            onClick={() => handleRePrint(sale)}
+                            title="Print Invoice / Challan"
+                            style={{ color: '#334155', padding: '0.35rem 0.45rem' }}
+                          >
+                            <Printer size={15} />
+                          </button>
+                          <button
+                            className="btn btn-secondary btn-sm btn-icon"
+                            onClick={() => handleOpenReturnModal(sale)}
+                            title="Process Sales Return / Credit Note"
+                            style={{ color: 'var(--warning-text, #d97706)', padding: '0.35rem 0.45rem' }}
+                          >
+                            <RotateCcw size={15} />
+                          </button>
+                          <button
+                            className="btn btn-secondary btn-sm btn-icon"
+                            onClick={() => handleDeleteSale(sale)}
+                            title="Delete Invoice (Restores Inventory Stock)"
+                            style={{ color: 'var(--danger, #ef4444)', padding: '0.35rem 0.45rem' }}
+                          >
+                            <Trash2 size={15} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
         </div>
+        <Pagination
+          currentPage={salesPage}
+          totalCount={salesTotalCount}
+          pageSize={salesPageSize}
+          onPageChange={setSalesPage}
+          onPageSizeChange={setSalesPageSize}
+        />
+      </div>
 
       {/* POS WORKSPACE MODAL */}
       {showPosModal && (
@@ -2317,7 +2367,10 @@ export default function Sales({ userProfile, branches, addToast }) {
           <div className="modal-content modal-xl">
             <div className="modal-header">
               <h3 className="modal-title">New Invoice (POS)</h3>
-              <button className="btn btn-secondary btn-sm" onClick={() => setShowPosModal(false)} style={{ borderRadius: '50%', padding: '0.4rem', border: 'none' }}>✕</button>
+              <button className="btn btn-secondary btn-sm" onClick={() => {
+                resetPosForm();
+                setShowPosModal(false);
+              }} style={{ borderRadius: '50%', padding: '0.4rem', border: 'none' }}>✕</button>
             </div>
             <div className="modal-body pos-layout">
               {/* Product Picker (Desktop Only) */}
@@ -2380,17 +2433,30 @@ export default function Sales({ userProfile, branches, addToast }) {
               <div className="pos-cart">
                 <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
 
-                  {/* Customer Selector Type Toggle */}
-                  <div className="form-group" style={{ marginBottom: '0.25rem' }}>
-                    <label style={{ display: 'block', marginBottom: '0.25rem', fontWeight: 600 }}>Customer Type</label>
-                    <select
-                      className="input-control"
-                      value={customerType}
-                      onChange={(e) => setCustomerType(e.target.value)}
-                    >
-                      <option value="existing">Existing Buyer</option>
-                      <option value="new">New Buyer</option>
-                    </select>
+                  {/* Customer Type & Stored Receipt No Grid */}
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.65rem' }}>
+                    <div className="form-group" style={{ marginBottom: '0.25rem' }}>
+                      <label style={{ display: 'block', marginBottom: '0.25rem', fontWeight: 600 }}>Customer Type</label>
+                      <select
+                        className="input-control"
+                        value={customerType}
+                        onChange={(e) => setCustomerType(e.target.value)}
+                      >
+                        <option value="existing">Existing Buyer</option>
+                        <option value="new">New Buyer</option>
+                      </select>
+                    </div>
+
+                    <div className="form-group" style={{ marginBottom: '0.25rem' }}>
+                      <label style={{ display: 'block', marginBottom: '0.25rem', fontWeight: 600 }}>Stored Receipt No</label>
+                      <input
+                        type="text"
+                        className="input-control"
+                        placeholder="e.g. REC-102 (optional)"
+                        value={storedReceiptNo}
+                        onChange={(e) => setStoredReceiptNo(e.target.value)}
+                      />
+                    </div>
                   </div>
 
                   {customerType === 'existing' ? (
@@ -3013,10 +3079,10 @@ export default function Sales({ userProfile, branches, addToast }) {
               </h3>
               <button className="btn btn-secondary btn-sm" onClick={() => setShowCheckoutModal(false)} style={{ borderRadius: '50%', padding: '0.4rem', border: 'none' }}>✕</button>
             </div>
-            
+
             <form onSubmit={handleCheckoutSubmit}>
               <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '1.15rem', padding: '1.25rem' }}>
-                
+
                 {/* TOTAL AMOUNT BANNER */}
                 <div style={{
                   background: 'var(--primary-light, rgba(37,99,235,0.08))',
@@ -3175,8 +3241,22 @@ export default function Sales({ userProfile, branches, addToast }) {
                   }
                 })()}
 
-                {/* OPTIONAL NOTES & TRX */}
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                {/* OPTIONAL NOTES, RECEIPT & TRX */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.65rem' }}>
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label style={{ fontSize: '0.78rem', color: 'var(--text-muted)', display: 'block', marginBottom: '0.2rem' }}>
+                      Stored Receipt No
+                    </label>
+                    <input
+                      type="text"
+                      className="input-control"
+                      placeholder="e.g. REC-102"
+                      style={{ fontSize: '0.82rem', padding: '0.35rem 0.5rem' }}
+                      value={storedReceiptNo}
+                      onChange={(e) => setStoredReceiptNo(e.target.value)}
+                    />
+                  </div>
+
                   <div className="form-group" style={{ marginBottom: 0 }}>
                     <label style={{ fontSize: '0.78rem', color: 'var(--text-muted)', display: 'block', marginBottom: '0.2rem' }}>
                       Reference No
@@ -3198,7 +3278,7 @@ export default function Sales({ userProfile, branches, addToast }) {
                     <input
                       type="text"
                       className="input-control"
-                      placeholder="Enter notes (optional)..."
+                      placeholder="Enter notes..."
                       style={{ fontSize: '0.82rem', padding: '0.35rem 0.5rem' }}
                       value={notes}
                       onChange={(e) => setNotes(e.target.value)}
@@ -3235,21 +3315,21 @@ export default function Sales({ userProfile, branches, addToast }) {
                 <Printer size={18} />
                 <span>Sales Challan Print Preview — {activeInvoice.invoice_number || `INV#${activeInvoice.id.substring(0, 8).toUpperCase()}`}</span>
               </h3>
-              <button 
-                className="btn btn-secondary btn-sm" 
+              <button
+                className="btn btn-secondary btn-sm"
                 onClick={() => setShowInvoicePrint(false)}
                 style={{ borderRadius: '50%', padding: '0.4rem', border: 'none' }}
               >
                 ✕
               </button>
             </div>
-            
+
             <div className="modal-body" style={{ overflowY: 'auto', padding: '1.25rem', backgroundColor: '#f8fafc' }}>
-              <div 
-                className="invoice-print-view" 
-                style={{ 
-                  margin: '0 auto', 
-                  border: '1px solid #000', 
+              <div
+                className="invoice-print-view"
+                style={{
+                  margin: '0 auto',
+                  border: '1px solid #000',
                   backgroundColor: '#ffffff',
                   padding: '0.8rem 1rem',
                   position: 'relative',
@@ -3281,10 +3361,10 @@ export default function Sales({ userProfile, branches, addToast }) {
                 {/* 1. TOP HEADER WITH OFFICIAL LOGO & TITLE */}
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1.5px solid #000', paddingBottom: '0.3rem' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.55rem' }}>
-                    <img 
-                      src={almasLogo} 
-                      alt="Almas Logo" 
-                      style={{ width: '38px', height: '38px', objectFit: 'contain', border: '1px solid #000', padding: '1px', background: '#fff', borderRadius: '3px' }} 
+                    <img
+                      src={almasLogo}
+                      alt="Almas Logo"
+                      style={{ width: '38px', height: '38px', objectFit: 'contain', border: '1px solid #000', padding: '1px', background: '#fff', borderRadius: '3px' }}
                     />
                     <div>
                       <h1 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 900, letterSpacing: '0.2px', color: '#000', textTransform: 'uppercase', fontFamily: 'Outfit, sans-serif', lineHeight: 1.1 }}>
@@ -3342,6 +3422,18 @@ export default function Sales({ userProfile, branches, addToast }) {
                     </div>
                   </div>
 
+                  {getSaleReceiptNo(activeInvoice) && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div style={{ display: 'flex', gap: '0.3rem', width: '58%' }}>
+                        <span style={{ fontWeight: 700, whiteSpace: 'nowrap' }}>Receipt No. :</span>
+                        <span style={{ fontWeight: 800, fontFamily: 'Outfit, sans-serif', letterSpacing: '0.2px', borderBottom: '1px dotted #000', flex: 1, paddingLeft: '0.2rem', color: '#0369a1' }}>
+                          {getSaleReceiptNo(activeInvoice)}
+                        </span>
+                      </div>
+                      <div style={{ width: '38%' }}></div>
+                    </div>
+                  )}
+
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <div style={{ display: 'flex', gap: '0.3rem', width: '58%' }}>
                       <span style={{ fontWeight: 700, whiteSpace: 'nowrap' }}>Messrs :</span>
@@ -3386,11 +3478,11 @@ export default function Sales({ userProfile, branches, addToast }) {
                 </div>
 
                 {/* 3. GOODS TABLE */}
-                <table 
-                  style={{ 
-                    width: '100%', 
-                    borderCollapse: 'collapse', 
-                    marginTop: '0.85rem', 
+                <table
+                  style={{
+                    width: '100%',
+                    borderCollapse: 'collapse',
+                    marginTop: '0.85rem',
                     border: '1.5px solid #000',
                     fontSize: '0.84rem'
                   }}
@@ -3553,7 +3645,7 @@ export default function Sales({ userProfile, branches, addToast }) {
 
             <form onSubmit={handleProcessReturn} style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden', margin: 0 }}>
               <div className="modal-body" style={{ flex: 1, overflowY: 'auto', padding: '1.25rem', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-                
+
                 {/* Invoice Summary Metric Bar */}
                 <div style={{
                   display: 'grid',
@@ -4378,7 +4470,7 @@ export default function Sales({ userProfile, branches, addToast }) {
 
             {/* Modal Body */}
             <div className="modal-body" style={{ overflowY: 'auto', padding: '1.25rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-              
+
               {/* Clean Meta Info Bar */}
               <div style={{
                 display: 'grid',
@@ -4403,6 +4495,12 @@ export default function Sales({ userProfile, branches, addToast }) {
                   <span style={{ color: 'var(--text-muted)', fontSize: '0.74rem', display: 'block', fontWeight: 600 }}>INVOICE DATE</span>
                   <strong>{new Date(selectedSaleForDetails.sale_date).toLocaleDateString()}</strong>
                 </div>
+                {getSaleReceiptNo(selectedSaleForDetails) && (
+                  <div>
+                    <span style={{ color: 'var(--text-muted)', fontSize: '0.74rem', display: 'block', fontWeight: 600 }}>STORED RECEIPT NO</span>
+                    <strong style={{ color: '#0284c7' }}>{getSaleReceiptNo(selectedSaleForDetails)}</strong>
+                  </div>
+                )}
               </div>
 
               {/* ITEMS & TOTALS SECTION */}
@@ -4450,14 +4548,14 @@ export default function Sales({ userProfile, branches, addToast }) {
                 });
 
                 const currentItems = [...retainedItems, ...replacementItems];
-                const currentSubtotal = hasModifications 
+                const currentSubtotal = hasModifications
                   ? currentItems.reduce((acc, it) => acc + it.total, 0)
                   : saleDetailItems.reduce((acc, it) => acc + ((parseFloat(it.quantity) || 0) * (parseFloat(it.unit_price) || 0)), 0);
                 const initialSubtotal = saleDetailItems.reduce((acc, it) => acc + ((parseFloat(it.quantity) || 0) * (parseFloat(it.unit_price) || 0)), 0) || (selectedSaleForDetails.total_amount || 0);
-                
+
                 const discount = parseFloat(selectedSaleForDetails.discount) || 0;
                 const tax = parseFloat(selectedSaleForDetails.tax) || 0;
-                const currentNet = hasModifications 
+                const currentNet = hasModifications
                   ? Math.max(0, currentSubtotal - discount + tax)
                   : (parseFloat(selectedSaleForDetails.net_amount) || Math.max(0, currentSubtotal - discount + tax));
                 const paidAmount = parseFloat(selectedSaleForDetails.paid_amount) || 0;
@@ -4506,7 +4604,7 @@ export default function Sales({ userProfile, branches, addToast }) {
                                     const initialTotal = initialQty * price;
                                     const itemSize = item.size || '—';
                                     const itemCarton = item.number_of_carton !== undefined && item.number_of_carton !== null ? item.number_of_carton : 0;
-                                    
+
                                     const returnedQty = saleDetailReturns
                                       .filter((r) => r.product?.id === item.product_id || r.product_id === item.product_id)
                                       .reduce((sum, r) => sum + (parseFloat(r.quantity) || 0), 0);
@@ -4893,7 +4991,7 @@ export default function Sales({ userProfile, branches, addToast }) {
 
             <form onSubmit={handlePromptSaveEditedSale} style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
               <div className="modal-body" style={{ overflowY: 'auto', padding: '1.25rem', display: 'flex', flexDirection: 'column', gap: '1.15rem' }}>
-                
+
                 {/* Customer & Date Selection */}
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '0.85rem' }}>
                   <div className="form-group" style={{ marginBottom: 0 }}>
@@ -5189,6 +5287,19 @@ export default function Sales({ userProfile, branches, addToast }) {
                         className="input-control"
                         value={editTaxRate}
                         onChange={(e) => setEditTaxRate(Math.max(0, parseFloat(e.target.value) || 0))}
+                      />
+                    </div>
+
+                    <div className="form-group" style={{ marginBottom: 0 }}>
+                      <label style={{ fontSize: '0.8rem', fontWeight: 600, display: 'block', marginBottom: '0.25rem' }}>
+                        Stored Receipt No (Optional)
+                      </label>
+                      <input
+                        type="text"
+                        className="input-control"
+                        placeholder="e.g. REC-102"
+                        value={editStoredReceiptNo}
+                        onChange={(e) => setEditStoredReceiptNo(e.target.value)}
                       />
                     </div>
 

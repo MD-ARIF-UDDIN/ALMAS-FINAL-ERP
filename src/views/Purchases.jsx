@@ -583,7 +583,8 @@ export default function Purchases({ userProfile, branches, addToast }) {
             payment_method: paymentMethod,
             transaction_type: 'supplier_payment',
             reference_invoice_id: purchaseId,
-            notes: referenceNumber ? `Trx Ref: ${referenceNumber}` : null,
+            reference_number: referenceNumber ? referenceNumber.trim() : null,
+            notes: null,
             created_by: userProfile.id,
           },
         ]);

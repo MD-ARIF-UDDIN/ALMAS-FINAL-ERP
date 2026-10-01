@@ -26,7 +26,8 @@ import {
   XCircle,
   History,
   Send,
-  AlertTriangle
+  AlertTriangle,
+  Edit
 } from 'lucide-react';
 import { TableLoading } from '../components/TableLoading';
 import Pagination from '../components/Pagination';
@@ -34,14 +35,24 @@ import { formatAmount, formatPlainNumber } from '../utils/format';
 
 export const getChallanStatus = (ch) => {
   if (!ch) return 'approved';
-  if (ch.status === 'pending' || ch.status === 'rejected' || ch.status === 'approved') {
-    return ch.status;
-  }
+  if (ch.status) return ch.status;
   if (ch.notes && typeof ch.notes === 'string') {
-    if (ch.notes.startsWith('[STATUS:PENDING]')) return 'pending';
-    if (ch.notes.startsWith('[STATUS:REJECTED')) return 'rejected';
+    if (ch.notes.includes('[STATUS:PENDING]')) return 'pending';
+    if (ch.notes.includes('[STATUS:REJECTED')) return 'rejected';
   }
   return 'approved';
+};
+
+export const getChallanDiscount = (ch) => {
+  if (!ch) return 0;
+  if (ch.discount !== undefined && ch.discount !== null && !isNaN(parseFloat(ch.discount))) {
+    return parseFloat(ch.discount);
+  }
+  if (ch.notes && typeof ch.notes === 'string') {
+    const match = ch.notes.match(/\[DISCOUNT:([0-9.]+)\]/);
+    if (match) return parseFloat(match[1]) || 0;
+  }
+  return 0;
 };
 
 export const getChallanCleanNotes = (ch) => {
@@ -49,6 +60,7 @@ export const getChallanCleanNotes = (ch) => {
   let str = ch.notes;
   str = str.replace(/\[STATUS:PENDING\]\s*/g, '');
   str = str.replace(/\[STATUS:REJECTED(:[^\]]*)?\]\s*/g, '');
+  str = str.replace(/\[DISCOUNT:([0-9.]+)\]\s*/g, '');
   return str.trim();
 };
 
@@ -80,7 +92,9 @@ export default function BranchChallans({ userProfile, branches = [], addToast })
     (isOwner && selectedBranchId === 'all')
   );
 
-  const isDirectDispatch = isOwner || role === 'factory_manager' || activeBranchObj?.is_factory;
+  // Direct dispatch only applies when operating directly from the Factory branch.
+  // Any challan created from a Showroom perspective requires Factory approval before stock is dispatched.
+  const isDirectDispatch = Boolean(activeBranchObj?.is_factory && role !== 'staff');
 
   // State lists
   const [challans, setChallans] = useState([]);
@@ -97,6 +111,7 @@ export default function BranchChallans({ userProfile, branches = [], addToast })
 
   // Modals
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [showEditChallanModal, setShowEditChallanModal] = useState(false);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [showPaymentHistoryModal, setShowPaymentHistoryModal] = useState(false);
   const [showPrintModal, setShowPrintModal] = useState(false);
@@ -104,6 +119,7 @@ export default function BranchChallans({ userProfile, branches = [], addToast })
   const [showRejectModal, setShowRejectModal] = useState(false);
   const [showRejectChallanModal, setShowRejectChallanModal] = useState(false);
   const [activeChallan, setActiveChallan] = useState(null);
+  const [editingChallan, setEditingChallan] = useState(null);
   const [selectedPaymentForAction, setSelectedPaymentForAction] = useState(null);
   const [selectedChallanForReject, setSelectedChallanForReject] = useState(null);
   const [rejectionReason, setRejectionReason] = useState('');
@@ -122,10 +138,22 @@ export default function BranchChallans({ userProfile, branches = [], addToast })
   const [vehicleNo, setVehicleNo] = useState('');
   const [driverName, setDriverName] = useState('');
   const [notes, setNotes] = useState('');
+  const [challanDiscount, setChallanDiscount] = useState('');
   const [challanItems, setChallanItems] = useState([
     { productId: '', quantity: 1, unitPrice: 0.00, totalPrice: 0.00 }
   ]);
   const [isSubmittingChallan, setIsSubmittingChallan] = useState(false);
+
+  // Edit Challan Form State (For pending challans)
+  const [editFromBranchId, setEditFromBranchId] = useState('');
+  const [editToBranchId, setEditToBranchId] = useState('');
+  const [editChallanDate, setEditChallanDate] = useState('');
+  const [editVehicleNo, setEditVehicleNo] = useState('');
+  const [editDriverName, setEditDriverName] = useState('');
+  const [editNotes, setEditNotes] = useState('');
+  const [editChallanDiscount, setEditChallanDiscount] = useState('');
+  const [editChallanItems, setEditChallanItems] = useState([]);
+  const [isSavingEditChallan, setIsSavingEditChallan] = useState(false);
 
   // Payment Form State (Branch submits request / Owner records payment)
   const [payAmount, setPayAmount] = useState('');
@@ -183,7 +211,7 @@ export default function BranchChallans({ userProfile, branches = [], addToast })
         query = query.or(`from_branch_id.eq.${selectedBranchId},to_branch_id.eq.${selectedBranchId}`);
       }
 
-      if (statusFilter !== 'all') {
+      if (statusFilter !== 'all' && ['unpaid', 'partial', 'paid'].includes(statusFilter)) {
         query = query.eq('payment_status', statusFilter);
       }
 
@@ -339,8 +367,14 @@ export default function BranchChallans({ userProfile, branches = [], addToast })
     setChallanItems(updated);
   };
 
-  const getNewChallanGrandTotal = () => {
+  const getNewChallanSubtotal = () => {
     return challanItems.reduce((sum, item) => sum + (parseFloat(item.totalPrice) || 0), 0);
+  };
+
+  const getNewChallanGrandTotal = () => {
+    const sub = getNewChallanSubtotal();
+    const disc = parseFloat(challanDiscount) || 0;
+    return Math.max(0, sub - disc);
   };
 
   // Submit Create Delivery Challan / Requisition
@@ -362,10 +396,14 @@ export default function BranchChallans({ userProfile, branches = [], addToast })
 
     setIsSubmittingChallan(true);
     try {
-      const grandTotal = getNewChallanGrandTotal();
+      const subtotal = getNewChallanSubtotal();
+      const disc = parseFloat(challanDiscount) || 0;
+      const grandTotal = Math.max(0, subtotal - disc);
       const challanNo = `CHL-${Date.now().toString().slice(-6)}`;
       const cleanUserNotes = notes.trim();
-      const formattedNotes = isDirectDispatch ? (cleanUserNotes || null) : `[STATUS:PENDING] ${cleanUserNotes}`.trim();
+
+      const requiresApproval = !activeBranchObj?.is_factory || role === 'staff' || role === 'branch_manager';
+      const challanStatus = requiresApproval ? 'pending' : 'approved';
 
       // 1. Insert Challan Header
       const { data: challanData, error: challanErr } = await supabase
@@ -376,13 +414,15 @@ export default function BranchChallans({ userProfile, branches = [], addToast })
             from_branch_id: fromBranchId,
             to_branch_id: toBranchId,
             total_bill_amount: grandTotal,
+            discount: disc,
+            status: challanStatus,
             paid_amount: 0.00,
             due_amount: grandTotal,
             payment_status: 'unpaid',
             challan_date: challanDate,
             vehicle_no: vehicleNo.trim() || null,
             driver_name: driverName.trim() || null,
-            notes: formattedNotes,
+            notes: cleanUserNotes || null,
             created_by: userProfile?.id,
           },
         ])
@@ -409,8 +449,8 @@ export default function BranchChallans({ userProfile, branches = [], addToast })
       const { error: itemsErr } = await supabase.from('branch_challan_items').insert(itemsPayload);
       if (itemsErr) throw itemsErr;
 
-      // 3. If Direct Dispatch by Factory/Owner, increment Destination Branch Inventory immediately
-      if (isDirectDispatch) {
+      // 3. If Direct Dispatch by Factory, increment Destination Branch Inventory immediately
+      if (!requiresApproval) {
         for (const it of validItems) {
           const q = parseInt(it.quantity) || 0;
           const { data: existingInv } = await supabase
@@ -433,7 +473,7 @@ export default function BranchChallans({ userProfile, branches = [], addToast })
         }
         showMessage(`Delivery Challan #${challanNo} created & dispatched successfully!`, 'success');
       } else {
-        showMessage(`Challan Requisition #${challanNo} submitted! Awaiting Factory approval before dispatch.`, 'success');
+        showMessage(`Challan #${challanNo} created! Awaiting Factory approval before dispatch.`, 'success');
       }
 
       setShowCreateModal(false);
@@ -447,6 +487,157 @@ export default function BranchChallans({ userProfile, branches = [], addToast })
     }
   };
 
+  // --- EDIT PENDING CHALLAN HANDLERS ---
+  const handleOpenEditChallan = async (challanObj) => {
+    setEditingChallan(challanObj);
+    setEditFromBranchId(challanObj.from_branch_id || '');
+    setEditToBranchId(challanObj.to_branch_id || '');
+    setEditChallanDate(challanObj.challan_date || new Date().toISOString().split('T')[0]);
+    setEditVehicleNo(challanObj.vehicle_no || '');
+    setEditDriverName(challanObj.driver_name || '');
+    setEditNotes(getChallanCleanNotes(challanObj));
+    const disc = getChallanDiscount(challanObj);
+    setEditChallanDiscount(disc > 0 ? disc : '');
+
+    try {
+      let items = challanObj.items || [];
+      if (items.length === 0) {
+        const { data: fetchedItems, error: fErr } = await supabase
+          .from('branch_challan_items')
+          .select('*')
+          .eq('challan_id', challanObj.id);
+        if (fErr) throw fErr;
+        items = fetchedItems || [];
+      }
+
+      const formatted = items.map((it) => ({
+        id: it.id,
+        productId: it.product_id,
+        quantity: it.dispatched_qty || 1,
+        unitPrice: it.unit_transfer_price || 0,
+        totalPrice: it.total_price || 0,
+      }));
+
+      setEditChallanItems(
+        formatted.length > 0 ? formatted : [{ productId: '', quantity: 1, unitPrice: 0.00, totalPrice: 0.00 }]
+      );
+      setShowEditChallanModal(true);
+    } catch (err) {
+      console.error('Error fetching items for edit:', err);
+      showMessage('Failed to load challan items.', 'error');
+    }
+  };
+
+  const addEditChallanItemRow = () => {
+    setEditChallanItems([...editChallanItems, { productId: '', quantity: 1, unitPrice: 0.00, totalPrice: 0.00 }]);
+  };
+
+  const removeEditChallanItemRow = (index) => {
+    if (editChallanItems.length <= 1) return;
+    setEditChallanItems(editChallanItems.filter((_, idx) => idx !== index));
+  };
+
+  const updateEditChallanItemRow = (index, field, value) => {
+    const updated = [...editChallanItems];
+    const row = { ...updated[index] };
+
+    if (field === 'productId') {
+      row.productId = value;
+      const matchedProd = catalogProducts.find((p) => p.id === value);
+      if (matchedProd) {
+        row.unitPrice = parseFloat(matchedProd.sale_price) || parseFloat(matchedProd.purchase_price) || 0;
+      }
+    } else if (field === 'quantity') {
+      row.quantity = value;
+    } else if (field === 'unitPrice') {
+      row.unitPrice = value;
+    }
+
+    const qty = parseInt(row.quantity) || 0;
+    const price = parseFloat(row.unitPrice) || 0;
+    row.totalPrice = qty * price;
+    updated[index] = row;
+    setEditChallanItems(updated);
+  };
+
+  const getEditChallanSubtotal = () => {
+    return editChallanItems.reduce((sum, item) => sum + (parseFloat(item.totalPrice) || 0), 0);
+  };
+
+  const getEditChallanGrandTotal = () => {
+    const sub = getEditChallanSubtotal();
+    const disc = parseFloat(editChallanDiscount) || 0;
+    return Math.max(0, sub - disc);
+  };
+
+  const handleSaveEditChallan = async (e) => {
+    e.preventDefault();
+    if (!editingChallan) return;
+
+    const validItems = editChallanItems.filter((it) => it.productId && (parseInt(it.quantity) || 0) > 0);
+    if (validItems.length === 0) {
+      showMessage('Please add at least one product with valid quantity.', 'error');
+      return;
+    }
+
+    setIsSavingEditChallan(true);
+    try {
+      const subtotal = getEditChallanSubtotal();
+      const disc = parseFloat(editChallanDiscount) || 0;
+      const grandTotal = Math.max(0, subtotal - disc);
+      const cleanUserNotes = editNotes.trim();
+
+      // 1. Update Challan Header
+      const { error: updErr } = await supabase
+        .from('branch_challans')
+        .update({
+          from_branch_id: editFromBranchId,
+          to_branch_id: editToBranchId,
+          total_bill_amount: grandTotal,
+          discount: disc,
+          status: editingChallan.status || 'pending',
+          due_amount: Math.max(0, grandTotal - (parseFloat(editingChallan.paid_amount) || 0)),
+          challan_date: editChallanDate,
+          vehicle_no: editVehicleNo.trim() || null,
+          driver_name: editDriverName.trim() || null,
+          notes: cleanUserNotes || null,
+        })
+        .eq('id', editingChallan.id);
+
+      if (updErr) throw updErr;
+
+      // 2. Replace Line Items in database
+      await supabase.from('branch_challan_items').delete().eq('challan_id', editingChallan.id);
+
+      const itemsPayload = validItems.map((it) => {
+        const q = parseInt(it.quantity) || 0;
+        const p = parseFloat(it.unitPrice) || 0;
+        return {
+          challan_id: editingChallan.id,
+          product_id: it.productId,
+          dispatched_qty: q,
+          sold_qty: 0,
+          remaining_qty: q,
+          unit_transfer_price: p,
+          total_price: q * p,
+        };
+      });
+
+      const { error: itemsErr } = await supabase.from('branch_challan_items').insert(itemsPayload);
+      if (itemsErr) throw itemsErr;
+
+      showMessage(`Challan #${editingChallan.challan_no} updated successfully!`, 'success');
+      setShowEditChallanModal(false);
+      setEditingChallan(null);
+      fetchChallans();
+    } catch (err) {
+      console.error('Error updating challan:', err);
+      showMessage(err.message || 'Failed to update challan.', 'error');
+    } finally {
+      setIsSavingEditChallan(false);
+    }
+  };
+
   // Factory / Owner Action: Approve Pending Challan Requisition
   const handleApproveChallan = async (challanObj) => {
     if (!isOwner && role !== 'factory_manager' && !activeBranchObj?.is_factory) {
@@ -455,7 +646,7 @@ export default function BranchChallans({ userProfile, branches = [], addToast })
     }
 
     const confirm = window.confirm(
-      `Approve and dispatch Challan #${challanObj.challan_no} to "${challanObj.to_branch?.name || 'Branch'}"?\nThis will immediately credit the items to their branch inventory.`
+      `Approve and dispatch Challan #${challanObj.challan_no} to "${challanObj.to_branch?.name || 'Branch'}"?\nThis will credit the items to their inventory and auto-approve any submitted payments.`
     );
     if (!confirm) return;
 
@@ -496,17 +687,66 @@ export default function BranchChallans({ userProfile, branches = [], addToast })
         }
       }
 
-      // 3. Update Challan Notes to remove [STATUS:PENDING]
+      // 3. Auto-Approve any pending payments attached to this challan
+      const { data: pendingPaymentsForChallan } = await supabase
+        .from('branch_payments')
+        .select('*')
+        .eq('challan_id', challanObj.id)
+        .eq('status', 'pending');
+
+      let approvedPaymentSum = 0;
+      if (pendingPaymentsForChallan && pendingPaymentsForChallan.length > 0) {
+        approvedPaymentSum = pendingPaymentsForChallan.reduce((s, p) => s + (parseFloat(p.amount) || 0), 0);
+        await supabase
+          .from('branch_payments')
+          .update({
+            status: 'approved',
+            approved_by: userProfile?.id,
+            approved_at: new Date().toISOString(),
+          })
+          .eq('challan_id', challanObj.id)
+          .eq('status', 'pending');
+
+        // Credit factory cash ledger for auto-approved payments
+        for (const p of pendingPaymentsForChallan) {
+          await supabase.from('cash_ledger').insert([
+            {
+              branch_id: challanObj.from_branch_id || selectedBranchId,
+              amount_in: parseFloat(p.amount) || 0,
+              amount_out: 0,
+              reference_id: challanObj.id,
+              description: `Settlement Approved: Challan #${challanObj.challan_no} from ${challanObj.to_branch?.name || 'Branch'} (${p.payment_method})`,
+              transaction_date: p.payment_date ? new Date(p.payment_date).toISOString() : new Date().toISOString(),
+              created_by: userProfile?.id,
+            },
+          ]);
+        }
+      }
+
+      const totalBill = parseFloat(challanObj.total_bill_amount) || 0;
+      const currentPaid = parseFloat(challanObj.paid_amount) || 0;
+      const newPaid = currentPaid + approvedPaymentSum;
+      const newDue = Math.max(0, totalBill - newPaid);
+      const newPaymentStatus = newDue <= 0.01 && totalBill > 0 ? 'paid' : (newPaid > 0 ? 'partial' : 'unpaid');
+
+      // 4. Update Challan status and paid/due amounts
       const cleanNotes = getChallanCleanNotes(challanObj);
       const { error: updErr } = await supabase
         .from('branch_challans')
-        .update({ notes: cleanNotes || null })
+        .update({
+          status: 'approved',
+          notes: cleanNotes || null,
+          paid_amount: newPaid,
+          due_amount: newDue,
+          payment_status: newPaymentStatus,
+        })
         .eq('id', challanObj.id);
 
       if (updErr) throw updErr;
 
-      showMessage(`Challan #${challanObj.challan_no} approved & items dispatched to ${challanObj.to_branch?.name || 'Branch'}!`, 'success');
+      showMessage(`Challan #${challanObj.challan_no} approved & payments auto-confirmed!`, 'success');
       fetchChallans();
+      fetchBranchPayments();
     } catch (err) {
       console.error('Error approving challan:', err);
       showMessage(err.message || 'Failed to approve challan.', 'error');
@@ -530,12 +770,14 @@ export default function BranchChallans({ userProfile, branches = [], addToast })
     setLoading(true);
     try {
       const cleanNotes = getChallanCleanNotes(selectedChallanForReject);
-      const reasonText = challanRejectionReason.trim() || 'Request rejected by Factory / Owner';
-      const updatedNotes = `[STATUS:REJECTED:${reasonText}] ${cleanNotes}`.trim();
+      const reasonText = challanRejectionReason.trim();
 
       const { error: rejErr } = await supabase
         .from('branch_challans')
-        .update({ notes: updatedNotes })
+        .update({
+          status: 'rejected',
+          notes: reasonText ? `${reasonText}${cleanNotes ? ` - ${cleanNotes}` : ''}` : (cleanNotes || null),
+        })
         .eq('id', selectedChallanForReject.id);
 
       if (rejErr) throw rejErr;
@@ -558,6 +800,7 @@ export default function BranchChallans({ userProfile, branches = [], addToast })
     setVehicleNo('');
     setDriverName('');
     setNotes('');
+    setChallanDiscount('');
     setChallanItems([{ productId: '', quantity: 1, unitPrice: 0.00, totalPrice: 0.00 }]);
   };
 
@@ -810,8 +1053,9 @@ export default function BranchChallans({ userProfile, branches = [], addToast })
             className="btn btn-primary" 
             onClick={() => {
               resetChallanForm();
-              if (!isOwner && myBranchId) {
-                setToBranchId(myBranchId);
+              const destBranchId = !isOwner ? myBranchId : (activeBranchObj && !activeBranchObj.is_factory ? activeBranchObj.id : '');
+              if (destBranchId) {
+                setToBranchId(destBranchId);
               }
               setShowCreateModal(true);
             }}
@@ -1068,6 +1312,7 @@ export default function BranchChallans({ userProfile, branches = [], addToast })
                 <th>Items</th>
                 <th>Sold / Total Qty</th>
                 <th style={{ textAlign: 'right' }}>Total Bill</th>
+                <th style={{ textAlign: 'right' }}>Discount</th>
                 <th style={{ textAlign: 'right' }}>{isFactoryPerspective ? 'Received' : 'Paid'}</th>
                 <th style={{ textAlign: 'right' }}>{isFactoryPerspective ? 'Receivable' : 'Due'}</th>
                 <th style={{ textAlign: 'center' }}>Status</th>
@@ -1076,10 +1321,10 @@ export default function BranchChallans({ userProfile, branches = [], addToast })
             </thead>
             <tbody>
               {loading ? (
-                <TableLoading colSpan={10} message="Loading branch challans..." />
+                <TableLoading colSpan={11} message="Loading branch challans..." />
               ) : filteredChallans.length === 0 ? (
                 <tr>
-                  <td colSpan={10} style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-muted)' }}>
+                  <td colSpan={11} style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-muted)' }}>
                     No challans found matching your filter criteria.
                   </td>
                 </tr>
@@ -1088,6 +1333,7 @@ export default function BranchChallans({ userProfile, branches = [], addToast })
                   const totalBill = parseFloat(ch.total_bill_amount) || 0;
                   const paid = parseFloat(ch.paid_amount) || 0;
                   const due = parseFloat(ch.due_amount) || 0;
+                  const discountVal = getChallanDiscount(ch);
 
                   const itemsCount = (ch.items || []).length;
                   const totalQty = (ch.items || []).reduce((s, it) => s + (it.dispatched_qty || 0), 0);
@@ -1160,6 +1406,9 @@ export default function BranchChallans({ userProfile, branches = [], addToast })
                       </td>
                       <td style={{ textAlign: 'right', fontWeight: 700, fontFamily: 'Outfit, sans-serif' }}>
                         ৳{formatAmount(totalBill)}
+                      </td>
+                      <td style={{ textAlign: 'right', fontWeight: 600, color: discountVal > 0 ? '#dc2626' : 'var(--text-muted)', fontFamily: 'Outfit, sans-serif', fontSize: '0.82rem' }}>
+                        {discountVal > 0 ? `-৳${formatAmount(discountVal)}` : '—'}
                       </td>
                       <td style={{ textAlign: 'right', color: '#059669', fontWeight: 700, fontFamily: 'Outfit, sans-serif' }}>
                         ৳{formatAmount(paid)}
@@ -1236,6 +1485,16 @@ export default function BranchChallans({ userProfile, branches = [], addToast })
                           {/* If Challan is Pending Approval */}
                           {isPending && (
                             <>
+                              <button
+                                type="button"
+                                className="btn btn-secondary btn-sm"
+                                onClick={() => handleOpenEditChallan(ch)}
+                                style={{ color: '#2563eb', borderColor: '#bfdbfe', backgroundColor: '#eff6ff', padding: '0.25rem 0.5rem', fontSize: '0.75rem' }}
+                                title="Edit Pending Challan"
+                              >
+                                <Edit size={13} />
+                                <span>Edit</span>
+                              </button>
                               {(isOwner || isFactoryPerspective || role === 'factory_manager') ? (
                                 <div style={{ display: 'inline-flex', gap: '0.3rem' }}>
                                   <button
@@ -1275,21 +1534,21 @@ export default function BranchChallans({ userProfile, branches = [], addToast })
                             </>
                           )}
 
-                          {/* Payment Button (Only for approved challans) */}
-                          {!isPending && !isRejected && !isPaid && (
+                          {/* Payment Button (Available for Pending & Approved challans before full payment) */}
+                          {!isRejected && !isPaid && (
                             <button
                               type="button"
                               className="btn btn-primary btn-sm btn-icon"
                               onClick={() => handleOpenPaymentModal(ch)}
-                              title={isFactoryPerspective ? 'Record Payment Settlement' : 'Submit Payment to Factory'}
+                              title={isFactoryPerspective ? 'Record Payment Settlement' : 'Submit Payment'}
                               style={{ padding: '0.35rem 0.45rem' }}
                             >
                               <CreditCard size={15} />
                             </button>
                           )}
 
-                          {/* Payment History & Approve Action (Only for approved challans) */}
-                          {!isPending && !isRejected && (
+                          {/* Payment History & Approve Action */}
+                          {!isRejected && (
                             <button
                               type="button"
                               className="btn btn-secondary btn-sm btn-icon"
@@ -1727,11 +1986,11 @@ export default function BranchChallans({ userProfile, branches = [], addToast })
                     </table>
                   </div>
 
-                  {/* Grand Total Bar */}
+                  {/* Discount & Grand Total Bar */}
                   <div
                     style={{
                       display: 'flex',
-                      justifyContent: 'flex-end',
+                      justifyContent: 'space-between',
                       alignItems: 'center',
                       gap: '1rem',
                       marginTop: '0.75rem',
@@ -1739,12 +1998,35 @@ export default function BranchChallans({ userProfile, branches = [], addToast })
                       backgroundColor: '#f8fafc',
                       borderRadius: '6px',
                       border: '1px solid var(--border-color)',
+                      flexWrap: 'wrap',
                     }}
                   >
-                    <span style={{ fontWeight: 600, fontSize: '0.88rem' }}>Total Amount:</span>
-                    <span style={{ fontSize: '1.2rem', fontWeight: 800, color: 'var(--primary)', fontFamily: 'Outfit, sans-serif' }}>
-                      ৳{formatAmount(getNewChallanGrandTotal())}
-                    </span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>Discount (৳):</span>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        max={getNewChallanSubtotal()}
+                        className="input-control"
+                        placeholder="0.00"
+                        value={challanDiscount}
+                        onChange={(e) => setChallanDiscount(e.target.value)}
+                        style={{ width: '110px', fontSize: '0.85rem', padding: '0.25rem 0.5rem', textAlign: 'right' }}
+                      />
+                    </div>
+
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem' }}>
+                      {parseFloat(challanDiscount) > 0 && (
+                        <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                          Subtotal: ৳{formatAmount(getNewChallanSubtotal())}
+                        </span>
+                      )}
+                      <span style={{ fontWeight: 600, fontSize: '0.88rem' }}>Total Amount:</span>
+                      <span style={{ fontSize: '1.2rem', fontWeight: 800, color: 'var(--primary)', fontFamily: 'Outfit, sans-serif' }}>
+                        ৳{formatAmount(getNewChallanGrandTotal())}
+                      </span>
+                    </div>
                   </div>
                 </div>
 
@@ -1766,6 +2048,249 @@ export default function BranchChallans({ userProfile, branches = [], addToast })
                 </button>
                 <button type="submit" className="btn btn-primary" disabled={isSubmittingChallan}>
                   {isSubmittingChallan ? 'Saving...' : 'Save Challan'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* EDIT CHALLAN MODAL (AVAILABLE BEFORE APPROVAL) */}
+      {showEditChallanModal && editingChallan && (
+        <div className="modal-overlay">
+          <div className="modal-content modal-lg" style={{ display: 'flex', flexDirection: 'column', maxHeight: '90vh' }}>
+            <div className="modal-header">
+              <h3 className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <Edit size={18} />
+                <span>Edit Pending Challan ({editingChallan.challan_no})</span>
+              </h3>
+              <button className="btn btn-secondary btn-sm" onClick={() => setShowEditChallanModal(false)} style={{ borderRadius: '50%', padding: '0.4rem', border: 'none' }}>
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveEditChallan} style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
+              <div className="modal-body" style={{ flex: 1, overflowY: 'auto', padding: '1.25rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                
+                {/* Branch Routing Row */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                  <div className="form-group" style={{ margin: 0 }}>
+                    <label>From *</label>
+                    <select
+                      className="input-control"
+                      value={editFromBranchId}
+                      onChange={(e) => setEditFromBranchId(e.target.value)}
+                      required
+                    >
+                      {branches.map((b) => (
+                        <option key={b.id} value={b.id}>
+                          {b.is_factory ? `🏭 ${b.name}` : `🏪 ${b.name}`}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="form-group" style={{ margin: 0 }}>
+                    <label>To Branch *</label>
+                    <select
+                      className="input-control"
+                      value={editToBranchId}
+                      onChange={(e) => setEditToBranchId(e.target.value)}
+                      required
+                    >
+                      <option value="">-- Select Branch --</option>
+                      {branches
+                        .filter((b) => b.id !== editFromBranchId)
+                        .map((b) => (
+                          <option key={b.id} value={b.id}>
+                            🏪 {b.name}
+                          </option>
+                        ))}
+                    </select>
+                  </div>
+                </div>
+
+                {/* Date & Transport Row */}
+                <div style={{ display: 'grid', gridTemplateColumns: '140px 1fr 1fr', gap: '1rem' }}>
+                  <div className="form-group" style={{ margin: 0 }}>
+                    <label>Date *</label>
+                    <input
+                      type="date"
+                      className="input-control"
+                      value={editChallanDate}
+                      onChange={(e) => setEditChallanDate(e.target.value)}
+                      required
+                    />
+                  </div>
+                  <div className="form-group" style={{ margin: 0 }}>
+                    <label>Vehicle No</label>
+                    <input
+                      type="text"
+                      className="input-control"
+                      placeholder="Vehicle number"
+                      value={editVehicleNo}
+                      onChange={(e) => setEditVehicleNo(e.target.value)}
+                    />
+                  </div>
+                  <div className="form-group" style={{ margin: 0 }}>
+                    <label>Driver Info</label>
+                    <input
+                      type="text"
+                      className="input-control"
+                      placeholder="Driver name and phone"
+                      value={editDriverName}
+                      onChange={(e) => setEditDriverName(e.target.value)}
+                    />
+                  </div>
+                </div>
+
+                {/* Product Items Table */}
+                <div style={{ marginTop: '0.5rem' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.4rem' }}>
+                    <label style={{ fontWeight: 700, fontSize: '0.85rem' }}>Products *</label>
+                    <button type="button" className="btn btn-secondary btn-sm" onClick={addEditChallanItemRow} style={{ padding: '0.25rem 0.6rem', fontSize: '0.78rem' }}>
+                      <Plus size={13} />
+                      <span>Add Product</span>
+                    </button>
+                  </div>
+
+                  <div className="table-container" style={{ border: '1px solid var(--border-color)', borderRadius: '6px', maxHeight: '240px', overflowY: 'auto' }}>
+                    <table>
+                      <thead>
+                        <tr>
+                          <th style={{ width: '30px', textAlign: 'center' }}>#</th>
+                          <th>Product *</th>
+                          <th style={{ width: '90px', textAlign: 'right' }}>Qty *</th>
+                          <th style={{ width: '120px', textAlign: 'right' }}>Price (৳)</th>
+                          <th style={{ width: '120px', textAlign: 'right' }}>Total (৳)</th>
+                          <th style={{ width: '35px' }}></th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {editChallanItems.map((item, idx) => (
+                          <tr key={idx}>
+                            <td style={{ textAlign: 'center', color: 'var(--text-muted)' }}>{idx + 1}</td>
+                            <td>
+                              <select
+                                className="input-control"
+                                value={item.productId}
+                                onChange={(e) => updateEditChallanItemRow(idx, 'productId', e.target.value)}
+                                required
+                                style={{ fontSize: '0.82rem', padding: '0.3rem 0.5rem' }}
+                              >
+                                <option value="">-- Select Product --</option>
+                                {catalogProducts.map((p) => (
+                                  <option key={p.id} value={p.id}>
+                                    {p.sku} - {p.name} {p.category ? `[${p.category}]` : ''}
+                                  </option>
+                                ))}
+                              </select>
+                            </td>
+                            <td>
+                              <input
+                                type="number"
+                                className="input-control"
+                                min="1"
+                                value={item.quantity}
+                                onChange={(e) => updateEditChallanItemRow(idx, 'quantity', e.target.value)}
+                                style={{ textAlign: 'right', fontSize: '0.82rem', padding: '0.3rem 0.5rem' }}
+                                required
+                              />
+                            </td>
+                            <td>
+                              <input
+                                type="number"
+                                step="0.01"
+                                className="input-control"
+                                min="0"
+                                value={item.unitPrice}
+                                onChange={(e) => updateEditChallanItemRow(idx, 'unitPrice', e.target.value)}
+                                style={{ textAlign: 'right', fontSize: '0.82rem', padding: '0.3rem 0.5rem' }}
+                                required
+                              />
+                            </td>
+                            <td style={{ textAlign: 'right', fontWeight: 700, fontFamily: 'Outfit, sans-serif' }}>
+                              ৳{formatAmount(item.totalPrice)}
+                            </td>
+                            <td style={{ textAlign: 'center' }}>
+                              {editChallanItems.length > 1 && (
+                                <button
+                                  type="button"
+                                  className="btn btn-secondary btn-sm"
+                                  onClick={() => removeEditChallanItemRow(idx)}
+                                  style={{ padding: '0.2rem 0.4rem', border: 'none', color: 'var(--danger)' }}
+                                >
+                                  ✕
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {/* Discount & Grand Total Bar */}
+                  <div
+                    style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      gap: '1rem',
+                      marginTop: '0.75rem',
+                      padding: '0.65rem 1rem',
+                      backgroundColor: '#f8fafc',
+                      borderRadius: '6px',
+                      border: '1px solid var(--border-color)',
+                      flexWrap: 'wrap',
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>Discount (৳):</span>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        max={getEditChallanSubtotal()}
+                        className="input-control"
+                        placeholder="0.00"
+                        value={editChallanDiscount}
+                        onChange={(e) => setEditChallanDiscount(e.target.value)}
+                        style={{ width: '110px', fontSize: '0.85rem', padding: '0.25rem 0.5rem', textAlign: 'right' }}
+                      />
+                    </div>
+
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem' }}>
+                      {parseFloat(editChallanDiscount) > 0 && (
+                        <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                          Subtotal: ৳{formatAmount(getEditChallanSubtotal())}
+                        </span>
+                      )}
+                      <span style={{ fontWeight: 600, fontSize: '0.88rem' }}>Total Amount:</span>
+                      <span style={{ fontSize: '1.2rem', fontWeight: 800, color: 'var(--primary)', fontFamily: 'Outfit, sans-serif' }}>
+                        ৳{formatAmount(getEditChallanGrandTotal())}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label>Notes</label>
+                  <input
+                    type="text"
+                    className="input-control"
+                    placeholder="Enter notes (optional)..."
+                    value={editNotes}
+                    onChange={(e) => setEditNotes(e.target.value)}
+                  />
+                </div>
+              </div>
+
+              <div className="modal-footer">
+                <button type="button" className="btn btn-secondary" onClick={() => setShowEditChallanModal(false)}>
+                  Cancel
+                </button>
+                <button type="submit" className="btn btn-primary" disabled={isSavingEditChallan}>
+                  {isSavingEditChallan ? 'Saving Changes...' : 'Update Challan'}
                 </button>
               </div>
             </form>
@@ -2033,6 +2558,40 @@ export default function BranchChallans({ userProfile, branches = [], addToast })
                       </tr>
                     ))}
                   </tbody>
+                  <tfoot>
+                    {(() => {
+                      const itemsSubtotal = (activeChallan.items || []).reduce((s, it) => s + (parseFloat(it.total_price) || 0), 0);
+                      const discountVal = getChallanDiscount(activeChallan);
+                      return (
+                        <>
+                          {discountVal > 0 && (
+                            <>
+                              <tr style={{ borderTop: '1px solid var(--border-color)', fontWeight: 600 }}>
+                                <td colSpan={6} style={{ textAlign: 'right', color: 'var(--text-muted)', fontSize: '0.85rem' }}>Subtotal:</td>
+                                <td style={{ textAlign: 'right', fontSize: '0.85rem' }}>৳{formatAmount(itemsSubtotal)}</td>
+                              </tr>
+                              <tr style={{ fontWeight: 600, color: '#dc2626' }}>
+                                <td colSpan={6} style={{ textAlign: 'right', fontSize: '0.85rem' }}>Factory Discount:</td>
+                                <td style={{ textAlign: 'right', fontSize: '0.85rem' }}>-৳{formatAmount(discountVal)}</td>
+                              </tr>
+                            </>
+                          )}
+                          <tr style={{ borderTop: '2px solid var(--border-color)', fontWeight: 800 }}>
+                            <td colSpan={6} style={{ textAlign: 'right' }}>Total Bill:</td>
+                            <td style={{ textAlign: 'right', color: 'var(--primary)', fontFamily: 'Outfit, sans-serif' }}>৳{formatAmount(activeChallan.total_bill_amount)}</td>
+                          </tr>
+                          <tr style={{ fontWeight: 600 }}>
+                            <td colSpan={6} style={{ textAlign: 'right', color: '#059669' }}>Paid / Received:</td>
+                            <td style={{ textAlign: 'right', color: '#059669', fontFamily: 'Outfit, sans-serif' }}>৳{formatAmount(activeChallan.paid_amount)}</td>
+                          </tr>
+                          <tr style={{ fontWeight: 700 }}>
+                            <td colSpan={6} style={{ textAlign: 'right', color: parseFloat(activeChallan.due_amount) > 0 ? '#dc2626' : 'var(--text-muted)' }}>Due / Receivable:</td>
+                            <td style={{ textAlign: 'right', color: parseFloat(activeChallan.due_amount) > 0 ? '#dc2626' : 'var(--text-muted)', fontFamily: 'Outfit, sans-serif' }}>৳{formatAmount(activeChallan.due_amount)}</td>
+                          </tr>
+                        </>
+                      );
+                    })()}
+                  </tfoot>
                 </table>
               </div>
             </div>
@@ -2171,6 +2730,14 @@ export default function BranchChallans({ userProfile, branches = [], addToast })
                     ))}
                   </tbody>
                   <tfoot>
+                    {getChallanDiscount(activeChallan) > 0 && (
+                      <tr style={{ backgroundColor: '#f8fafc', borderTop: '1.5px solid #000' }}>
+                        <td colSpan={4} style={{ borderRight: '1px solid #000', padding: '0.45rem 0.5rem', textAlign: 'right', fontWeight: 700, color: '#dc2626' }}>Factory Discount:</td>
+                        <td style={{ padding: '0.45rem 0.5rem', textAlign: 'right', fontWeight: 800, color: '#dc2626' }}>
+                          -৳{formatAmount(getChallanDiscount(activeChallan))}
+                        </td>
+                      </tr>
+                    )}
                     <tr style={{ backgroundColor: '#f8fafc', borderTop: '1.5px solid #000' }}>
                       <td colSpan={4} style={{ borderRight: '1px solid #000', padding: '0.65rem 0.5rem', textAlign: 'right', fontWeight: 800 }}>Grand Consignment Bill Total:</td>
                       <td style={{ padding: '0.65rem 0.5rem', textAlign: 'right', fontWeight: 900, fontSize: '0.98rem', color: '#000' }}>
@@ -2180,9 +2747,9 @@ export default function BranchChallans({ userProfile, branches = [], addToast })
                   </tfoot>
                 </table>
 
-                {activeChallan.notes && (
+                {getChallanCleanNotes(activeChallan) && (
                   <p style={{ fontSize: '0.8rem', marginBottom: '1.5rem', color: '#475569' }}>
-                    <strong>Remarks:</strong> {activeChallan.notes}
+                    <strong>Remarks:</strong> {getChallanCleanNotes(activeChallan)}
                   </p>
                 )}
 

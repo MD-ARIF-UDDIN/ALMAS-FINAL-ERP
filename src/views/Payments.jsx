@@ -166,6 +166,7 @@ export default function Payments({ userProfile, branches, addToast }) {
           amount,
           payment_method,
           reference_invoice_id,
+          reference_number,
           notes,
           branch_id,
           contacts (
@@ -229,6 +230,7 @@ export default function Payments({ userProfile, branches, addToast }) {
           payment_date,
           amount,
           payment_method,
+          reference_number,
           notes,
           created_by,
           profiles (
@@ -275,7 +277,8 @@ export default function Payments({ userProfile, branches, addToast }) {
         payment_method: paymentMethod,
         transaction_type: isSale ? 'customer_collection' : 'supplier_payment',
         reference_invoice_id: selectedInvoice.id,
-        notes: referenceNumber ? `Ref: ${referenceNumber}${paymentNotes ? ` - ${paymentNotes}` : ''}` : (paymentNotes || null),
+        reference_number: referenceNumber.trim() || null,
+        notes: paymentNotes.trim() || null,
         created_by: userProfile.id,
       };
 
@@ -572,6 +575,11 @@ export default function Payments({ userProfile, branches, addToast }) {
                         )}
                         <td style={{ fontFamily: 'monospace', fontWeight: 700, fontSize: '0.82rem' }}>
                           {log.payment_number || 'N/A'}
+                          {log.reference_number && (
+                            <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 500 }}>
+                              Ref: {log.reference_number}
+                            </div>
+                          )}
                         </td>
                         <td>
                           <span className={`badge ${isRec ? 'badge-paid' : 'badge-unpaid'}`}>
