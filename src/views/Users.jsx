@@ -35,6 +35,7 @@ import {
   MODULE_SERIAL_PERMISSIONS,
   ALL_PERMISSIONS,
   DEFAULT_ROLE_PERMISSIONS,
+  STAFF_ROLES,
   STAFF_DESIGNATIONS,
   getRolePermissions,
   saveRolePermissions,
@@ -81,20 +82,16 @@ export default function Users({ userProfile, branches, fetchBranches, addToast, 
   const [fullName, setFullName] = useState('');
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
-  const [role, setRole] = useState('staff');
+  const [role, setRole] = useState('sales_executive');
   const [selectedBranch, setSelectedBranch] = useState('');
-  const [designation, setDesignation] = useState('Sales Executive');
-  const [customDesignation, setCustomDesignation] = useState('');
   const [salary, setSalary] = useState('');
 
   // Form states for editing staff
   const [editingProfile, setEditingProfile] = useState(null);
   const [editFullName, setEditFullName] = useState('');
   const [editPassword, setEditPassword] = useState('');
-  const [editRole, setEditRole] = useState('staff');
+  const [editRole, setEditRole] = useState('sales_executive');
   const [editBranch, setEditBranch] = useState('');
-  const [editDesignation, setEditDesignation] = useState('Sales Executive');
-  const [editCustomDesignation, setEditCustomDesignation] = useState('');
   const [editSalary, setEditSalary] = useState('');
 
   useEffect(() => {
@@ -137,8 +134,8 @@ export default function Users({ userProfile, branches, fetchBranches, addToast, 
   const [isFactory, setIsFactory] = useState(false);
 
   // Role Permissions Matrix State
-  const [selectedMatrixRole, setSelectedMatrixRole] = useState('branch_manager'); // 'branch_manager' | 'staff'
-  const [matrixPermissions, setMatrixPermissions] = useState(() => getRolePermissions('branch_manager'));
+  const [selectedMatrixRole, setSelectedMatrixRole] = useState('sales_executive');
+  const [matrixPermissions, setMatrixPermissions] = useState(() => getRolePermissions('sales_executive'));
 
   const fetchProfiles = async () => {
     setLoading(true);
@@ -174,27 +171,6 @@ export default function Users({ userProfile, branches, fetchBranches, addToast, 
 
   const showMessage = (text, type) => {
     addToast(text, type === 'error' ? 'error' : type === 'success' ? 'success' : 'info');
-  };
-
-  const handleDesignationSelect = (desigVal) => {
-    setDesignation(desigVal);
-    // Auto-suggest matching role based on designation
-    if (['Branch Manager', 'Assistant Branch Manager'].includes(desigVal)) {
-      setRole('branch_manager');
-    } else if (['Factory Manager', 'Production Supervisor', 'Quality Control (QC) Inspector'].includes(desigVal)) {
-      setRole('factory_manager');
-    } else if (role !== 'owner') {
-      setRole('staff');
-    }
-  };
-
-  const handleEditDesignationSelect = (desigVal) => {
-    setEditDesignation(desigVal);
-    if (['Branch Manager', 'Assistant Branch Manager'].includes(desigVal)) {
-      setEditRole('branch_manager');
-    } else if (['Factory Manager', 'Production Supervisor', 'Quality Control (QC) Inspector'].includes(desigVal)) {
-      setEditRole('factory_manager');
-    }
   };
 
   const handleCreateUser = async (e) => {
@@ -248,10 +224,8 @@ export default function Users({ userProfile, branches, fetchBranches, addToast, 
       if (!newUserId) throw new Error('No user ID returned from auth sign up.');
 
       // 2. Prepare Designation and Salary metadata inside permissions JSON
-      const finalDesignation = role === 'owner' 
-        ? 'Owner / Director' 
-        : (designation === 'Other / Custom' ? (customDesignation.trim() || 'Staff') : designation);
-      
+      const foundRole = STAFF_ROLES.find((r) => r.id === role);
+      const finalDesignation = foundRole ? foundRole.label : role;
       const parsedSalary = role === 'owner' ? 0 : (parseFloat(salary) || 0);
 
       const permissionsPayload = {
@@ -290,20 +264,9 @@ export default function Users({ userProfile, branches, fetchBranches, addToast, 
   const handleOpenEditUser = (profile) => {
     setEditingProfile(profile);
     setEditFullName(profile.full_name || '');
-    setEditRole(profile.role || 'staff');
+    setEditRole(profile.role || 'sales_executive');
     setEditBranch(profile.branch_id || '');
     setEditPassword('');
-
-    // Load designation & salary
-    const currentDesig = getStaffDesignation(profile);
-    const isKnown = STAFF_DESIGNATIONS.includes(currentDesig);
-    if (isKnown) {
-      setEditDesignation(currentDesig);
-      setEditCustomDesignation('');
-    } else {
-      setEditDesignation(currentDesig ? 'Other / Custom' : 'Sales Executive');
-      setEditCustomDesignation(currentDesig || '');
-    }
 
     const currentSal = getStaffSalary(profile);
     setEditSalary(currentSal > 0 ? String(currentSal) : '');
@@ -330,10 +293,8 @@ export default function Users({ userProfile, branches, fetchBranches, addToast, 
     setLoading(true);
     try {
       // 1. Prepare Designation and Salary preserving existing custom_permissions
-      const finalDesignation = editRole === 'owner' 
-        ? 'Owner / Director' 
-        : (editDesignation === 'Other / Custom' ? (editCustomDesignation.trim() || 'Staff') : editDesignation);
-      
+      const foundRole = STAFF_ROLES.find((r) => r.id === editRole);
+      const finalDesignation = foundRole ? foundRole.label : editRole;
       const parsedSalary = editRole === 'owner' ? 0 : (parseFloat(editSalary) || 0);
 
       let updatedPermissions = {};
@@ -600,10 +561,8 @@ export default function Users({ userProfile, branches, fetchBranches, addToast, 
     setFullName('');
     setPhone('');
     setPassword('');
-    setRole('staff');
+    setRole('sales_executive');
     setSelectedBranch('');
-    setDesignation('Sales Executive');
-    setCustomDesignation('');
     setSalary('');
   };
 
@@ -711,11 +670,10 @@ export default function Users({ userProfile, branches, fetchBranches, addToast, 
                 <thead>
                   <tr>
                     <th style={{ width: '40px' }}>SL</th>
-                    <th>Employee Name</th>
-                    <th>Designation</th>
-                    <th>Phone Number</th>
-                    <th>Role</th>
-                    <th>Branch Office</th>
+                    <th>Staff Member</th>
+                    <th>Role / Designation</th>
+                    <th>Phone (Login ID)</th>
+                    <th>Branch Location</th>
                     <th>Monthly Salary</th>
                     <th style={{ textAlign: 'center', width: '130px' }}>Permissions</th>
                     <th style={{ textAlign: 'center', width: '140px' }}>Actions</th>
@@ -723,10 +681,10 @@ export default function Users({ userProfile, branches, fetchBranches, addToast, 
                 </thead>
                 <tbody>
                   {loading ? (
-                    <TableLoading colSpan={9} message="Fetching user profiles..." />
+                    <TableLoading colSpan={8} message="Fetching user profiles..." />
                   ) : profiles.length === 0 ? (
                     <tr>
-                      <td colSpan={9} style={{ textAlign: 'center', padding: '2rem' }}>
+                      <td colSpan={8} style={{ textAlign: 'center', padding: '2rem' }}>
                         No profiles found.
                       </td>
                     </tr>
@@ -744,14 +702,13 @@ export default function Users({ userProfile, branches, fetchBranches, addToast, 
                           <td style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{p.full_name || 'N/A'}</td>
                           <td>
                             <span 
+                              className={`badge badge-${p.role || 'staff'}`}
                               style={{ 
-                                fontWeight: 500, 
-                                fontSize: '0.82rem',
-                                color: isOwner ? '#7c3aed' : '#334155',
-                                backgroundColor: isOwner ? '#f5f3ff' : '#f1f5f9',
-                                padding: '0.2rem 0.5rem',
-                                borderRadius: '4px',
-                                border: isOwner ? '1px solid #ddd6fe' : '1px solid #e2e8f0',
+                                fontWeight: 600, 
+                                fontSize: '0.8rem',
+                                color: isOwner ? '#7c3aed' : undefined,
+                                backgroundColor: isOwner ? '#f5f3ff' : undefined,
+                                border: isOwner ? '1px solid #ddd6fe' : undefined,
                                 display: 'inline-block'
                               }}
                             >
@@ -760,11 +717,6 @@ export default function Users({ userProfile, branches, fetchBranches, addToast, 
                           </td>
                           <td style={{ fontSize: '0.85rem', fontFamily: 'monospace' }}>
                             {p.phone || (p.email ? p.email.replace('@almas.local', '') : 'N/A')}
-                          </td>
-                          <td>
-                            <span className={`badge badge-${p.role}`} style={{ textTransform: 'capitalize' }}>
-                              {(p.role || 'staff').replace(/_/g, ' ')}
-                            </span>
                           </td>
                           <td style={{ fontWeight: 500 }}>
                             {isOwner ? (
@@ -941,35 +893,23 @@ export default function Users({ userProfile, branches, fetchBranches, addToast, 
           {/* Top Role Selector Toolbar */}
           <div className="card" style={{ padding: '0.85rem 1.25rem' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-secondary)' }}>
-                  Configure Role:
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+                <span style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--text-primary)' }}>
+                  Select Role / Designation:
                 </span>
-                <div style={{ display: 'flex', gap: '0.4rem' }}>
-                  <button
-                    type="button"
-                    className={`btn ${selectedMatrixRole === 'factory_manager' ? 'btn-primary' : 'btn-secondary'} btn-sm`}
-                    onClick={() => setSelectedMatrixRole('factory_manager')}
+                <div style={{ minWidth: '260px' }}>
+                  <select
+                    className="input-control"
+                    value={selectedMatrixRole}
+                    onChange={(e) => setSelectedMatrixRole(e.target.value)}
+                    style={{ fontWeight: 600, color: 'var(--text-primary)', height: '36px', padding: '0.35rem 0.75rem' }}
                   >
-                    <Shield size={13} />
-                    <span>Factory Manager</span>
-                  </button>
-                  <button
-                    type="button"
-                    className={`btn ${selectedMatrixRole === 'branch_manager' ? 'btn-primary' : 'btn-secondary'} btn-sm`}
-                    onClick={() => setSelectedMatrixRole('branch_manager')}
-                  >
-                    <Shield size={13} />
-                    <span>Branch Manager</span>
-                  </button>
-                  <button
-                    type="button"
-                    className={`btn ${selectedMatrixRole === 'staff' ? 'btn-primary' : 'btn-secondary'} btn-sm`}
-                    onClick={() => setSelectedMatrixRole('staff')}
-                  >
-                    <User size={13} />
-                    <span>Staff Member</span>
-                  </button>
+                    {STAFF_ROLES.filter((r) => r.id !== 'owner').map((r) => (
+                      <option key={r.id} value={r.id}>
+                        {r.label}
+                      </option>
+                    ))}
+                  </select>
                 </div>
               </div>
 
@@ -1340,36 +1280,28 @@ export default function Users({ userProfile, branches, fetchBranches, addToast, 
                   </div>
                 </div>
 
+                <div className="form-group">
+                  <label>Role / Designation *</label>
+                  <div style={{ position: 'relative' }}>
+                    <Shield size={14} style={{ position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+                    <select
+                      className="input-control"
+                      style={{ paddingLeft: '2.5rem' }}
+                      value={editRole}
+                      onChange={(e) => setEditRole(e.target.value)}
+                      required
+                    >
+                      {STAFF_ROLES.map((r) => (
+                        <option key={r.id} value={r.id}>
+                          {r.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
                 {editRole !== 'owner' && (
                   <>
-                    <div className="form-group">
-                      <label>Staff Designation *</label>
-                      <select
-                        className="input-control"
-                        value={editDesignation}
-                        onChange={(e) => handleEditDesignationSelect(e.target.value)}
-                        required
-                      >
-                        {STAFF_DESIGNATIONS.map((d) => (
-                          <option key={d} value={d}>{d}</option>
-                        ))}
-                      </select>
-                    </div>
-
-                    {editDesignation === 'Other / Custom' && (
-                      <div className="form-group">
-                        <label>Custom Designation Title *</label>
-                        <input
-                          type="text"
-                          className="input-control"
-                          placeholder="e.g. Master Pattern Designer"
-                          value={editCustomDesignation}
-                          onChange={(e) => setEditCustomDesignation(e.target.value)}
-                          required
-                        />
-                      </div>
-                    )}
-
                     <div className="form-group">
                       <label>Monthly Salary (৳)</label>
                       <div style={{ position: 'relative' }}>
@@ -1389,49 +1321,28 @@ export default function Users({ userProfile, branches, fetchBranches, addToast, 
                         Monthly salary is auto-filled when recording salary expenses for this employee.
                       </span>
                     </div>
-                  </>
-                )}
 
-                <div className="form-group">
-                  <label>Role *</label>
-                  <div style={{ position: 'relative' }}>
-                    <Shield size={14} style={{ position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
-                    <select
-                      className="input-control"
-                      style={{ paddingLeft: '2.5rem' }}
-                      value={editRole}
-                      onChange={(e) => setEditRole(e.target.value)}
-                      required
-                    >
-                      <option value="staff">Staff</option>
-                      <option value="branch_manager">Branch Manager</option>
-                      <option value="factory_manager">Factory Manager</option>
-                      <option value="owner">Owner</option>
-                    </select>
-                  </div>
-                </div>
-
-                {editRole !== 'owner' && (
-                  <div className="form-group">
-                    <label>Branch *</label>
-                    <div style={{ position: 'relative' }}>
-                      <Building size={14} style={{ position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
-                      <select
-                        className="input-control"
-                        style={{ paddingLeft: '2.5rem' }}
-                        value={editBranch}
-                        onChange={(e) => setEditBranch(e.target.value)}
-                        required
-                      >
-                        <option value="">-- Select Branch --</option>
-                        {branches.map((b) => (
-                          <option key={b.id} value={b.id}>
-                            {b.name}
-                          </option>
-                        ))}
-                      </select>
+                    <div className="form-group">
+                      <label>Branch *</label>
+                      <div style={{ position: 'relative' }}>
+                        <Building size={14} style={{ position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+                        <select
+                          className="input-control"
+                          style={{ paddingLeft: '2.5rem' }}
+                          value={editBranch}
+                          onChange={(e) => setEditBranch(e.target.value)}
+                          required
+                        >
+                          <option value="">-- Select Branch --</option>
+                          {branches.map((b) => (
+                            <option key={b.id} value={b.id}>
+                              {b.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
                     </div>
-                  </div>
+                  </>
                 )}
 
                 <div className="form-group">
@@ -1537,36 +1448,28 @@ export default function Users({ userProfile, branches, fetchBranches, addToast, 
                   </div>
                 </div>
 
+                <div className="form-group">
+                  <label>Role / Designation *</label>
+                  <div style={{ position: 'relative' }}>
+                    <Shield size={14} style={{ position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+                    <select
+                      className="input-control"
+                      style={{ paddingLeft: '2.5rem' }}
+                      value={role}
+                      onChange={(e) => setRole(e.target.value)}
+                      required
+                    >
+                      {STAFF_ROLES.map((r) => (
+                        <option key={r.id} value={r.id}>
+                          {r.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
                 {role !== 'owner' && (
                   <>
-                    <div className="form-group">
-                      <label>Staff Designation *</label>
-                      <select
-                        className="input-control"
-                        value={designation}
-                        onChange={(e) => handleDesignationSelect(e.target.value)}
-                        required
-                      >
-                        {STAFF_DESIGNATIONS.map((d) => (
-                          <option key={d} value={d}>{d}</option>
-                        ))}
-                      </select>
-                    </div>
-
-                    {designation === 'Other / Custom' && (
-                      <div className="form-group">
-                        <label>Custom Designation Title *</label>
-                        <input
-                          type="text"
-                          className="input-control"
-                          placeholder="e.g. Master Pattern Designer"
-                          value={customDesignation}
-                          onChange={(e) => setCustomDesignation(e.target.value)}
-                          required
-                        />
-                      </div>
-                    )}
-
                     <div className="form-group">
                       <label>Monthly Salary (৳)</label>
                       <div style={{ position: 'relative' }}>
@@ -1586,49 +1489,28 @@ export default function Users({ userProfile, branches, fetchBranches, addToast, 
                         Monthly salary is auto-filled when recording salary expenses for this employee.
                       </span>
                     </div>
-                  </>
-                )}
 
-                <div className="form-group">
-                  <label>Role *</label>
-                  <div style={{ position: 'relative' }}>
-                    <Shield size={14} style={{ position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
-                    <select
-                      className="input-control"
-                      style={{ paddingLeft: '2.5rem' }}
-                      value={role}
-                      onChange={(e) => setRole(e.target.value)}
-                      required
-                    >
-                      <option value="staff">Staff</option>
-                      <option value="branch_manager">Branch Manager</option>
-                      <option value="factory_manager">Factory Manager</option>
-                      <option value="owner">Owner</option>
-                    </select>
-                  </div>
-                </div>
-
-                {role !== 'owner' && (
-                  <div className="form-group">
-                    <label>Branch *</label>
-                    <div style={{ position: 'relative' }}>
-                      <Building size={14} style={{ position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
-                      <select
-                        className="input-control"
-                        style={{ paddingLeft: '2.5rem' }}
-                        value={selectedBranch}
-                        onChange={(e) => setSelectedBranch(e.target.value)}
-                        required
-                      >
-                        <option value="">-- Select Branch --</option>
-                        {branches.map((b) => (
-                          <option key={b.id} value={b.id}>
-                            {b.name}
-                          </option>
-                        ))}
-                      </select>
+                    <div className="form-group">
+                      <label>Branch *</label>
+                      <div style={{ position: 'relative' }}>
+                        <Building size={14} style={{ position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+                        <select
+                          className="input-control"
+                          style={{ paddingLeft: '2.5rem' }}
+                          value={selectedBranch}
+                          onChange={(e) => setSelectedBranch(e.target.value)}
+                          required
+                        >
+                          <option value="">-- Select Branch --</option>
+                          {branches.map((b) => (
+                            <option key={b.id} value={b.id}>
+                              {b.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
                     </div>
-                  </div>
+                  </>
                 )}
               </div>
               <div className="modal-footer">

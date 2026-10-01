@@ -204,10 +204,30 @@ export const ALL_PERMISSIONS = Array.from(
   )
 );
 
+export const STAFF_ROLES = [
+  { id: 'sales_executive', label: 'Sales Executive' },
+  { id: 'senior_sales_executive', label: 'Senior Sales Executive' },
+  { id: 'cashier', label: 'Cashier' },
+  { id: 'branch_manager', label: 'Branch Manager' },
+  { id: 'assistant_branch_manager', label: 'Assistant Branch Manager' },
+  { id: 'store_keeper', label: 'Store Keeper / Inventory In-charge' },
+  { id: 'factory_manager', label: 'Factory Manager' },
+  { id: 'production_supervisor', label: 'Production Supervisor' },
+  { id: 'qc_inspector', label: 'Quality Control (QC) Inspector' },
+  { id: 'accountant', label: 'Accountant' },
+  { id: 'craftsman', label: 'Craftsman / Artisan' },
+  { id: 'tailor', label: 'Tailor / Stitching Master' },
+  { id: 'packaging_staff', label: 'Packaging Staff' },
+  { id: 'delivery_rider', label: 'Delivery Rider / Messenger' },
+  { id: 'office_assistant', label: 'Office Assistant / Helper' },
+  { id: 'staff', label: 'General Staff' },
+  { id: 'owner', label: 'Owner / Admin' },
+];
+
 // Standard Default Templates
 export const DEFAULT_ROLE_PERMISSIONS = {
   owner: [...ALL_PERMISSIONS],
-  factory_manager: [
+  branch_manager: [
     'product.items_view',
     'product.items_create',
     'inventory.stock_view',
@@ -218,6 +238,8 @@ export const DEFAULT_ROLE_PERMISSIONS = {
     'sales.view',
     'sales.pos_view',
     'sales.create',
+    'returns.view',
+    'returns.create',
     'purchases.view',
     'purchases.new_view',
     'purchases.create',
@@ -230,7 +252,24 @@ export const DEFAULT_ROLE_PERMISSIONS = {
     'contacts.edit',
     'reports.view',
   ],
-  branch_manager: [
+  assistant_branch_manager: [
+    'product.items_view',
+    'inventory.stock_view',
+    'inventory.transfer_view',
+    'inventory.transfer',
+    'sales.view',
+    'sales.pos_view',
+    'sales.create',
+    'returns.view',
+    'returns.create',
+    'payments.view',
+    'payments.create',
+    'expenses.view',
+    'expenses.create',
+    'contacts.view',
+    'contacts.create',
+  ],
+  factory_manager: [
     'product.items_view',
     'product.items_create',
     'inventory.stock_view',
@@ -238,9 +277,6 @@ export const DEFAULT_ROLE_PERMISSIONS = {
     'inventory.transfer_view',
     'inventory.transfer',
     'inventory.logs_view',
-    'sales.view',
-    'sales.pos_view',
-    'sales.create',
     'purchases.view',
     'purchases.new_view',
     'purchases.create',
@@ -252,6 +288,109 @@ export const DEFAULT_ROLE_PERMISSIONS = {
     'contacts.create',
     'contacts.edit',
     'reports.view',
+  ],
+  production_supervisor: [
+    'product.items_view',
+    'inventory.stock_view',
+    'inventory.adjust',
+    'inventory.transfer_view',
+    'inventory.transfer',
+    'inventory.logs_view',
+    'purchases.view',
+    'purchases.new_view',
+    'purchases.create',
+  ],
+  qc_inspector: [
+    'product.items_view',
+    'inventory.stock_view',
+    'inventory.transfer_view',
+    'inventory.logs_view',
+  ],
+  sales_executive: [
+    'product.items_view',
+    'sales.view',
+    'sales.pos_view',
+    'sales.create',
+    'returns.view',
+    'returns.create',
+    'payments.view',
+    'payments.create',
+    'contacts.view',
+    'contacts.create',
+    'inventory.stock_view',
+  ],
+  senior_sales_executive: [
+    'product.items_view',
+    'product.items_create',
+    'sales.view',
+    'sales.pos_view',
+    'sales.create',
+    'returns.view',
+    'returns.create',
+    'payments.view',
+    'payments.create',
+    'contacts.view',
+    'contacts.create',
+    'contacts.edit',
+    'inventory.stock_view',
+    'inventory.transfer_view',
+    'inventory.transfer',
+  ],
+  cashier: [
+    'sales.view',
+    'sales.pos_view',
+    'sales.create',
+    'returns.view',
+    'returns.create',
+    'payments.view',
+    'payments.create',
+    'expenses.create',
+    'contacts.view',
+    'contacts.create',
+  ],
+  store_keeper: [
+    'product.items_view',
+    'product.items_create',
+    'inventory.stock_view',
+    'inventory.adjust',
+    'inventory.transfer_view',
+    'inventory.transfer',
+    'inventory.logs_view',
+    'purchases.view',
+    'purchases.new_view',
+    'purchases.create',
+  ],
+  accountant: [
+    'payments.view',
+    'payments.create',
+    'expenses.view',
+    'expenses.create',
+    'reports.view',
+    'sales.view',
+    'purchases.view',
+    'contacts.view',
+    'contacts.create',
+    'contacts.edit',
+  ],
+  craftsman: [
+    'product.items_view',
+    'inventory.stock_view',
+  ],
+  tailor: [
+    'product.items_view',
+    'inventory.stock_view',
+  ],
+  packaging_staff: [
+    'product.items_view',
+    'inventory.stock_view',
+  ],
+  delivery_rider: [
+    'sales.view',
+    'inventory.transfer_view',
+  ],
+  office_assistant: [
+    'contacts.view',
+    'inventory.stock_view',
   ],
   staff: [
     'product.items_view',
@@ -304,7 +443,7 @@ export function getRolePermissions(role) {
   } catch (e) {
     console.error('Error reading role permissions:', e);
   }
-  return DEFAULT_ROLE_PERMISSIONS[role] || DEFAULT_ROLE_PERMISSIONS.staff;
+  return DEFAULT_ROLE_PERMISSIONS[role] || DEFAULT_ROLE_PERMISSIONS.staff || [];
 }
 
 /**
@@ -395,31 +534,15 @@ export function getStaffSalary(profile) {
   return 0;
 }
 
-export const STAFF_DESIGNATIONS = [
-  'Sales Executive',
-  'Senior Sales Executive',
-  'Branch Manager',
-  'Assistant Branch Manager',
-  'Cashier',
-  'Store Keeper / Inventory In-charge',
-  'Factory Manager',
-  'Production Supervisor',
-  'Quality Control (QC) Inspector',
-  'Craftsman / Artisan',
-  'Machine Operator',
-  'Tailor / Stitching Master',
-  'Packaging Staff',
-  'Delivery Rider / Messenger',
-  'Accountant',
-  'Office Assistant / Helper',
-  'Other / Custom',
-];
+export const STAFF_DESIGNATIONS = STAFF_ROLES.map((r) => r.label);
 
 /**
- * Helper to get staff designation from profile
+ * Helper to get staff designation / role display title from profile
  */
 export function getStaffDesignation(profile) {
   if (!profile) return '';
+  const match = STAFF_ROLES.find((r) => r.id === profile.role);
+  if (match) return match.label;
   if (profile.designation) return profile.designation;
   if (typeof profile.permissions === 'object' && profile.permissions && profile.permissions.designation) {
     return profile.permissions.designation;
