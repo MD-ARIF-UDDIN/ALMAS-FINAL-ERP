@@ -583,50 +583,6 @@ export default function Purchases({ userProfile, branches, addToast }) {
             }
           }
 
-          // Update inventory stock for this branch
-          if (finalProdId) {
-            const { data: currentInv } = await supabase
-              .from('inventory')
-              .select('id, quantity')
-              .eq('branch_id', selectedBranchId)
-              .eq('product_id', finalProdId)
-              .maybeSingle();
-
-            if (currentInv) {
-              await supabase
-                .from('inventory')
-                .update({
-                  quantity: (currentInv.quantity || 0) + itemQty,
-                  purchase_price: costVal > 0 ? costVal : undefined,
-                  updated_at: new Date().toISOString(),
-                })
-                .eq('id', currentInv.id);
-            } else {
-              await supabase.from('inventory').insert([
-                {
-                  branch_id: selectedBranchId,
-                  product_id: finalProdId,
-                  quantity: itemQty,
-                  purchase_price: costVal,
-                  sale_price: costVal,
-                  updated_at: new Date().toISOString(),
-                }
-              ]);
-            }
-
-            // Log movement in inventory audit log
-            await supabase.from('inventory_movements').insert([
-              {
-                branch_id: selectedBranchId,
-                product_id: finalProdId,
-                type: 'purchase',
-                quantity: itemQty,
-                reference_id: purchaseId,
-                description: `Branch Purchase: Bill #${purData[0].invoice_number || purchaseId.substring(0, 8)} (${cleanName || 'Item'})`,
-                created_by: userProfile.id,
-              }
-            ]);
-          }
 
           resolvedPurchaseItems.push({
             purchase_id: purchaseId,
@@ -902,49 +858,22 @@ export default function Purchases({ userProfile, branches, addToast }) {
 
       if (purUpdateErr) throw purUpdateErr;
 
-      // 2. Stock adjustments for Branch purchases (!isFactoryPurchase)
-      if (!isFactoryPurchase && targetBranchId) {
-        // Fetch current DB purchase items directly to get true previous state
-        const { data: dbItems, error: dbItemsErr } = await supabase
-          .from('purchase_items')
-          .select('id, product_id, item_name, quantity')
-          .eq('purchase_id', editingPurchase.id);
+      // 2. Fetch current DB purchase items for differential sync
+      const { data: dbItems, error: dbItemsErr } = await supabase
+        .from('purchase_items')
+        .select('id, product_id, item_name, quantity, unit_price, total_price')
+        .eq('purchase_id', editingPurchase.id);
 
-        if (dbItemsErr) throw dbItemsErr;
+      if (dbItemsErr) throw dbItemsErr;
 
-        // Map original item quantities by productId
-        const oldQtyMap = {};
-        for (const it of (dbItems || [])) {
-          let pId = it.product_id;
-          if (!pId && it.item_name) {
-            const cleanName = it.item_name.trim();
-            const { data: matched } = await supabase
-              .from('products')
-              .select('id')
-              .ilike('name', cleanName)
-              .limit(1);
-            if (matched && matched.length > 0) {
-              pId = matched[0].id;
-            }
-          }
-          if (pId) {
-            oldQtyMap[pId] = (oldQtyMap[pId] || 0) + (parseFloat(it.quantity) || 0);
-          }
-        }
+      const currentDbItems = dbItems || [];
 
-        // Also incorporate originalEditItems in case DB fetch was partial
-        originalEditItems.forEach((it) => {
-          if (it.productId && !oldQtyMap[it.productId]) {
-            oldQtyMap[it.productId] = parseFloat(it.quantity) || 0;
-          }
-        });
-
-        // Resolve new item product IDs
+      // Resolve product IDs for any new items created in edit modal
+      if (!isFactoryPurchase) {
         for (const item of validItems) {
           let finalProdId = item.productId;
-          const cleanName = item.name.trim();
+          const cleanName = item.name?.trim();
           const cleanCode = item.code?.trim();
-          const itemQty = parseFloat(item.quantity) || 1;
           const costVal = parseFloat(item.costPrice) || 0;
 
           if (!finalProdId) {
@@ -984,80 +913,136 @@ export default function Purchases({ userProfile, branches, addToast }) {
             item.productId = finalProdId;
           }
         }
+      }
 
-        const newQtyMap = {};
-        validItems.forEach((it) => {
-          if (it.productId) {
-            newQtyMap[it.productId] = (newQtyMap[it.productId] || 0) + (parseFloat(it.quantity) || 0);
-          }
-        });
+      // Identify deleted items, updated items, and new items
+      const validItemIds = new Set(validItems.map((v) => v.id).filter(Boolean));
+      const deletedDbItems = currentDbItems.filter((d) => !validItemIds.has(d.id));
+      const existingItemsToUpdate = validItems.filter((v) => v.id && currentDbItems.some((d) => d.id === v.id));
+      const newItemsToInsert = validItems.filter((v) => !v.id);
 
-        const allProdIds = Array.from(new Set([...Object.keys(oldQtyMap), ...Object.keys(newQtyMap)]));
-        for (const pId of allProdIds) {
-          const oldQ = oldQtyMap[pId] || 0;
-          const newQ = newQtyMap[pId] || 0;
-          const diff = newQ - oldQ; // positive = stock increased, negative = stock reduced
+      // A. Process Deleted Items
+      for (const delIt of deletedDbItems) {
+        const pId = delIt.product_id;
+        const delQty = parseFloat(delIt.quantity) || 0;
 
-          if (diff !== 0) {
-            const { data: curInv } = await supabase
+        if (!isFactoryPurchase && targetBranchId && pId && delQty > 0) {
+          const { data: curInv } = await supabase
+            .from('inventory')
+            .select('id, quantity')
+            .eq('branch_id', targetBranchId)
+            .eq('product_id', pId)
+            .maybeSingle();
+
+          if (curInv) {
+            await supabase
               .from('inventory')
-              .select('id, quantity')
-              .eq('branch_id', targetBranchId)
-              .eq('product_id', pId)
-              .maybeSingle();
+              .update({
+                quantity: Math.max(0, (curInv.quantity || 0) - delQty),
+                updated_at: new Date().toISOString(),
+              })
+              .eq('id', curInv.id);
+          }
 
-            if (curInv) {
-              await supabase
-                .from('inventory')
-                .update({
-                  quantity: Math.max(0, (curInv.quantity || 0) + diff),
-                  updated_at: new Date().toISOString(),
-                })
-                .eq('id', curInv.id);
-            } else if (diff > 0) {
-              await supabase.from('inventory').insert([
-                {
-                  branch_id: targetBranchId,
-                  product_id: pId,
-                  quantity: diff,
-                  updated_at: new Date().toISOString(),
-                },
-              ]);
-            }
+          await supabase.from('inventory_movements').insert([
+            {
+              branch_id: targetBranchId,
+              product_id: pId,
+              type: 'adjustment_out',
+              quantity: delQty,
+              reference_id: editingPurchase.id,
+              description: `Purchase Bill Edited [${editingPurchase.invoice_number || editingPurchase.id.substring(0, 8)}]: Item removed, Qty reduced by -${delQty}`,
+              created_by: userProfile.id,
+            },
+          ]);
+        }
 
-            await supabase.from('inventory_movements').insert([
+        await supabase.from('purchase_items').delete().eq('id', delIt.id);
+      }
+
+      // B. Process Existing Updated Items (Uses UPDATE - avoids triggering INSERT stock double-count)
+      for (const upIt of existingItemsToUpdate) {
+        const dbMatch = currentDbItems.find((d) => d.id === upIt.id);
+        const oldQ = parseFloat(dbMatch?.quantity) || 0;
+        const newQ = parseFloat(upIt.quantity) || 0;
+        const pId = upIt.productId || dbMatch?.product_id;
+        const unitPrice = parseFloat(upIt.costPrice) || 0;
+        const diff = newQ - oldQ;
+
+        // Update purchase_items table row directly
+        const { error: upErr } = await supabase
+          .from('purchase_items')
+          .update({
+            product_id: isFactoryPurchase ? null : (pId || null),
+            item_name: upIt.name?.trim() || 'Custom Item',
+            quantity: newQ,
+            unit_price: unitPrice,
+            total_price: newQ * unitPrice,
+          })
+          .eq('id', upIt.id);
+
+        if (upErr) throw upErr;
+
+        // Adjust inventory only if quantity changed for branch purchases
+        if (!isFactoryPurchase && targetBranchId && pId && diff !== 0) {
+          const { data: curInv } = await supabase
+            .from('inventory')
+            .select('id, quantity')
+            .eq('branch_id', targetBranchId)
+            .eq('product_id', pId)
+            .maybeSingle();
+
+          if (curInv) {
+            await supabase
+              .from('inventory')
+              .update({
+                quantity: Math.max(0, (curInv.quantity || 0) + diff),
+                updated_at: new Date().toISOString(),
+              })
+              .eq('id', curInv.id);
+          } else if (diff > 0) {
+            await supabase.from('inventory').insert([
               {
                 branch_id: targetBranchId,
                 product_id: pId,
-                type: diff > 0 ? 'purchase' : 'adjustment_out',
-                quantity: Math.abs(diff),
-                reference_id: editingPurchase.id,
-                description: `Purchase Bill Edited [${editingPurchase.invoice_number || editingPurchase.id.substring(0, 8)}]: Qty adjusted by ${diff > 0 ? '+' : ''}${diff}`,
-                created_by: userProfile.id,
+                quantity: diff,
+                updated_at: new Date().toISOString(),
               },
             ]);
           }
+
+          await supabase.from('inventory_movements').insert([
+            {
+              branch_id: targetBranchId,
+              product_id: pId,
+              type: diff > 0 ? 'purchase' : 'adjustment_out',
+              quantity: Math.abs(diff),
+              reference_id: editingPurchase.id,
+              description: `Purchase Bill Edited [${editingPurchase.invoice_number || editingPurchase.id.substring(0, 8)}]: Qty adjusted by ${diff > 0 ? '+' : ''}${diff}`,
+              created_by: userProfile.id,
+            },
+          ]);
         }
       }
 
-      // 3. Delete and re-insert purchase_items
-      await supabase.from('purchase_items').delete().eq('purchase_id', editingPurchase.id);
+      // C. Process Brand New Items (INSERT fires DB trigger which automatically adds to inventory)
+      if (newItemsToInsert.length > 0) {
+        const resolvedNewItems = newItemsToInsert.map((it) => {
+          const qty = parseFloat(it.quantity) || 1;
+          const price = parseFloat(it.costPrice) || 0;
+          return {
+            purchase_id: editingPurchase.id,
+            product_id: isFactoryPurchase ? null : (it.productId || null),
+            item_name: it.name?.trim() || 'Custom Item',
+            quantity: qty,
+            unit_price: price,
+            total_price: qty * price,
+          };
+        });
 
-      const resolvedItems = validItems.map((it) => {
-        const qty = parseFloat(it.quantity) || 1;
-        const price = parseFloat(it.costPrice) || 0;
-        return {
-          purchase_id: editingPurchase.id,
-          product_id: isFactoryPurchase ? null : (it.productId || null),
-          item_name: it.name?.trim() || 'Custom Item',
-          quantity: qty,
-          unit_price: price,
-          total_price: qty * price,
-        };
-      });
-
-      const { error: itemsInsertErr } = await supabase.from('purchase_items').insert(resolvedItems);
-      if (itemsInsertErr) throw itemsInsertErr;
+        const { error: newItemsErr } = await supabase.from('purchase_items').insert(resolvedNewItems);
+        if (newItemsErr) throw newItemsErr;
+      }
 
       showMessage('Purchase bill updated successfully!', 'success');
       setShowEditPurchaseModal(false);

@@ -209,10 +209,10 @@ export default function Contacts({ userProfile, branches = [], addToast }) {
       }
 
       const editingContact = isEditing ? contacts.find(c => c.id === editingId) : null;
-      const isEditingFactory = isFactoryContact(editingContact);
+      const isEditingSystem = isSystemContact(editingContact);
 
       const payload = {
-        name: isEditingFactory ? editingContact.name : trimmedName,
+        name: isEditingSystem ? editingContact.name : trimmedName,
         phone: trimmedPhone,
         email: trimmedEmail || null,
         address: trimmedAddress || null,
@@ -271,6 +271,20 @@ export default function Contacts({ userProfile, branches = [], addToast }) {
     return cName === 'chittagong factory' || cName.includes('factory');
   };
 
+  const isShowroomContact = (contact) => {
+    if (!contact) return false;
+    const cName = (contact.name || '').toLowerCase().trim();
+    return (
+      cName === 'gazipur showroom' ||
+      cName.includes('showroom') ||
+      branches.some(b => !b.is_factory && b.name?.toLowerCase().trim() === cName)
+    );
+  };
+
+  const isSystemContact = (contact) => {
+    return isFactoryContact(contact) || isShowroomContact(contact);
+  };
+
   const handleEdit = (contact) => {
     setIsEditing(true);
     setEditingId(contact.id);
@@ -286,9 +300,10 @@ export default function Contacts({ userProfile, branches = [], addToast }) {
     const contactId = typeof contact === 'object' ? contact.id : contact;
     const contactName = typeof contact === 'object' ? contact.name : 'this contact';
     const contactType = typeof contact === 'object' ? contact.type : activeTab;
+    const targetContact = typeof contact === 'object' ? contact : contacts.find(c => c.id === contactId);
 
-    if (isFactoryContact(typeof contact === 'object' ? contact : contacts.find(c => c.id === contactId))) {
-      showMessage('The Factory supplier contact is a permanent system record and cannot be deleted.', 'error');
+    if (isSystemContact(targetContact)) {
+      showMessage(`"${contactName}" is a permanent system/branch contact and cannot be deleted.`, 'error');
       return;
     }
 
@@ -661,6 +676,24 @@ export default function Contacts({ userProfile, branches = [], addToast }) {
                               🏭 Factory Contact
                             </span>
                           )}
+                          {isShowroomContact(c) && (
+                            <span
+                              style={{
+                                backgroundColor: '#f0fdf4',
+                                color: '#15803d',
+                                border: '1px solid #bbf7d0',
+                                fontSize: '0.68rem',
+                                fontWeight: 700,
+                                padding: '0.1rem 0.4rem',
+                                borderRadius: '4px',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '0.2rem',
+                              }}
+                            >
+                              🏪 Showroom Contact
+                            </span>
+                          )}
                         </div>
                         <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
                           Added {new Date(c.created_at).toLocaleDateString()}
@@ -786,7 +819,7 @@ export default function Contacts({ userProfile, branches = [], addToast }) {
                           >
                             <Edit size={14} />
                           </button>
-                          {role === 'owner' && !isFactoryContact(c) && (
+                          {role === 'owner' && !isSystemContact(c) && (
                             <button
                               type="button"
                               className="btn btn-secondary btn-sm btn-icon"
@@ -867,6 +900,21 @@ export default function Contacts({ userProfile, branches = [], addToast }) {
                           }}
                         >
                           🏭 Factory Contact
+                        </span>
+                      )}
+                      {isShowroomContact(c) && (
+                        <span
+                          style={{
+                            backgroundColor: '#f0fdf4',
+                            color: '#15803d',
+                            border: '1px solid #bbf7d0',
+                            fontSize: '0.68rem',
+                            fontWeight: 700,
+                            padding: '0.1rem 0.35rem',
+                            borderRadius: '4px',
+                          }}
+                        >
+                          🏪 Showroom Contact
                         </span>
                       )}
                     </div>
@@ -1047,7 +1095,7 @@ export default function Contacts({ userProfile, branches = [], addToast }) {
                       <Edit size={14} />
                       <span>Edit</span>
                     </button>
-                    {role === 'owner' && !isFactoryContact(c) && (
+                    {role === 'owner' && !isSystemContact(c) && (
                       <button
                         type="button"
                         className="btn btn-secondary btn-sm btn-icon"
@@ -1114,17 +1162,17 @@ export default function Contacts({ userProfile, branches = [], addToast }) {
                     placeholder={activeTab === 'customer' ? 'Enter customer name' : 'Enter supplier name'}
                     value={name}
                     onChange={(e) => setName(e.target.value)}
-                    disabled={isEditing && isFactoryContact(contacts.find(c => c.id === editingId))}
-                    readOnly={isEditing && isFactoryContact(contacts.find(c => c.id === editingId))}
+                    disabled={isEditing && isSystemContact(contacts.find(c => c.id === editingId))}
+                    readOnly={isEditing && isSystemContact(contacts.find(c => c.id === editingId))}
                     style={{
-                      backgroundColor: (isEditing && isFactoryContact(contacts.find(c => c.id === editingId))) ? '#f1f5f9' : '#ffffff',
-                      cursor: (isEditing && isFactoryContact(contacts.find(c => c.id === editingId))) ? 'not-allowed' : 'text',
+                      backgroundColor: (isEditing && isSystemContact(contacts.find(c => c.id === editingId))) ? '#f1f5f9' : '#ffffff',
+                      cursor: (isEditing && isSystemContact(contacts.find(c => c.id === editingId))) ? 'not-allowed' : 'text',
                     }}
                     required
                   />
-                  {isEditing && isFactoryContact(contacts.find(c => c.id === editingId)) && (
+                  {isEditing && isSystemContact(contacts.find(c => c.id === editingId)) && (
                     <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '0.25rem', display: 'block' }}>
-                      🔒 Permanent Factory Supplier name cannot be modified. Phone number and address can be updated.
+                      🔒 Permanent System / Branch contact name cannot be modified. Phone number and address can be updated.
                     </span>
                   )}
                 </div>

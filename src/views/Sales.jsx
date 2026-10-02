@@ -79,6 +79,7 @@ export default function Sales({ userProfile, branches, addToast }) {
   const [editCustomerId, setEditCustomerId] = useState('');
   const [editSaleDate, setEditSaleDate] = useState('');
   const [editStoredReceiptNo, setEditStoredReceiptNo] = useState('');
+  const [editIsShowroomChallan, setEditIsShowroomChallan] = useState(false);
   const [editCart, setEditCart] = useState([]);
   const [originalSaleItems, setOriginalSaleItems] = useState([]);
   const [editDiscount, setEditDiscount] = useState(0);
@@ -118,9 +119,13 @@ export default function Sales({ userProfile, branches, addToast }) {
   const [collectPaymentNotes, setCollectPaymentNotes] = useState('');
   const [isSubmittingPayment, setIsSubmittingPayment] = useState(false);
 
+  // Factory Showroom Challan State
+  const [isShowroomChallan, setIsShowroomChallan] = useState(false);
+
   const resetPosForm = useCallback(() => {
     setCart([]);
     setSelectedCustomerId('');
+    setIsShowroomChallan(false);
     setDiscount(0);
     setTaxRate(0);
     setPaidAmount('');
@@ -232,6 +237,71 @@ export default function Sales({ userProfile, branches, addToast }) {
 
   const activeBranch = branches.find((b) => b.id === selectedBranchId);
   const isFactory = Boolean(activeBranch?.is_factory || activeBranch?.name?.toLowerCase().includes('factory'));
+
+  useEffect(() => {
+    if (!isFactory) {
+      setIsShowroomChallan(false);
+    }
+  }, [selectedBranchId, isFactory]);
+
+  const isShowroomContact = useCallback((contactOrId) => {
+    if (!contactOrId) return false;
+    let contact = null;
+    if (typeof contactOrId === 'object') {
+      contact = contactOrId;
+    } else {
+      contact = customers.find((c) => c.id === contactOrId);
+    }
+    if (!contact) return false;
+    const cName = (contact.name || '').toLowerCase().trim();
+    return (
+      cName === 'gazipur showroom' ||
+      cName.includes('showroom') ||
+      branches.some((b) => !b.is_factory && b.name?.toLowerCase().trim() === cName)
+    );
+  }, [customers, branches]);
+
+  const getShowroomCustomers = useCallback(() => {
+    return customers.filter((c) => isShowroomContact(c));
+  }, [customers, isShowroomContact]);
+
+  const isSaleShowroomChallan = useCallback((sale) => {
+    if (!sale) return false;
+    const saleBranch = branches.find((b) => b.id === sale.branch_id);
+    const isSaleFactory = Boolean(saleBranch?.is_factory || saleBranch?.name?.toLowerCase().includes('factory') || isFactory);
+    if (sale.is_showroom_challan) return true;
+    if (isSaleFactory) {
+      if (isShowroomContact(sale.customer_id)) return true;
+      const cName = (sale.contacts?.name || '').toLowerCase().trim();
+      if (cName === 'gazipur showroom' || cName.includes('showroom')) return true;
+    }
+    return false;
+  }, [branches, isFactory, isShowroomContact]);
+
+  const handleToggleShowroomChallan = (checked) => {
+    setIsShowroomChallan(checked);
+    if (checked) {
+      setCustomerType('existing');
+      const showroomList = getShowroomCustomers();
+      if (showroomList.length > 0) {
+        if (!selectedCustomerId || !isShowroomContact(selectedCustomerId)) {
+          setSelectedCustomerId(showroomList[0].id);
+        }
+      }
+    }
+  };
+
+  const handleToggleEditShowroomChallan = (checked) => {
+    setEditIsShowroomChallan(checked);
+    if (checked) {
+      const showroomList = getShowroomCustomers();
+      if (showroomList.length > 0) {
+        if (!editCustomerId || !isShowroomContact(editCustomerId)) {
+          setEditCustomerId(showroomList[0].id);
+        }
+      }
+    }
+  };
 
   // Fetch customers on mount
   useEffect(() => {
@@ -930,23 +1000,34 @@ export default function Sales({ userProfile, branches, addToast }) {
       const cleanReceipt = storedReceiptNo.trim();
 
       // 1. Insert Sales Invoice
-      const { data: saleData, error: saleError } = await supabase
+      const isChallan = isFactory && Boolean(isShowroomChallan || isShowroomContact(customerId));
+
+      const salePayload = {
+        branch_id: selectedBranchId,
+        customer_id: customerId,
+        total_amount: subtotal,
+        discount: discount,
+        net_amount: grandTotal,
+        paid_amount: 0.00, // Trigger will compute this from payments
+        payment_status: 'unpaid', // Trigger will compute this
+        created_by: userProfile.id,
+        receipt_number: cleanReceipt || null,
+        notes: cleanUserNotes || null,
+        is_showroom_challan: isChallan,
+      };
+
+      let { data: saleData, error: saleError } = await supabase
         .from('sales')
-        .insert([
-          {
-            branch_id: selectedBranchId,
-            customer_id: customerId,
-            total_amount: subtotal,
-            discount: discount,
-            net_amount: grandTotal,
-            paid_amount: 0.00, // Trigger will compute this from payments
-            payment_status: 'unpaid', // Trigger will compute this
-            created_by: userProfile.id,
-            receipt_number: cleanReceipt || null,
-            notes: cleanUserNotes || null,
-          },
-        ])
+        .insert([salePayload])
         .select();
+
+      if (saleError && saleError.message?.includes('is_showroom_challan')) {
+        delete salePayload.is_showroom_challan;
+        const retry = await supabase.from('sales').insert([salePayload]).select();
+        if (retry.error) throw retry.error;
+        saleData = retry.data;
+        saleError = null;
+      }
 
       if (saleError) throw saleError;
       const saleId = saleData[0].id;
@@ -1238,6 +1319,17 @@ export default function Sales({ userProfile, branches, addToast }) {
     setEditNotes(getSaleCleanNotes(sale));
     setEditProductSearch('');
     setShowEditSearchDropdown(false);
+
+    const saleBranch = branches.find(b => b.id === sale.branch_id);
+    const isSaleFactory = Boolean(saleBranch?.is_factory || saleBranch?.name?.toLowerCase().includes('factory') || isFactory);
+    const isChallan = isSaleFactory && Boolean(
+      sale.is_showroom_challan ||
+      isShowroomContact(sale.customer_id) ||
+      sale.contacts?.name?.toLowerCase().includes('showroom') ||
+      sale.contacts?.name === 'Gazipur Showroom'
+    );
+    setEditIsShowroomChallan(isChallan);
+
     setShowEditSaleModal(true);
     setLoadingEditItems(true);
 
@@ -1477,20 +1569,33 @@ export default function Sales({ userProfile, branches, addToast }) {
       const cleanUserNotes = editNotes.trim();
       const cleanReceipt = editStoredReceiptNo.trim();
 
-      const { error: saleErr } = await supabase
+      const editBranch = branches.find(b => b.id === targetBranchId);
+      const isEditBranchFactory = Boolean(editBranch?.is_factory || editBranch?.name?.toLowerCase().includes('factory') || isFactory);
+      const editIsChallan = isEditBranchFactory && Boolean(editIsShowroomChallan || isShowroomContact(editCustomerId));
+
+      const editSalePayload = {
+        customer_id: editCustomerId,
+        sale_date: editSaleDate,
+        total_amount: subtotal,
+        discount: disc,
+        tax: taxAmt,
+        net_amount: grandTotal,
+        payment_status: newStatus,
+        receipt_number: cleanReceipt || null,
+        notes: cleanUserNotes || null,
+        is_showroom_challan: editIsChallan,
+      };
+
+      let { error: saleErr } = await supabase
         .from('sales')
-        .update({
-          customer_id: editCustomerId,
-          sale_date: editSaleDate,
-          total_amount: subtotal,
-          discount: disc,
-          tax: taxAmt,
-          net_amount: grandTotal,
-          payment_status: newStatus,
-          receipt_number: cleanReceipt || null,
-          notes: cleanUserNotes || null,
-        })
+        .update(editSalePayload)
         .eq('id', editingSale.id);
+
+      if (saleErr && saleErr.message?.includes('is_showroom_challan')) {
+        delete editSalePayload.is_showroom_challan;
+        const retry = await supabase.from('sales').update(editSalePayload).eq('id', editingSale.id);
+        saleErr = retry.error;
+      }
 
       if (saleErr) throw saleErr;
 
@@ -2281,7 +2386,27 @@ export default function Sales({ userProfile, branches, addToast }) {
                       )}
                       <td>{new Date(sale.sale_date).toLocaleDateString()}</td>
                       <td>
-                        <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{sale.contacts?.name || 'Walk-in Customer'}</div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', flexWrap: 'wrap' }}>
+                          <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{sale.contacts?.name || 'Walk-in Customer'}</span>
+                          {isSaleShowroomChallan(sale) && (
+                            <span
+                              style={{
+                                backgroundColor: '#f0fdf4',
+                                color: '#15803d',
+                                border: '1px solid #bbf7d0',
+                                fontSize: '0.68rem',
+                                fontWeight: 700,
+                                padding: '0.1rem 0.35rem',
+                                borderRadius: '4px',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '0.2rem',
+                              }}
+                            >
+                              🏪 Showroom Challan
+                            </span>
+                          )}
+                        </div>
                         {sale.contacts?.phone && (
                           <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>{sale.contacts.phone}</div>
                         )}
@@ -2428,10 +2553,30 @@ export default function Sales({ userProfile, branches, addToast }) {
 
                   {/* Buyer & Date & Branch */}
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem', fontSize: '0.82rem' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-                      <span style={{ fontWeight: 700, color: 'var(--text-primary)', fontSize: '0.88rem' }}>
-                        {sale.contacts?.name || 'Walk-in Customer'}
-                      </span>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', flexWrap: 'wrap', gap: '0.35rem' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', flexWrap: 'wrap' }}>
+                        <span style={{ fontWeight: 700, color: 'var(--text-primary)', fontSize: '0.88rem' }}>
+                          {sale.contacts?.name || 'Walk-in Customer'}
+                        </span>
+                        {isSaleShowroomChallan(sale) && (
+                          <span
+                            style={{
+                              backgroundColor: '#f0fdf4',
+                              color: '#15803d',
+                              border: '1px solid #bbf7d0',
+                              fontSize: '0.68rem',
+                              fontWeight: 700,
+                              padding: '0.1rem 0.35rem',
+                              borderRadius: '4px',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '0.2rem',
+                            }}
+                          >
+                            🏪 Showroom Challan
+                          </span>
+                        )}
+                      </div>
                       <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
                         {new Date(sale.sale_date).toLocaleDateString()}
                       </span>
@@ -2691,6 +2836,38 @@ export default function Sales({ userProfile, branches, addToast }) {
               <div className="pos-cart">
                 <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
 
+                  {/* Customer Info Header with Factory Showroom Challan Toggle */}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.1rem', flexWrap: 'wrap', gap: '0.4rem' }}>
+                    <span style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                      Customer & Invoice Info
+                    </span>
+                    {isFactory && (
+                      <label style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '0.45rem',
+                        cursor: 'pointer',
+                        fontSize: '0.82rem',
+                        fontWeight: 700,
+                        userSelect: 'none',
+                        backgroundColor: isShowroomChallan ? '#f0fdf4' : '#ffffff',
+                        border: isShowroomChallan ? '1.5px solid #16a34a' : '1px solid var(--border-color)',
+                        color: isShowroomChallan ? '#15803d' : 'var(--text-primary)',
+                        padding: '0.2rem 0.6rem',
+                        borderRadius: '6px',
+                        transition: 'all 0.15s ease',
+                      }}>
+                        <input
+                          type="checkbox"
+                          checked={isShowroomChallan}
+                          onChange={(e) => handleToggleShowroomChallan(e.target.checked)}
+                          style={{ width: '15px', height: '15px', cursor: 'pointer', accentColor: '#16a34a' }}
+                        />
+                        <span>🏪 Is Showroom Challan</span>
+                      </label>
+                    )}
+                  </div>
+
                   {/* Customer Type & Stored Receipt No Grid */}
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.65rem' }}>
                     <div className="form-group" style={{ marginBottom: '0.25rem' }}>
@@ -2699,6 +2876,11 @@ export default function Sales({ userProfile, branches, addToast }) {
                         className="input-control"
                         value={customerType}
                         onChange={(e) => setCustomerType(e.target.value)}
+                        disabled={isFactory && isShowroomChallan}
+                        style={{
+                          backgroundColor: (isFactory && isShowroomChallan) ? '#f1f5f9' : '#ffffff',
+                          cursor: (isFactory && isShowroomChallan) ? 'not-allowed' : 'pointer',
+                        }}
                       >
                         <option value="existing">Existing Buyer</option>
                         <option value="new">New Buyer</option>
@@ -2719,15 +2901,26 @@ export default function Sales({ userProfile, branches, addToast }) {
 
                   {customerType === 'existing' ? (
                     <div className="form-group" style={{ marginBottom: '0.25rem' }}>
-                      <label>Customer *</label>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.25rem' }}>
+                        <label style={{ margin: 0 }}>Customer *</label>
+                        {isFactory && isShowroomChallan && (
+                          <span style={{ fontSize: '0.7rem', color: '#15803d', fontWeight: 700 }}>
+                            🔒 Locked to Showroom Branches
+                          </span>
+                        )}
+                      </div>
                       <select
                         className="input-control"
                         value={selectedCustomerId}
                         onChange={(e) => setSelectedCustomerId(e.target.value)}
                         required={customerType === 'existing'}
+                        style={{
+                          backgroundColor: (isFactory && isShowroomChallan) ? '#f0fdf4' : '#ffffff',
+                          borderColor: (isFactory && isShowroomChallan) ? '#86efac' : '#cbd5e1',
+                        }}
                       >
                         <option value="">-- Select Customer --</option>
-                        {customers.map((c) => (
+                        {((isFactory && isShowroomChallan) ? getShowroomCustomers() : customers).map((c) => (
                           <option key={c.id} value={c.id}>
                             {c.name} {c.phone ? `(${c.phone})` : ''}
                           </option>
@@ -4866,7 +5059,27 @@ export default function Sales({ userProfile, branches, addToast }) {
               }}>
                 <div>
                   <span style={{ color: 'var(--text-muted)', fontSize: '0.74rem', display: 'block', fontWeight: 600 }}>BUYER</span>
-                  <strong>{selectedSaleForDetails.contacts?.name || 'Walk-in Customer'}</strong>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', flexWrap: 'wrap' }}>
+                    <strong>{selectedSaleForDetails.contacts?.name || 'Walk-in Customer'}</strong>
+                    {isSaleShowroomChallan(selectedSaleForDetails) && (
+                      <span
+                        style={{
+                          backgroundColor: '#f0fdf4',
+                          color: '#15803d',
+                          border: '1px solid #bbf7d0',
+                          fontSize: '0.68rem',
+                          fontWeight: 700,
+                          padding: '0.1rem 0.35rem',
+                          borderRadius: '4px',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '0.2rem',
+                        }}
+                      >
+                        🏪 Showroom Challan
+                      </span>
+                    )}
+                  </div>
                   {selectedSaleForDetails.contacts?.phone && <span style={{ color: 'var(--text-secondary)' }}> ({selectedSaleForDetails.contacts.phone})</span>}
                 </div>
                 <div>
@@ -5374,42 +5587,95 @@ export default function Sales({ userProfile, branches, addToast }) {
             <form onSubmit={handlePromptSaveEditedSale} style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
               <div className="modal-body" style={{ overflowY: 'auto', padding: '1.25rem', display: 'flex', flexDirection: 'column', gap: '1.15rem' }}>
 
-                {/* Customer & Date Selection */}
-                <div className="form-grid-responsive-2" style={{ gap: '0.85rem' }}>
-                  <div className="form-group" style={{ marginBottom: 0 }}>
-                    <label style={{ fontWeight: 600, fontSize: '0.82rem', marginBottom: '0.3rem', display: 'block' }}>
-                      Customer / Buyer *
-                    </label>
-                    <select
-                      className="input-control"
-                      value={editCustomerId}
-                      onChange={(e) => setEditCustomerId(e.target.value)}
-                      required
-                      style={{ height: '36px', minHeight: '36px', fontSize: '0.85rem' }}
-                    >
-                      <option value="">-- Select Customer --</option>
-                      {customers.map((c) => (
-                        <option key={c.id} value={c.id}>
-                          {c.name} {c.phone ? `(${c.phone})` : ''}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
+                {/* Customer & Date Selection with Showroom Challan Toggle */}
+                {(() => {
+                  const editSaleBranch = branches.find(b => b.id === (editingSale?.branch_id || selectedBranchId));
+                  const isEditBranchFactory = Boolean(editSaleBranch?.is_factory || editSaleBranch?.name?.toLowerCase().includes('factory') || isFactory);
 
-                  <div className="form-group" style={{ marginBottom: 0 }}>
-                    <label style={{ fontWeight: 600, fontSize: '0.82rem', marginBottom: '0.3rem', display: 'block' }}>
-                      Invoice Date *
-                    </label>
-                    <input
-                      type="date"
-                      className="input-control"
-                      value={editSaleDate}
-                      onChange={(e) => setEditSaleDate(e.target.value)}
-                      required
-                      style={{ height: '36px', minHeight: '36px', fontSize: '0.85rem' }}
-                    />
-                  </div>
-                </div>
+                  return (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
+                      {isEditBranchFactory && (
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.4rem' }}>
+                          <span style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                            Customer & Date Info
+                          </span>
+                          <label style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '0.45rem',
+                            cursor: 'pointer',
+                            fontSize: '0.82rem',
+                            fontWeight: 700,
+                            userSelect: 'none',
+                            backgroundColor: editIsShowroomChallan ? '#f0fdf4' : '#ffffff',
+                            border: editIsShowroomChallan ? '1.5px solid #16a34a' : '1px solid var(--border-color)',
+                            color: editIsShowroomChallan ? '#15803d' : 'var(--text-primary)',
+                            padding: '0.2rem 0.6rem',
+                            borderRadius: '6px',
+                            transition: 'all 0.15s ease',
+                          }}>
+                            <input
+                              type="checkbox"
+                              checked={editIsShowroomChallan}
+                              onChange={(e) => handleToggleEditShowroomChallan(e.target.checked)}
+                              style={{ width: '15px', height: '15px', cursor: 'pointer', accentColor: '#16a34a' }}
+                            />
+                            <span>🏪 Is Showroom Challan</span>
+                          </label>
+                        </div>
+                      )}
+
+                      <div className="form-grid-responsive-2" style={{ gap: '0.85rem' }}>
+                        <div className="form-group" style={{ marginBottom: 0 }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.3rem' }}>
+                            <label style={{ fontWeight: 600, fontSize: '0.82rem', margin: 0 }}>
+                              Customer / Buyer *
+                            </label>
+                            {isEditBranchFactory && editIsShowroomChallan && (
+                              <span style={{ fontSize: '0.7rem', color: '#15803d', fontWeight: 700 }}>
+                                🔒 Showroom Only
+                              </span>
+                            )}
+                          </div>
+                          <select
+                            className="input-control"
+                            value={editCustomerId}
+                            onChange={(e) => setEditCustomerId(e.target.value)}
+                            required
+                            style={{
+                              height: '36px',
+                              minHeight: '36px',
+                              fontSize: '0.85rem',
+                              backgroundColor: (isEditBranchFactory && editIsShowroomChallan) ? '#f0fdf4' : '#ffffff',
+                              borderColor: (isEditBranchFactory && editIsShowroomChallan) ? '#86efac' : '#cbd5e1',
+                            }}
+                          >
+                            <option value="">-- Select Customer --</option>
+                            {((isEditBranchFactory && editIsShowroomChallan) ? getShowroomCustomers() : customers).map((c) => (
+                              <option key={c.id} value={c.id}>
+                                {c.name} {c.phone ? `(${c.phone})` : ''}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <div className="form-group" style={{ marginBottom: 0 }}>
+                          <label style={{ fontWeight: 600, fontSize: '0.82rem', marginBottom: '0.3rem', display: 'block' }}>
+                            Invoice Date *
+                          </label>
+                          <input
+                            type="date"
+                            className="input-control"
+                            value={editSaleDate}
+                            onChange={(e) => setEditSaleDate(e.target.value)}
+                            required
+                            style={{ height: '36px', minHeight: '36px', fontSize: '0.85rem' }}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
 
                 {/* Quick Search & Add Product */}
                 <div ref={editSearchRef} style={{ position: 'relative' }}>
