@@ -135,6 +135,7 @@ export default function Sidebar({ userProfile, onLogout, branches, isOpen, setIs
           subItems: [
             { id: 'overall', name: 'Sales & Turnover', icon: TrendingUp, path: '/reports?tab=overall', isDefault: true },
             { id: 'customer', name: 'Customer Statement', icon: User, path: '/reports?tab=customer' },
+            { id: 'supplier', name: 'Supplier Statement', icon: Truck, path: '/reports?tab=supplier' },
             { id: 'payments', name: 'Payment Collections', icon: CreditCard, path: '/reports?tab=payments' },
           ],
         },

@@ -2284,4 +2284,51 @@ textarea.input-control {
   to { opacity: 1; transform: translateY(0); }
 }
 
+/* ====================================================================
+   RESPONSIVE REPORT CARD VIEWS (NO HORIZONTAL SCROLLBAR ON MOBILE)
+   ==================================================================== */
+.report-desktop-table {
+  display: block;
+  width: 100%;
+}
+
+.report-mobile-cards {
+  display: none;
+  width: 100%;
+}
+
+@media (max-width: 768px) {
+  .report-desktop-table {
+    display: none !important;
+  }
+  .report-mobile-cards {
+    display: flex !important;
+    flex-direction: column;
+    gap: 0.5rem;
+    padding: 0.5rem;
+  }
+  
+  .report-item-card {
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    padding: 0.65rem 0.75rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  }
+  
+  .report-item-card.is-payment {
+    background: #f0fdf4;
+    border-color: #bbf7d0;
+  }
+
+  .report-item-card.is-purchase {
+    background: #ffffff;
+    border-color: #e2e8f0;
+  }
+}
+
+
 
