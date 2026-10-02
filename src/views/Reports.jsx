@@ -2,7 +2,8 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
 import almasLogo from '../assets/almas_logo.jpg';
-import html2pdf from 'html2pdf.js';
+import { jsPDF } from 'jspdf';
+import autoTable from 'jspdf-autotable';
 import {
   BarChart3,
   Calendar,
@@ -641,59 +642,523 @@ export default function Reports({ userProfile, branches = [] }) {
     return `business_summary - ${todayStr}.pdf`;
   };
 
+  const cleanPdfText = (str) => {
+    if (!str) return '';
+    return String(str)
+      .replace(/৳/g, 'Tk ')
+      .replace(/[^\x20-\x7E\n]/g, ' ')
+      .replace(/[ ]{2,}/g, ' ')
+      .trim();
+  };
+
   const handleDownloadPdf = async () => {
     setIsDownloadingPdf(true);
-    let tempContainer = null;
     try {
+      const doc = new jsPDF({ unit: 'pt', format: 'a4', orientation: 'portrait' });
+      const pageWidth = doc.internal.pageSize.getWidth();
+      const pageHeight = doc.internal.pageSize.getHeight();
+      const margin = 36;
+      const contentWidth = pageWidth - margin * 2; // 523.28 pt
+
+      const printDate = new Date().toLocaleString('en-GB', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: true,
+      });
+
+      const isSupplier = activeTab === 'supplier';
+      const isCustomer = activeTab === 'customer';
+      const isPayment = activeTab === 'payments';
+      const isOverall = activeTab === 'overall';
+
+      const reportTitle = isSupplier
+        ? 'SUPPLIER STATEMENT / PURCHASE LEDGER'
+        : isCustomer
+        ? 'CUSTOMER ACCOUNT STATEMENT'
+        : isPayment
+        ? 'CUSTOMER PAYMENT COLLECTIONS REGISTER'
+        : 'OVERALL BUSINESS SUMMARY REPORT';
+
+      // 1. Logo (with safety fallback)
+      try {
+        doc.addImage(almasLogo, 'JPEG', margin, margin, 38, 38);
+      } catch {
+        // fallback if image embed issue
+      }
+
+      // 2. Header Title & Subtitle
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(13);
+      doc.setTextColor(0, 0, 0);
+      doc.text('ALMAS ACCESSORIES INDUSTRIES', margin + 46, margin + 14);
+
+      doc.setFont('helvetica', 'italic');
+      doc.setFontSize(7.5);
+      doc.setTextColor(60, 60, 60);
+      doc.text('100% Export Oriented Garments Accessories Industries', margin + 46, margin + 27);
+
+      // Pill Badge on top right
+      const badgeWidth = 205;
+      const badgeX = pageWidth - margin - badgeWidth;
+      doc.setDrawColor(0, 0, 0);
+      doc.setLineWidth(1.2);
+      doc.roundedRect(badgeX, margin + 6, badgeWidth, 20, 10, 10, 'S');
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(6.8);
+      doc.setTextColor(0, 0, 0);
+      doc.text(reportTitle, badgeX + badgeWidth / 2, margin + 19, { align: 'center' });
+
+      // Header Divider Line
+      doc.setLineWidth(1.5);
+      doc.setDrawColor(0, 0, 0);
+      doc.line(margin, margin + 46, pageWidth - margin, margin + 46);
+
+      // 3. Metadata Section
+      let currentY = margin + 58;
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(8.5);
+      doc.setTextColor(0, 0, 0);
+
+      if (isSupplier) {
+        doc.setFont('helvetica', 'bold');
+        doc.text('Supplier: ', margin, currentY);
+        doc.setFont('helvetica', 'normal');
+        doc.text(cleanPdfText(selectedSupplier?.name) || 'All Suppliers', margin + 44, currentY);
+
+        if (selectedSupplier?.phone) {
+          currentY += 12;
+          doc.setFont('helvetica', 'bold');
+          doc.text('Phone: ', margin, currentY);
+          doc.setFont('helvetica', 'normal');
+          doc.text(cleanPdfText(selectedSupplier.phone), margin + 44, currentY);
+        }
+        if (selectedSupplier?.address) {
+          currentY += 12;
+          doc.setFont('helvetica', 'bold');
+          doc.text('Address: ', margin, currentY);
+          doc.setFont('helvetica', 'normal');
+          doc.text(cleanPdfText(selectedSupplier.address), margin + 44, currentY);
+        }
+      } else if (isCustomer) {
+        doc.setFont('helvetica', 'bold');
+        doc.text('Customer: ', margin, currentY);
+        doc.setFont('helvetica', 'normal');
+        doc.text(cleanPdfText(selectedCustomer?.name) || 'Customer', margin + 48, currentY);
+
+        if (selectedCustomer?.phone) {
+          currentY += 12;
+          doc.setFont('helvetica', 'bold');
+          doc.text('Phone: ', margin, currentY);
+          doc.setFont('helvetica', 'normal');
+          doc.text(cleanPdfText(selectedCustomer.phone), margin + 48, currentY);
+        }
+        if (selectedCustomer?.address) {
+          currentY += 12;
+          doc.setFont('helvetica', 'bold');
+          doc.text('Address: ', margin, currentY);
+          doc.setFont('helvetica', 'normal');
+          doc.text(cleanPdfText(selectedCustomer.address), margin + 48, currentY);
+        }
+      } else if (isPayment) {
+        doc.setFont('helvetica', 'bold');
+        doc.text('Account / Scope: ', margin, currentY);
+        doc.setFont('helvetica', 'normal');
+        doc.text(cleanPdfText(selectedCustomer?.name) || 'All Customers (Company-wide)', margin + 74, currentY);
+      } else {
+        doc.setFont('helvetica', 'bold');
+        doc.text('Scope: ', margin, currentY);
+        doc.setFont('helvetica', 'normal');
+        doc.text('Overall Business Summary', margin + 40, currentY);
+      }
+
+      // Metadata Right Column
+      const rightX = pageWidth - margin - 185;
+      let rightY = margin + 58;
+      doc.setFont('helvetica', 'bold');
+      doc.text('Branch / Plant: ', rightX, rightY);
+      doc.setFont('helvetica', 'normal');
+      doc.text(cleanPdfText(selectedBranchName), rightX + 66, rightY);
+
+      rightY += 12;
+      doc.setFont('helvetica', 'bold');
+      doc.text('Statement Period: ', rightX, rightY);
+      doc.setFont('helvetica', 'normal');
+      doc.text(startDate ? `${startDate} to ${endDate}` : 'All Time (Full History)', rightX + 78, rightY);
+
+      rightY += 12;
+      doc.setFont('helvetica', 'bold');
+      doc.text('Printed On: ', rightX, rightY);
+      doc.setFont('helvetica', 'normal');
+      doc.text(printDate, rightX + 54, rightY);
+
+      currentY = Math.max(currentY, rightY) + 12;
+      doc.setLineWidth(0.75);
+      doc.setDrawColor(200, 200, 200);
+      doc.line(margin, currentY, pageWidth - margin, currentY);
+      currentY += 8;
+
+      // 4. Top Summary Boxes (Black & White)
+      if (isSupplier) {
+        const numBoxes = 4;
+        const boxW = contentWidth / numBoxes;
+        const boxH = 32;
+
+        const boxes = [
+          { title: `TOTAL PURCHASES (${supplierPurchases.length})`, val: `Tk ${formatAmount(supplierTotalBilled)}`, bg: [255, 255, 255] },
+          { title: 'TOTAL QUANTITY', val: `${supplierTotalQty.toLocaleString()} lbs`, bg: [255, 255, 255] },
+          { title: `TOTAL PAID (${supplierPayments.length})`, val: `Tk ${formatAmount(supplierTotalPaid)}`, bg: [255, 255, 255] },
+          { title: 'CLOSING DUE BALANCE', val: `Tk ${formatAmount(supplierTotalDue)}`, bg: [242, 242, 242] },
+        ];
+
+        boxes.forEach((b, i) => {
+          const bx = margin + i * boxW;
+          doc.setFillColor(b.bg[0], b.bg[1], b.bg[2]);
+          doc.setDrawColor(0, 0, 0);
+          doc.setLineWidth(1);
+          doc.rect(bx, currentY, boxW, boxH, 'FD');
+
+          doc.setFont('helvetica', 'bold');
+          doc.setFontSize(6.5);
+          doc.setTextColor(80, 80, 80);
+          doc.text(b.title, bx + boxW / 2, currentY + 11, { align: 'center' });
+
+          doc.setFont('helvetica', 'bold');
+          doc.setFontSize(9.5);
+          doc.setTextColor(0, 0, 0);
+          doc.text(b.val, bx + boxW / 2, currentY + 24, { align: 'center' });
+        });
+
+        currentY += boxH + 12;
+      } else if (isCustomer) {
+        const numBoxes = 3;
+        const boxW = contentWidth / numBoxes;
+        const boxH = 32;
+
+        const boxes = [
+          { title: `TOTAL INVOICED (${customerSales.length})`, val: `Tk ${formatAmount(customerTotalBilled)}`, bg: [255, 255, 255] },
+          { title: 'TOTAL PAID', val: `Tk ${formatAmount(customerTotalPaid)}`, bg: [255, 255, 255] },
+          { title: 'CLOSING DUE BALANCE', val: `Tk ${formatAmount(customerTotalDue)}`, bg: [242, 242, 242] },
+        ];
+
+        boxes.forEach((b, i) => {
+          const bx = margin + i * boxW;
+          doc.setFillColor(b.bg[0], b.bg[1], b.bg[2]);
+          doc.setDrawColor(0, 0, 0);
+          doc.setLineWidth(1);
+          doc.rect(bx, currentY, boxW, boxH, 'FD');
+
+          doc.setFont('helvetica', 'bold');
+          doc.setFontSize(6.5);
+          doc.setTextColor(80, 80, 80);
+          doc.text(b.title, bx + boxW / 2, currentY + 11, { align: 'center' });
+
+          doc.setFont('helvetica', 'bold');
+          doc.setFontSize(9.5);
+          doc.setTextColor(0, 0, 0);
+          doc.text(b.val, bx + boxW / 2, currentY + 24, { align: 'center' });
+        });
+
+        currentY += boxH + 12;
+      } else if (isPayment) {
+        const numBoxes = 3;
+        const boxW = contentWidth / numBoxes;
+        const boxH = 32;
+
+        const boxes = [
+          { title: `TOTAL COLLECTED (${customerPayments.length})`, val: `Tk ${formatAmount(paymentsTotalAmount)}`, bg: [255, 255, 255] },
+          { title: 'CASH COLLECTIONS', val: `Tk ${formatAmount(paymentsCashAmount)}`, bg: [255, 255, 255] },
+          { title: 'BANK & DIGITAL', val: `Tk ${formatAmount(paymentsDigitalAmount)}`, bg: [242, 242, 242] },
+        ];
+
+        boxes.forEach((b, i) => {
+          const bx = margin + i * boxW;
+          doc.setFillColor(b.bg[0], b.bg[1], b.bg[2]);
+          doc.setDrawColor(0, 0, 0);
+          doc.setLineWidth(1);
+          doc.rect(bx, currentY, boxW, boxH, 'FD');
+
+          doc.setFont('helvetica', 'bold');
+          doc.setFontSize(6.5);
+          doc.setTextColor(80, 80, 80);
+          doc.text(b.title, bx + boxW / 2, currentY + 11, { align: 'center' });
+
+          doc.setFont('helvetica', 'bold');
+          doc.setFontSize(9.5);
+          doc.setTextColor(0, 0, 0);
+          doc.text(b.val, bx + boxW / 2, currentY + 24, { align: 'center' });
+        });
+
+        currentY += boxH + 12;
+      } else {
+        const numBoxes = 4;
+        const boxW = contentWidth / numBoxes;
+        const boxH = 32;
+
+        const boxes = [
+          { title: 'GROSS TURNOVER', val: `Tk ${formatAmount(overallMetrics.grossSales)}`, bg: [255, 255, 255] },
+          { title: 'TOTAL INVOICES', val: `${overallMetrics.totalSalesCount}`, bg: [255, 255, 255] },
+          { title: 'COLLECTIONS RECEIVED', val: `Tk ${formatAmount(overallMetrics.totalCollected)}`, bg: [255, 255, 255] },
+          { title: 'OUTSTANDING DUE', val: `Tk ${formatAmount(overallMetrics.totalDue)}`, bg: [242, 242, 242] },
+        ];
+
+        boxes.forEach((b, i) => {
+          const bx = margin + i * boxW;
+          doc.setFillColor(b.bg[0], b.bg[1], b.bg[2]);
+          doc.setDrawColor(0, 0, 0);
+          doc.setLineWidth(1);
+          doc.rect(bx, currentY, boxW, boxH, 'FD');
+
+          doc.setFont('helvetica', 'bold');
+          doc.setFontSize(6.5);
+          doc.setTextColor(80, 80, 80);
+          doc.text(b.title, bx + boxW / 2, currentY + 11, { align: 'center' });
+
+          doc.setFont('helvetica', 'bold');
+          doc.setFontSize(9.5);
+          doc.setTextColor(0, 0, 0);
+          doc.text(b.val, bx + boxW / 2, currentY + 24, { align: 'center' });
+        });
+
+        currentY += boxH + 12;
+      }
+
+      // 5. Data Tables via autoTable (Crisp vector rendering)
+      if (isSupplier) {
+        const head = [['SL', 'DATE', 'CHALLAN / REF', 'PARTICULARS / DESCRIPTION', 'DEBIT (Tk)', 'CREDIT (Tk)', 'BALANCE (Tk)', 'MODE']];
+        const body = supplierLedger.map((row) => {
+          let desc = '';
+          if (row.type === 'purchase') {
+            if (row.items && row.items.length > 0) {
+              desc = row.items.map((it) => `${cleanPdfText(it.item_name) || 'Gray Thread'}: ${it.quantity} lbs @ Tk ${it.unit_price}`).join(', ');
+            } else {
+              desc = cleanPdfText(row.description) || 'Raw Material Purchase';
+            }
+          } else {
+            desc = cleanPdfText(row.description) || `Bank Payment - ${cleanPdfText(row.paymentMethod) || 'Bank'}`;
+          }
+
+          return [
+            String(row.sl),
+            new Date(row.date).toLocaleDateString('en-GB'),
+            cleanPdfText(row.refNo) || '',
+            desc,
+            row.debit > 0 ? formatAmount(row.debit) : '-',
+            row.credit > 0 ? formatAmount(row.credit) : '-',
+            formatAmount(row.balance),
+            row.type === 'purchase' ? String(row.status || 'UNPAID').toUpperCase() : String(row.paymentMethod || 'PAID').toUpperCase(),
+          ];
+        });
+
+        const foot = [[
+          { content: 'GRAND TOTALS:', colSpan: 4, styles: { halign: 'right', fontStyle: 'bold' } },
+          { content: formatAmount(supplierTotalBilled), styles: { halign: 'right', fontStyle: 'bold' } },
+          { content: formatAmount(supplierTotalPaid), styles: { halign: 'right', fontStyle: 'bold' } },
+          { content: formatAmount(supplierTotalDue), styles: { halign: 'right', fontStyle: 'bold' } },
+          { content: supplierTotalDue > 0 ? 'DUE' : 'CLEAR', styles: { halign: 'center', fontStyle: 'bold' } },
+        ]];
+
+        autoTable(doc, {
+          startY: currentY,
+          margin: { left: margin, right: margin, bottom: 60 },
+          head: head,
+          body: body,
+          foot: foot,
+          theme: 'grid',
+          styles: {
+            fontSize: 7.5,
+            cellPadding: 3.5,
+            textColor: [0, 0, 0],
+            lineColor: [0, 0, 0],
+            lineWidth: 0.5,
+            font: 'helvetica',
+          },
+          headStyles: {
+            fillColor: [240, 240, 240],
+            textColor: [0, 0, 0],
+            fontStyle: 'bold',
+            lineWidth: 0.75,
+            lineColor: [0, 0, 0],
+          },
+          footStyles: {
+            fillColor: [240, 240, 240],
+            textColor: [0, 0, 0],
+            fontStyle: 'bold',
+            lineWidth: 0.75,
+            lineColor: [0, 0, 0],
+          },
+          columnStyles: {
+            0: { halign: 'center', cellWidth: 24 },
+            1: { cellWidth: 52 },
+            2: { cellWidth: 68, fontStyle: 'bold' },
+            3: { cellWidth: 'auto' },
+            4: { halign: 'right', cellWidth: 55 },
+            5: { halign: 'right', cellWidth: 55 },
+            6: { halign: 'right', cellWidth: 55, fontStyle: 'bold' },
+            7: { halign: 'center', cellWidth: 42 },
+          },
+          didDrawPage: (data) => {
+            const footerY = pageHeight - 28;
+            doc.setFont('helvetica', 'normal');
+            doc.setFontSize(6.5);
+            doc.setTextColor(90, 90, 90);
+            doc.text('ALMAS ACCESSORIES INDUSTRIES | Factory 1: Baipal, Savar | Factory 2: Khatungonj, Chittagong | Showroom: Baipal, Dhaka', pageWidth / 2, footerY, { align: 'center' });
+            doc.text(`Page ${data.pageNumber}`, pageWidth - margin, footerY, { align: 'right' });
+          },
+        });
+      } else if (isCustomer) {
+        const head = [['SL', 'DATE', 'INVOICE / CHALLAN', 'SUBTOTAL (Tk)', 'DISCOUNT (Tk)', 'NET BILL (Tk)', 'PAID (Tk)', 'DUE (Tk)', 'STATUS']];
+        const body = customerSales.map((s, idx) => {
+          const net = parseFloat(s.net_amount) || 0;
+          const paid = parseFloat(s.paid_amount) || 0;
+          const due = Math.max(0, net - paid);
+          return [
+            String(idx + 1),
+            new Date(s.sale_date).toLocaleDateString('en-GB'),
+            cleanPdfText(s.invoice_number) || `INV#${s.id.substring(0, 8).toUpperCase()}`,
+            formatAmount(s.total_amount),
+            formatAmount(s.discount),
+            formatAmount(net),
+            formatAmount(paid),
+            formatAmount(due),
+            String(s.payment_status).toUpperCase(),
+          ];
+        });
+
+        const foot = [[
+          { content: 'GRAND TOTALS:', colSpan: 5, styles: { halign: 'right', fontStyle: 'bold' } },
+          { content: formatAmount(customerTotalBilled), styles: { halign: 'right', fontStyle: 'bold' } },
+          { content: formatAmount(customerTotalPaid), styles: { halign: 'right', fontStyle: 'bold' } },
+          { content: formatAmount(customerTotalDue), styles: { halign: 'right', fontStyle: 'bold' } },
+          { content: customerTotalDue > 0 ? 'DUE' : 'PAID', styles: { halign: 'center', fontStyle: 'bold' } },
+        ]];
+
+        autoTable(doc, {
+          startY: currentY,
+          margin: { left: margin, right: margin, bottom: 60 },
+          head: head,
+          body: body,
+          foot: foot,
+          theme: 'grid',
+          styles: {
+            fontSize: 7.5,
+            cellPadding: 3.5,
+            textColor: [0, 0, 0],
+            lineColor: [0, 0, 0],
+            lineWidth: 0.5,
+            font: 'helvetica',
+          },
+          headStyles: {
+            fillColor: [240, 240, 240],
+            textColor: [0, 0, 0],
+            fontStyle: 'bold',
+            lineWidth: 0.75,
+            lineColor: [0, 0, 0],
+          },
+          footStyles: {
+            fillColor: [240, 240, 240],
+            textColor: [0, 0, 0],
+            fontStyle: 'bold',
+            lineWidth: 0.75,
+            lineColor: [0, 0, 0],
+          },
+          didDrawPage: (data) => {
+            const footerY = pageHeight - 28;
+            doc.setFont('helvetica', 'normal');
+            doc.setFontSize(6.5);
+            doc.setTextColor(90, 90, 90);
+            doc.text('ALMAS ACCESSORIES INDUSTRIES | Factory 1: Baipal, Savar | Factory 2: Khatungonj, Chittagong | Showroom: Baipal, Dhaka', pageWidth / 2, footerY, { align: 'center' });
+            doc.text(`Page ${data.pageNumber}`, pageWidth - margin, footerY, { align: 'right' });
+          },
+        });
+      } else if (isPayment) {
+        const head = [['SL', 'DATE', 'RECEIPT #', 'CUSTOMER NAME', 'INVOICE REF', 'METHOD', 'NOTES', 'AMOUNT (Tk)']];
+        const body = customerPayments.map((p, idx) => {
+          const invNo = p.reference_invoice_id
+            ? paymentSalesMap[p.reference_invoice_id] || `INV#${p.reference_invoice_id.substring(0, 8).toUpperCase()}`
+            : 'Direct Receipt';
+          return [
+            String(idx + 1),
+            new Date(p.payment_date).toLocaleDateString('en-GB'),
+            cleanPdfText(p.payment_number) || `RCP#${p.id.substring(0, 8).toUpperCase()}`,
+            cleanPdfText(p.contacts?.name) || 'Walk-in',
+            cleanPdfText(invNo),
+            String(p.payment_method || 'CASH').toUpperCase(),
+            cleanPdfText(p.notes) || '-',
+            formatAmount(p.amount),
+          ];
+        });
+
+        const foot = [[
+          { content: 'TOTAL COLLECTED:', colSpan: 7, styles: { halign: 'right', fontStyle: 'bold' } },
+          { content: formatAmount(paymentsTotalAmount), styles: { halign: 'right', fontStyle: 'bold' } },
+        ]];
+
+        autoTable(doc, {
+          startY: currentY,
+          margin: { left: margin, right: margin, bottom: 60 },
+          head: head,
+          body: body,
+          foot: foot,
+          theme: 'grid',
+          styles: {
+            fontSize: 7.5,
+            cellPadding: 3.5,
+            textColor: [0, 0, 0],
+            lineColor: [0, 0, 0],
+            lineWidth: 0.5,
+            font: 'helvetica',
+          },
+          headStyles: {
+            fillColor: [240, 240, 240],
+            textColor: [0, 0, 0],
+            fontStyle: 'bold',
+            lineWidth: 0.75,
+            lineColor: [0, 0, 0],
+          },
+          footStyles: {
+            fillColor: [240, 240, 240],
+            textColor: [0, 0, 0],
+            fontStyle: 'bold',
+            lineWidth: 0.75,
+            lineColor: [0, 0, 0],
+          },
+          didDrawPage: (data) => {
+            const footerY = pageHeight - 28;
+            doc.setFont('helvetica', 'normal');
+            doc.setFontSize(6.5);
+            doc.setTextColor(90, 90, 90);
+            doc.text('ALMAS ACCESSORIES INDUSTRIES | Factory 1: Baipal, Savar | Factory 2: Khatungonj, Chittagong | Showroom: Baipal, Dhaka', pageWidth / 2, footerY, { align: 'center' });
+            doc.text(`Page ${data.pageNumber}`, pageWidth - margin, footerY, { align: 'right' });
+          },
+        });
+      }
+
+      // 6. Signatures on final page
+      const finalY = (doc.lastAutoTable && doc.lastAutoTable.finalY) ? doc.lastAutoTable.finalY + 40 : currentY + 60;
+      if (finalY < pageHeight - 65) {
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(7.5);
+        doc.setLineWidth(0.75);
+        doc.setDrawColor(0, 0, 0);
+
+        doc.line(margin + 20, finalY, margin + 110, finalY);
+        doc.text('Prepared By', margin + 65, finalY + 10, { align: 'center' });
+
+        doc.line(pageWidth / 2 - 45, finalY, pageWidth / 2 + 45, finalY);
+        doc.text('Checked By', pageWidth / 2, finalY + 10, { align: 'center' });
+
+        doc.line(pageWidth - margin - 110, finalY, pageWidth - margin - 20, finalY);
+        doc.text('Authorized Signatory', pageWidth - margin - 65, finalY + 10, { align: 'center' });
+      }
+
       const filename = getPdfFileName();
-      const sourceEl = document.getElementById('report-printable-area') || document.getElementById('report-printable-source');
-      if (!sourceEl) {
-        console.error('Printable content source not found');
-        return;
-      }
-
-      // Clone node and mount at top of DOM so html2canvas computes layout, styles & fonts properly
-      tempContainer = sourceEl.cloneNode(true);
-      tempContainer.id = 'temp-export-pdf-node';
-      tempContainer.style.position = 'absolute';
-      tempContainer.style.left = '0px';
-      tempContainer.style.top = '0px';
-      tempContainer.style.width = '820px';
-      tempContainer.style.backgroundColor = '#ffffff';
-      tempContainer.style.zIndex = '999999';
-      tempContainer.style.opacity = '1';
-      tempContainer.style.visibility = 'visible';
-      tempContainer.style.display = 'block';
-      tempContainer.style.pointerEvents = 'none';
-
-      document.body.appendChild(tempContainer);
-
-      // Allow browser reflow & image decoding
-      await new Promise((resolve) => setTimeout(resolve, 150));
-
-      const opt = {
-        margin: [8, 6, 8, 6],
-        filename: filename,
-        image: { type: 'jpeg', quality: 0.98 },
-        html2canvas: {
-          scale: 2,
-          useCORS: true,
-          logging: false,
-          scrollY: 0,
-          scrollX: 0,
-          windowWidth: 820,
-        },
-        jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
-        pagebreak: { mode: ['avoid-all', 'css', 'legacy'] },
-      };
-
-      await html2pdf().set(opt).from(tempContainer).save();
+      doc.save(filename);
     } catch (err) {
-      console.error('PDF auto-download failed:', err);
+      console.error('jsPDF auto-download failed:', err);
     } finally {
-      if (tempContainer && tempContainer.parentNode) {
-        tempContainer.parentNode.removeChild(tempContainer);
-      }
       setIsDownloadingPdf(false);
     }
   };
@@ -932,7 +1397,7 @@ export default function Reports({ userProfile, branches = [] }) {
                 Total Quantity
               </div>
               <div style={{ fontSize: '13px', fontWeight: 900, marginTop: '2px' }}>
-                {supplierTotalQty.toLocaleString()} pcs
+                {supplierTotalQty.toLocaleString()} lbs
               </div>
             </div>
             <div style={{ padding: '6px 8px', borderRight: '1px solid #000000', textAlign: 'center' }}>
@@ -1120,7 +1585,7 @@ export default function Reports({ userProfile, branches = [] }) {
                           <div style={{ fontSize: '9.5px', color: '#444444', marginTop: '1px' }}>
                             {row.items.map((it, idx) => (
                               <span key={idx} style={{ marginRight: '6px' }}>
-                                [{it.item_name || 'Item'}: {it.quantity} pcs @ ৳{it.unit_price}]
+                                [{it.item_name || 'Item'}: {it.quantity} lbs @ ৳{it.unit_price}]
                               </span>
                             ))}
                           </div>
@@ -2325,7 +2790,7 @@ export default function Reports({ userProfile, branches = [] }) {
                       Total Qty Purchased
                     </div>
                     <div style={{ fontSize: '0.85rem', fontWeight: 800, color: '#0369a1', fontFamily: 'Outfit, sans-serif' }}>
-                      {supplierTotalQty.toLocaleString()} pcs
+                      {supplierTotalQty.toLocaleString()} lbs
                     </div>
                   </div>
 
@@ -2421,7 +2886,7 @@ export default function Reports({ userProfile, branches = [] }) {
                                    <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
                                     {row.items.map((it, i) => (
                                       <span key={i} style={{ marginRight: '0.5rem' }}>
-                                        • {it.item_name || 'Item'}: {it.quantity} @ ৳{it.unit_price}
+                                        • {it.item_name || 'Item'}: {it.quantity} lbs @ ৳{it.unit_price}
                                       </span>
                                     ))}
                                   </div>
@@ -2499,7 +2964,7 @@ export default function Reports({ userProfile, branches = [] }) {
                               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.25rem', marginTop: '0.25rem' }}>
                                 {row.items.map((it, i) => (
                                   <span key={i} style={{ fontSize: '0.7rem', backgroundColor: '#ffffff', border: '1px solid #cbd5e1', borderRadius: '4px', padding: '0.1rem 0.35rem', color: '#334155' }}>
-                                    📦 {it.item_name || 'Item'}: <strong>{it.quantity} pcs</strong> @ ৳{it.unit_price}
+                                    📦 {it.item_name || 'Item'}: <strong>{it.quantity} lbs</strong> @ ৳{it.unit_price}
                                   </span>
                                 ))}
                               </div>

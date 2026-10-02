@@ -170,7 +170,7 @@ async function seedKhanTwisting() {
           net_amount: pur.debit,
           paid_amount: 0,
           payment_status: 'unpaid',
-          notes: `Challan #${pur.challan} (${pur.qty} pcs @ ৳${pur.price})`,
+          notes: `Challan #${pur.challan} (${pur.qty} lbs @ ৳${pur.price})`,
           created_by: adminProfile.id,
         }
       ])
