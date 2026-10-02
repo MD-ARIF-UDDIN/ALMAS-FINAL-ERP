@@ -642,25 +642,58 @@ export default function Reports({ userProfile, branches = [] }) {
   };
 
   const handleDownloadPdf = async () => {
-    const element = document.getElementById('report-pdf-render-target') || document.getElementById('report-printable-area');
-    if (!element) return;
-
     setIsDownloadingPdf(true);
+    let tempContainer = null;
     try {
       const filename = getPdfFileName();
+      const sourceEl = document.getElementById('report-printable-area') || document.getElementById('report-printable-source');
+      if (!sourceEl) {
+        console.error('Printable content source not found');
+        return;
+      }
+
+      // Clone node and mount at top of DOM so html2canvas computes layout, styles & fonts properly
+      tempContainer = sourceEl.cloneNode(true);
+      tempContainer.id = 'temp-export-pdf-node';
+      tempContainer.style.position = 'absolute';
+      tempContainer.style.left = '0px';
+      tempContainer.style.top = '0px';
+      tempContainer.style.width = '820px';
+      tempContainer.style.backgroundColor = '#ffffff';
+      tempContainer.style.zIndex = '999999';
+      tempContainer.style.opacity = '1';
+      tempContainer.style.visibility = 'visible';
+      tempContainer.style.display = 'block';
+      tempContainer.style.pointerEvents = 'none';
+
+      document.body.appendChild(tempContainer);
+
+      // Allow browser reflow & image decoding
+      await new Promise((resolve) => setTimeout(resolve, 150));
+
       const opt = {
-        margin: [6, 6, 6, 6],
+        margin: [8, 6, 8, 6],
         filename: filename,
         image: { type: 'jpeg', quality: 0.98 },
-        html2canvas: { scale: 2, useCORS: true, logging: false },
+        html2canvas: {
+          scale: 2,
+          useCORS: true,
+          logging: false,
+          scrollY: 0,
+          scrollX: 0,
+          windowWidth: 820,
+        },
         jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
         pagebreak: { mode: ['avoid-all', 'css', 'legacy'] },
       };
 
-      await html2pdf().set(opt).from(element).save();
+      await html2pdf().set(opt).from(tempContainer).save();
     } catch (err) {
       console.error('PDF auto-download failed:', err);
     } finally {
+      if (tempContainer && tempContainer.parentNode) {
+        tempContainer.parentNode.removeChild(tempContainer);
+      }
       setIsDownloadingPdf(false);
     }
   };
@@ -2856,20 +2889,9 @@ export default function Reports({ userProfile, branches = [] }) {
       )}
 
       {/* ========================================================= */}
-      {/* HIDDEN TARGET FOR DIRECT AUTO-DOWNLOAD OF PDF (NO PRINT)  */}
+      {/* HIDDEN TEMPLATE SOURCE FOR PDF AUTO-DOWNLOAD              */}
       {/* ========================================================= */}
-      <div
-        id="report-pdf-render-target"
-        style={{
-          position: 'fixed',
-          left: '-9999px',
-          top: 0,
-          width: '850px',
-          backgroundColor: '#ffffff',
-          zIndex: -100,
-          pointerEvents: 'none',
-        }}
-      >
+      <div id="report-printable-source" style={{ display: 'none' }}>
         {renderPrintDocument()}
       </div>
 
