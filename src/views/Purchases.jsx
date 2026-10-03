@@ -2027,7 +2027,7 @@ export default function Purchases({ userProfile, branches, addToast }) {
 
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.86rem' }}>
                     <span style={{ color: 'var(--text-secondary)' }}>Total Quantity:</span>
-                    <strong style={{ fontWeight: 700, color: 'var(--text-primary)' }}>{getTotalQuantity()} pcs</strong>
+                    <strong style={{ fontWeight: 700, color: 'var(--text-primary)' }}>{getTotalQuantity()}</strong>
                   </div>
 
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.86rem' }}>
@@ -2887,7 +2887,7 @@ export default function Purchases({ userProfile, branches, addToast }) {
 
                     <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.82rem' }}>
                       <span style={{ color: 'var(--text-secondary)' }}>Total Quantity:</span>
-                      <strong style={{ fontWeight: 700, color: 'var(--text-primary)' }}>{getEditTotalQuantity()} pcs</strong>
+                      <strong style={{ fontWeight: 700, color: 'var(--text-primary)' }}>{getEditTotalQuantity()}</strong>
                     </div>
 
                     <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.82rem' }}>

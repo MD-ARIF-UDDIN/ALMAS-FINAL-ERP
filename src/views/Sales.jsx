@@ -2466,7 +2466,7 @@ export default function Sales({ userProfile, branches, addToast }) {
                         )}
                       </td>
                       <td style={{ textAlign: 'center', fontWeight: 700, color: '#0284c7' }}>
-                        {totalQty > 0 ? `${totalQty} pcs` : '—'}
+                        {totalQty > 0 ? totalQty : '—'}
                       </td>
                       <td style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 600 }}>৳{formatAmount(sale.net_amount)}</td>
                       <td style={{ fontFamily: 'Outfit, sans-serif', color: 'var(--success-text)' }}>৳{formatAmount(sale.paid_amount)}</td>
@@ -2664,7 +2664,7 @@ export default function Sales({ userProfile, branches, addToast }) {
                     <div>
                       <span style={{ color: 'var(--text-muted)', fontSize: '0.7rem', display: 'block' }}>Total Qty</span>
                       <span style={{ fontWeight: 700, color: '#0284c7', fontSize: '0.88rem' }}>
-                        {((sale.sale_items || []).reduce((sum, item) => sum + (parseFloat(item.quantity) || 0), 0)) || '—'} {((sale.sale_items || []).reduce((sum, item) => sum + (parseFloat(item.quantity) || 0), 0)) > 0 ? 'pcs' : ''}
+                        {((sale.sale_items || []).reduce((sum, item) => sum + (parseFloat(item.quantity) || 0), 0)) || '—'}
                       </span>
                     </div>
                     <div>
@@ -3644,7 +3644,7 @@ export default function Sales({ userProfile, branches, addToast }) {
                     <div className="cart-totals-summary">
                       <div className="totals-row">
                         <span>Total Quantity</span>
-                        <strong style={{ fontWeight: 700, color: 'var(--text-primary)' }}>{getTotalQuantity()} pcs</strong>
+                        <strong style={{ fontWeight: 700, color: 'var(--text-primary)' }}>{getTotalQuantity()}</strong>
                       </div>
                       <div className="totals-row">
                         <span>Subtotal</span>
@@ -3738,7 +3738,7 @@ export default function Sales({ userProfile, branches, addToast }) {
                 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid rgba(0,0,0,0.06)', paddingBottom: '0.35rem', fontSize: '0.84rem' }}>
                     <span style={{ color: 'var(--text-secondary)' }}>Total Quantity:</span>
-                    <strong style={{ color: 'var(--text-primary)', fontWeight: 700 }}>{getTotalQuantity()} pcs</strong>
+                    <strong style={{ color: 'var(--text-primary)', fontWeight: 700 }}>{getTotalQuantity()}</strong>
                   </div>
                   <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', textTransform: 'uppercase', fontWeight: 600, marginTop: '0.2rem' }}>Total Amount</div>
                   <div style={{ fontFamily: 'Outfit, sans-serif', fontSize: '1.85rem', fontWeight: 800, color: 'var(--primary-color, #2563eb)' }}>
@@ -5451,7 +5451,7 @@ export default function Sales({ userProfile, branches, addToast }) {
                           <strong style={{ fontWeight: 700, color: 'var(--text-primary)' }}>
                             {hasModifications
                               ? currentItems.reduce((acc, it) => acc + (parseFloat(it.quantity) || 0), 0)
-                              : saleDetailItems.reduce((acc, it) => acc + (parseFloat(it.quantity) || 0), 0)} pcs
+                              : saleDetailItems.reduce((acc, it) => acc + (parseFloat(it.quantity) || 0), 0)}
                           </strong>
                         </div>
                         {hasModifications && (
@@ -6182,7 +6182,7 @@ export default function Sales({ userProfile, branches, addToast }) {
                   }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem' }}>
                       <span style={{ color: 'var(--text-secondary)' }}>Total Quantity:</span>
-                      <strong style={{ fontWeight: 700, color: 'var(--text-primary)' }}>{getEditTotalQuantity()} pcs</strong>
+                      <strong style={{ fontWeight: 700, color: 'var(--text-primary)' }}>{getEditTotalQuantity()}</strong>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem' }}>
                       <span>Subtotal:</span>
