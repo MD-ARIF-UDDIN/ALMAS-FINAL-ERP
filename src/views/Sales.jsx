@@ -415,6 +415,10 @@ export default function Sales({ userProfile, branches, addToast }) {
           contacts (
             name,
             phone
+          ),
+          sale_items (
+            id,
+            quantity
           )
         `, { count: 'exact' })
         .order('sale_date', { ascending: false })
@@ -677,6 +681,10 @@ export default function Sales({ userProfile, branches, addToast }) {
   };
 
   // Math Calculations
+  const getTotalQuantity = () => {
+    return cart.reduce((sum, item) => sum + (parseFloat(item.quantity) || 0), 0);
+  };
+
   const getSubtotal = () => {
     return cart.reduce((sum, item) => sum + getItemPrice(item) * (parseFloat(item.quantity) || 0), 0);
   };
@@ -1414,6 +1422,10 @@ export default function Sales({ userProfile, branches, addToast }) {
   };
 
   // Calculations for Edit Modal
+  const getEditTotalQuantity = () => {
+    return editCart.reduce((sum, item) => sum + (parseFloat(item.quantity) || 0), 0);
+  };
+
   const getEditSubtotal = () => {
     return editCart.reduce((sum, item) => sum + (parseFloat(item.unit_price) || 0) * (parseFloat(item.quantity) || 0), 0);
   };
@@ -2371,6 +2383,7 @@ export default function Sales({ userProfile, branches, addToast }) {
                 {userProfile?.role === 'owner' && <th>Branch</th>}
                 <th>Sale Date</th>
                 <th>Buyer Name</th>
+                <th style={{ width: '85px', textAlign: 'center' }}>Total Qty</th>
                 <th>Net Value</th>
                 <th>Paid Amount</th>
                 <th>Dues</th>
@@ -2380,10 +2393,10 @@ export default function Sales({ userProfile, branches, addToast }) {
             </thead>
             <tbody>
               {loading ? (
-                <TableLoading colSpan={userProfile?.role === 'owner' ? 11 : 10} message="Fetching sales records..." />
+                <TableLoading colSpan={userProfile?.role === 'owner' ? 12 : 11} message="Fetching sales records..." />
               ) : salesHistory.length === 0 ? (
                 <tr>
-                  <td colSpan={userProfile?.role === 'owner' ? 11 : 10} style={{ textAlign: 'center', padding: '2rem' }}>
+                  <td colSpan={userProfile?.role === 'owner' ? 12 : 11} style={{ textAlign: 'center', padding: '2rem' }}>
                     {historySearchQuery.trim() ? `No sales invoices found matching "${historySearchQuery}".` : 'No sales invoices recorded yet. Click "Create Invoice (POS)" to sell items.'}
                   </td>
                 </tr>
@@ -2392,6 +2405,7 @@ export default function Sales({ userProfile, branches, addToast }) {
                   const due = sale.net_amount - sale.paid_amount;
                   const rowNumber = (salesPage - 1) * salesPageSize + index + 1;
                   const receiptNo = getSaleReceiptNo(sale);
+                  const totalQty = (sale.sale_items || []).reduce((sum, item) => sum + (parseFloat(item.quantity) || 0), 0);
                   return (
                     <tr key={sale.id}>
                       <td>{rowNumber}</td>
@@ -2450,6 +2464,9 @@ export default function Sales({ userProfile, branches, addToast }) {
                         {sale.contacts?.phone && (
                           <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>{sale.contacts.phone}</div>
                         )}
+                      </td>
+                      <td style={{ textAlign: 'center', fontWeight: 700, color: '#0284c7' }}>
+                        {totalQty > 0 ? `${totalQty} pcs` : '—'}
                       </td>
                       <td style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 600 }}>৳{formatAmount(sale.net_amount)}</td>
                       <td style={{ fontFamily: 'Outfit, sans-serif', color: 'var(--success-text)' }}>৳{formatAmount(sale.paid_amount)}</td>
@@ -2644,6 +2661,12 @@ export default function Sales({ userProfile, branches, addToast }) {
                     border: '1px solid #f1f5f9',
                     fontSize: '0.82rem',
                   }}>
+                    <div>
+                      <span style={{ color: 'var(--text-muted)', fontSize: '0.7rem', display: 'block' }}>Total Qty</span>
+                      <span style={{ fontWeight: 700, color: '#0284c7', fontSize: '0.88rem' }}>
+                        {((sale.sale_items || []).reduce((sum, item) => sum + (parseFloat(item.quantity) || 0), 0)) || '—'} {((sale.sale_items || []).reduce((sum, item) => sum + (parseFloat(item.quantity) || 0), 0)) > 0 ? 'pcs' : ''}
+                      </span>
+                    </div>
                     <div>
                       <span style={{ color: 'var(--text-muted)', fontSize: '0.7rem', display: 'block' }}>Net Value</span>
                       <span style={{ fontWeight: 800, color: 'var(--text-primary)', fontSize: '0.92rem' }}>
@@ -3620,6 +3643,10 @@ export default function Sales({ userProfile, branches, addToast }) {
                   {cart.length > 0 && (
                     <div className="cart-totals-summary">
                       <div className="totals-row">
+                        <span>Total Quantity</span>
+                        <strong style={{ fontWeight: 700, color: 'var(--text-primary)' }}>{getTotalQuantity()} pcs</strong>
+                      </div>
+                      <div className="totals-row">
                         <span>Subtotal</span>
                         <span>৳{formatAmount(getSubtotal())}</span>
                       </div>
@@ -3698,16 +3725,23 @@ export default function Sales({ userProfile, branches, addToast }) {
             <form onSubmit={handleCheckoutSubmit}>
               <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '1.15rem', padding: '1.25rem' }}>
 
-                {/* TOTAL AMOUNT BANNER */}
+                {/* TOTAL AMOUNT & QUANTITY BANNER */}
                 <div style={{
                   background: 'var(--primary-light, rgba(37,99,235,0.08))',
-                  padding: '1rem',
+                  padding: '0.85rem 1rem',
                   borderRadius: 'var(--radius-md, 8px)',
                   textAlign: 'center',
-                  border: '1px solid var(--border-color)'
+                  border: '1px solid var(--border-color)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '0.25rem'
                 }}>
-                  <div style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', textTransform: 'uppercase', fontWeight: 600 }}>Total Amount</div>
-                  <div style={{ fontFamily: 'Outfit, sans-serif', fontSize: '2rem', fontWeight: 800, color: 'var(--primary-color, #2563eb)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid rgba(0,0,0,0.06)', paddingBottom: '0.35rem', fontSize: '0.84rem' }}>
+                    <span style={{ color: 'var(--text-secondary)' }}>Total Quantity:</span>
+                    <strong style={{ color: 'var(--text-primary)', fontWeight: 700 }}>{getTotalQuantity()} pcs</strong>
+                  </div>
+                  <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', textTransform: 'uppercase', fontWeight: 600, marginTop: '0.2rem' }}>Total Amount</div>
+                  <div style={{ fontFamily: 'Outfit, sans-serif', fontSize: '1.85rem', fontWeight: 800, color: 'var(--primary-color, #2563eb)' }}>
                     ৳{formatAmount(getGrandTotal())}
                   </div>
                 </div>
@@ -5412,6 +5446,14 @@ export default function Sales({ userProfile, branches, addToast }) {
                         gap: '0.35rem',
                         fontSize: '0.85rem'
                       }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem' }}>
+                          <span style={{ color: 'var(--text-secondary)' }}>Total Quantity:</span>
+                          <strong style={{ fontWeight: 700, color: 'var(--text-primary)' }}>
+                            {hasModifications
+                              ? currentItems.reduce((acc, it) => acc + (parseFloat(it.quantity) || 0), 0)
+                              : saleDetailItems.reduce((acc, it) => acc + (parseFloat(it.quantity) || 0), 0)} pcs
+                          </strong>
+                        </div>
                         {hasModifications && (
                           <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-secondary)', fontSize: '0.8rem' }}>
                             <span>Initial Total:</span>
@@ -6138,6 +6180,10 @@ export default function Sales({ userProfile, branches, addToast }) {
                     gap: '0.45rem',
                     justifyContent: 'center'
                   }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem' }}>
+                      <span style={{ color: 'var(--text-secondary)' }}>Total Quantity:</span>
+                      <strong style={{ fontWeight: 700, color: 'var(--text-primary)' }}>{getEditTotalQuantity()} pcs</strong>
+                    </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem' }}>
                       <span>Subtotal:</span>
                       <span style={{ fontWeight: 600 }}>৳{formatAmount(getEditSubtotal())}</span>
