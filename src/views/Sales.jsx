@@ -1187,8 +1187,20 @@ export default function Sales({ userProfile, branches, addToast }) {
         .eq('id', saleId)
         .single();
 
+      const mappedCartForPrint = cart.map((item) => {
+        const p = getItemPrice(item);
+        const q = parseFloat(item.quantity) || 1;
+        return {
+          ...item,
+          unit_price: p,
+          unitPrice: p,
+          total_price: p * q,
+          products: item.product || item.products,
+        };
+      });
+
       setActiveInvoice(populatedSale);
-      setInvoiceItems(cart);
+      setInvoiceItems(mappedCartForPrint);
       setShowInvoicePrint(true);
 
       // Reset state
@@ -4104,8 +4116,14 @@ export default function Sales({ userProfile, branches, addToast }) {
                   <tbody>
                     {invoiceItems.map((item, index) => {
                       const qty = parseFloat(item.quantity) || 1;
-                      const price = parseFloat(item.unit_price || item.product?.sale_price || 0);
-                      const total = parseFloat(item.total_price || (qty * price));
+                      const price = parseFloat(
+                        item.unit_price !== undefined && item.unit_price !== ''
+                          ? item.unit_price
+                          : item.unitPrice !== undefined && item.unitPrice !== ''
+                          ? item.unitPrice
+                          : item.products?.sale_price || item.product?.sale_price || 0
+                      );
+                      const total = parseFloat(item.total_price !== undefined && item.total_price !== '' ? item.total_price : (qty * price));
                       const itemSize = item.size || item.products?.category || item.product?.category || '—';
                       const itemCartons = item.number_of_carton !== undefined && item.number_of_carton !== null ? item.number_of_carton : '0';
                       return (
