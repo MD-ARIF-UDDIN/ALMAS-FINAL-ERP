@@ -1111,6 +1111,34 @@ export default function Sales({ userProfile, branches, addToast }) {
             console.error('Error updating challan item remaining qty:', challanErr);
           }
         }
+
+        // 2.2 Deduct sold quantities from branch inventory
+        for (const item of cart) {
+          const resolvedProdId = customProdIdMap[item.product.id] || item.product.id;
+          const qty = parseFloat(item.quantity) || 1;
+          if (resolvedProdId && qty > 0) {
+            try {
+              const { data: invItem } = await supabase
+                .from('inventory')
+                .select('id, quantity')
+                .eq('branch_id', selectedBranchId)
+                .eq('product_id', resolvedProdId)
+                .maybeSingle();
+
+              if (invItem) {
+                await supabase
+                  .from('inventory')
+                  .update({
+                    quantity: Math.max(0, (invItem.quantity || 0) - qty),
+                    updated_at: new Date().toISOString(),
+                  })
+                  .eq('id', invItem.id);
+              }
+            } catch (stockErr) {
+              console.error('Error updating inventory stock on checkout:', stockErr);
+            }
+          }
+        }
       }
 
       // 3. Register payment if initial payment is made
