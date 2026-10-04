@@ -25,6 +25,15 @@ export default function Purchases({ userProfile, branches, addToast }) {
   const [purchasesTotalCount, setPurchasesTotalCount] = useState(0);
   const [purchaseSearchQuery, setPurchaseSearchQuery] = useState('');
 
+  // Purchases 4-Metric Summary State (Total Qty, Today Qty, Total Price, Today Price)
+  const [purchasesSummary, setPurchasesSummary] = useState({
+    total_qty: 0,
+    today_qty: 0,
+    total_amount: 0,
+    today_amount: 0,
+  });
+  const [loadingSummary, setLoadingSummary] = useState(false);
+
   // View states
   // View Details states
   const [selectedPurchase, setSelectedPurchase] = useState(null);
@@ -203,12 +212,87 @@ export default function Purchases({ userProfile, branches, addToast }) {
     }
   }, [selectedBranchId, purchasesPage, purchasesPageSize, purchaseSearchQuery, userProfile?.role]);
 
-  // Branch purchases fetched whenever selected branch changes
+  // High-performance Purchases Summary Fetcher (Instant DB RPC with client fallback)
+  const fetchPurchasesSummary = useCallback(async () => {
+    if (!selectedBranchId) return;
+    setLoadingSummary(true);
+    try {
+      // 1. Instant Server-Side Aggregation via Postgres RPC
+      const rpcParam = selectedBranchId === 'all' ? {} : { p_branch_id: selectedBranchId };
+      const { data: rpcData, error: rpcError } = await supabase.rpc('get_purchases_summary', rpcParam);
+
+      if (!rpcError && rpcData) {
+        setPurchasesSummary({
+          total_qty: Number(rpcData.total_qty) || 0,
+          today_qty: Number(rpcData.today_qty) || 0,
+          total_amount: Number(rpcData.total_amount) || 0,
+          today_amount: Number(rpcData.today_amount) || 0,
+        });
+        return;
+      }
+
+      // 2. Optimized Fallback (if RPC is not yet created in Supabase)
+      const todayStr = new Date().toISOString().split('T')[0];
+      let purQuery = supabase.from('purchases').select('id, net_amount, purchase_date');
+      if (selectedBranchId && selectedBranchId !== 'all') {
+        purQuery = purQuery.eq('branch_id', selectedBranchId);
+      }
+      const { data: purRows, error: purErr } = await purQuery;
+      if (purErr) throw purErr;
+
+      let totalAmt = 0;
+      let todayAmt = 0;
+      const allPurIds = [];
+      const todayPurIds = new Set();
+
+      (purRows || []).forEach((p) => {
+        const net = Number(p.net_amount) || 0;
+        totalAmt += net;
+        allPurIds.push(p.id);
+        if (p.purchase_date === todayStr) {
+          todayAmt += net;
+          todayPurIds.add(p.id);
+        }
+      });
+
+      let totalQty = 0;
+      let todayQty = 0;
+
+      if (allPurIds.length > 0) {
+        const { data: itemRows } = await supabase
+          .from('purchase_items')
+          .select('purchase_id, quantity')
+          .in('purchase_id', allPurIds.slice(0, 1000));
+
+        (itemRows || []).forEach((it) => {
+          const q = Number(it.quantity) || 0;
+          totalQty += q;
+          if (todayPurIds.has(it.purchase_id)) {
+            todayQty += q;
+          }
+        });
+      }
+
+      setPurchasesSummary({
+        total_qty: totalQty,
+        today_qty: todayQty,
+        total_amount: totalAmt,
+        today_amount: todayAmt,
+      });
+    } catch (err) {
+      console.error('Error fetching purchases summary:', err);
+    } finally {
+      setLoadingSummary(false);
+    }
+  }, [selectedBranchId]);
+
+  // Branch purchases and summary fetched whenever selected branch changes
   useEffect(() => {
     if (selectedBranchId) {
       fetchPurchases();
+      fetchPurchasesSummary();
     }
-  }, [selectedBranchId, fetchPurchases]);
+  }, [selectedBranchId, fetchPurchases, fetchPurchasesSummary]);
 
   const fetchSuppliers = async () => {
     try {
@@ -649,6 +733,7 @@ export default function Purchases({ userProfile, branches, addToast }) {
       
       // Refresh history list and catalog if new products were created
       fetchPurchases();
+      fetchPurchasesSummary();
       if (hadNewProducts) {
         fetchCatalogProducts();
       }
@@ -1048,6 +1133,7 @@ export default function Purchases({ userProfile, branches, addToast }) {
       setShowEditPurchaseModal(false);
       setEditingPurchase(null);
       fetchPurchases();
+      fetchPurchasesSummary();
       fetchCatalogProducts();
     } catch (err) {
       console.error('Error saving purchase edit:', err);
@@ -1058,7 +1144,7 @@ export default function Purchases({ userProfile, branches, addToast }) {
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
       <div className="top-bar">
         <div className="page-title-group">
           <h1>Purchases</h1>
@@ -1100,6 +1186,43 @@ export default function Purchases({ userProfile, branches, addToast }) {
             <Plus size={16} />
             <span>New Purchase</span>
           </button>
+        </div>
+      </div>
+
+      {/* PURCHASES 4-METRIC SUMMARY CARDS (4 on Desktop, 2 per row on Mobile) */}
+      <div className="summary-grid-4">
+        {/* Card 1: Total Purchased Qty */}
+        <div className="summary-metric-card" style={{ borderLeftColor: '#0284c7' }}>
+          <span className="summary-metric-label">Total Purchased (Qty)</span>
+          <span className="summary-metric-value" style={{ color: '#0284c7' }}>
+            {loadingSummary ? '...' : purchasesSummary.total_qty.toLocaleString()}{' '}
+            <span style={{ fontSize: '0.72rem', fontWeight: 600, color: 'var(--text-muted)' }}>pcs</span>
+          </span>
+        </div>
+
+        {/* Card 2: Purchased Today Qty */}
+        <div className="summary-metric-card" style={{ borderLeftColor: '#d97706' }}>
+          <span className="summary-metric-label">Purchased Today (Qty)</span>
+          <span className="summary-metric-value" style={{ color: '#d97706' }}>
+            {loadingSummary ? '...' : purchasesSummary.today_qty.toLocaleString()}{' '}
+            <span style={{ fontSize: '0.72rem', fontWeight: 600, color: 'var(--text-muted)' }}>pcs</span>
+          </span>
+        </div>
+
+        {/* Card 3: Total Purchases Amount */}
+        <div className="summary-metric-card" style={{ borderLeftColor: '#10b981' }}>
+          <span className="summary-metric-label">Total Purchases</span>
+          <span className="summary-metric-value" style={{ color: '#059669' }}>
+            {loadingSummary ? '...' : `৳${formatAmount(purchasesSummary.total_amount)}`}
+          </span>
+        </div>
+
+        {/* Card 4: Purchases Today Amount */}
+        <div className="summary-metric-card" style={{ borderLeftColor: '#6366f1' }}>
+          <span className="summary-metric-label">Purchases Today</span>
+          <span className="summary-metric-value" style={{ color: '#4f46e5' }}>
+            {loadingSummary ? '...' : `৳${formatAmount(purchasesSummary.today_amount)}`}
+          </span>
         </div>
       </div>
 

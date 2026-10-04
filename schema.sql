@@ -556,3 +556,111 @@ CREATE INDEX IF NOT EXISTS idx_profiles_branch_id ON public.profiles (branch_id)
 CREATE INDEX IF NOT EXISTS idx_profiles_phone ON public.profiles (phone);
 CREATE INDEX IF NOT EXISTS idx_profiles_role ON public.profiles (role);
 
+-- ====================================================================
+-- 8. HIGH-PERFORMANCE SUMMARY RPC FUNCTIONS
+-- ====================================================================
+
+-- 8.1 Sales Summary RPC (Instant server-side aggregation for millions of rows)
+CREATE OR REPLACE FUNCTION public.get_sales_summary(p_branch_id UUID DEFAULT NULL)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+    today_date DATE := CURRENT_DATE;
+    total_qty NUMERIC := 0;
+    today_qty NUMERIC := 0;
+    total_amount NUMERIC := 0;
+    today_amount NUMERIC := 0;
+BEGIN
+    IF p_branch_id IS NOT NULL THEN
+        SELECT 
+            COALESCE(SUM(net_amount), 0),
+            COALESCE(SUM(CASE WHEN sale_date = today_date THEN net_amount ELSE 0 END), 0)
+        INTO total_amount, today_amount
+        FROM public.sales
+        WHERE branch_id = p_branch_id;
+
+        SELECT 
+            COALESCE(SUM(si.quantity), 0),
+            COALESCE(SUM(CASE WHEN s.sale_date = today_date THEN si.quantity ELSE 0 END), 0)
+        INTO total_qty, today_qty
+        FROM public.sale_items si
+        JOIN public.sales s ON s.id = si.sale_id
+        WHERE s.branch_id = p_branch_id;
+    ELSE
+        SELECT 
+            COALESCE(SUM(net_amount), 0),
+            COALESCE(SUM(CASE WHEN sale_date = today_date THEN net_amount ELSE 0 END), 0)
+        INTO total_amount, today_amount
+        FROM public.sales;
+
+        SELECT 
+            COALESCE(SUM(si.quantity), 0),
+            COALESCE(SUM(CASE WHEN s.sale_date = today_date THEN si.quantity ELSE 0 END), 0)
+        INTO total_qty, today_qty
+        FROM public.sale_items si
+        JOIN public.sales s ON s.id = si.sale_id;
+    END IF;
+
+    RETURN jsonb_build_object(
+        'total_qty', total_qty,
+        'today_qty', today_qty,
+        'total_amount', total_amount,
+        'today_amount', today_amount
+    );
+END;
+$$;
+
+-- 8.2 Purchases Summary RPC (Instant server-side aggregation)
+CREATE OR REPLACE FUNCTION public.get_purchases_summary(p_branch_id UUID DEFAULT NULL)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+    today_date DATE := CURRENT_DATE;
+    total_qty NUMERIC := 0;
+    today_qty NUMERIC := 0;
+    total_amount NUMERIC := 0;
+    today_amount NUMERIC := 0;
+BEGIN
+    IF p_branch_id IS NOT NULL THEN
+        SELECT 
+            COALESCE(SUM(net_amount), 0),
+            COALESCE(SUM(CASE WHEN purchase_date = today_date THEN net_amount ELSE 0 END), 0)
+        INTO total_amount, today_amount
+        FROM public.purchases
+        WHERE branch_id = p_branch_id;
+
+        SELECT 
+            COALESCE(SUM(pi.quantity), 0),
+            COALESCE(SUM(CASE WHEN p.purchase_date = today_date THEN pi.quantity ELSE 0 END), 0)
+        INTO total_qty, today_qty
+        FROM public.purchase_items pi
+        JOIN public.purchases p ON p.id = pi.purchase_id
+        WHERE p.branch_id = p_branch_id;
+    ELSE
+        SELECT 
+            COALESCE(SUM(net_amount), 0),
+            COALESCE(SUM(CASE WHEN purchase_date = today_date THEN net_amount ELSE 0 END), 0)
+        INTO total_amount, today_amount
+        FROM public.purchases;
+
+        SELECT 
+            COALESCE(SUM(pi.quantity), 0),
+            COALESCE(SUM(CASE WHEN p.purchase_date = today_date THEN pi.quantity ELSE 0 END), 0)
+        INTO total_qty, today_qty
+        FROM public.purchase_items pi
+        JOIN public.purchases p ON p.id = pi.purchase_id;
+    END IF;
+
+    RETURN jsonb_build_object(
+        'total_qty', total_qty,
+        'today_qty', today_qty,
+        'total_amount', total_amount,
+        'today_amount', today_amount
+    );
+END;
+$$;
+

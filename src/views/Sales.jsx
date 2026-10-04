@@ -63,6 +63,15 @@ export default function Sales({ userProfile, branches, addToast }) {
   const [salesTotalCount, setSalesTotalCount] = useState(0);
   const [historySearchQuery, setHistorySearchQuery] = useState('');
 
+  // Sales 4-Metric Summary State (Total Qty, Today Qty, Total Price, Today Price)
+  const [salesSummary, setSalesSummary] = useState({
+    total_qty: 0,
+    today_qty: 0,
+    total_amount: 0,
+    today_amount: 0,
+  });
+  const [loadingSummary, setLoadingSummary] = useState(false);
+
   // Sales Details Modal State
   const [showSaleDetailsModal, setShowSaleDetailsModal] = useState(false);
   const [selectedSaleForDetails, setSelectedSaleForDetails] = useState(null);
@@ -462,13 +471,88 @@ export default function Sales({ userProfile, branches, addToast }) {
     }
   }, [selectedBranchId, salesPage, salesPageSize, historySearchQuery, userProfile?.role]);
 
-  // Fetch branch-specific inventory and sales history
+  // High-performance Summary Fetcher (Zero-bottleneck RPC with lightweight client fallback)
+  const fetchSalesSummary = useCallback(async () => {
+    if (!selectedBranchId) return;
+    setLoadingSummary(true);
+    try {
+      // 1. Instant Server-Side Aggregation via Postgres RPC
+      const rpcParam = selectedBranchId === 'all' ? {} : { p_branch_id: selectedBranchId };
+      const { data: rpcData, error: rpcError } = await supabase.rpc('get_sales_summary', rpcParam);
+
+      if (!rpcError && rpcData) {
+        setSalesSummary({
+          total_qty: Number(rpcData.total_qty) || 0,
+          today_qty: Number(rpcData.today_qty) || 0,
+          total_amount: Number(rpcData.total_amount) || 0,
+          today_amount: Number(rpcData.today_amount) || 0,
+        });
+        return;
+      }
+
+      // 2. Optimized Fallback (if RPC is not yet created in Supabase)
+      const todayStr = new Date().toISOString().split('T')[0];
+      let salesQuery = supabase.from('sales').select('id, net_amount, sale_date');
+      if (selectedBranchId && selectedBranchId !== 'all') {
+        salesQuery = salesQuery.eq('branch_id', selectedBranchId);
+      }
+      const { data: salesRows, error: salesErr } = await salesQuery;
+      if (salesErr) throw salesErr;
+
+      let totalAmt = 0;
+      let todayAmt = 0;
+      const allSaleIds = [];
+      const todaySaleIds = new Set();
+
+      (salesRows || []).forEach((s) => {
+        const net = Number(s.net_amount) || 0;
+        totalAmt += net;
+        allSaleIds.push(s.id);
+        if (s.sale_date === todayStr) {
+          todayAmt += net;
+          todaySaleIds.add(s.id);
+        }
+      });
+
+      let totalQty = 0;
+      let todayQty = 0;
+
+      if (allSaleIds.length > 0) {
+        const { data: itemRows } = await supabase
+          .from('sale_items')
+          .select('sale_id, quantity')
+          .in('sale_id', allSaleIds.slice(0, 1000));
+
+        (itemRows || []).forEach((it) => {
+          const q = Number(it.quantity) || 0;
+          totalQty += q;
+          if (todaySaleIds.has(it.sale_id)) {
+            todayQty += q;
+          }
+        });
+      }
+
+      setSalesSummary({
+        total_qty: totalQty,
+        today_qty: todayQty,
+        total_amount: totalAmt,
+        today_amount: todayAmt,
+      });
+    } catch (err) {
+      console.error('Error fetching sales summary:', err);
+    } finally {
+      setLoadingSummary(false);
+    }
+  }, [selectedBranchId]);
+
+  // Fetch branch-specific inventory, sales history, and summary
   useEffect(() => {
     if (selectedBranchId) {
       fetchBranchInventory();
       fetchSalesHistory();
+      fetchSalesSummary();
     }
-  }, [selectedBranchId, isFactory, fetchSalesHistory]);
+  }, [selectedBranchId, isFactory, fetchSalesHistory, fetchSalesSummary]);
 
   const handleRePrint = async (sale) => {
     setLoading(true);
@@ -1225,6 +1309,7 @@ export default function Sales({ userProfile, branches, addToast }) {
       // Refresh inventory stock display
       fetchBranchInventory();
       fetchSalesHistory();
+      fetchSalesSummary();
       showMessage('Invoice checkout completed successfully!', 'success');
     } catch (err) {
       console.error(err);
@@ -1829,6 +1914,7 @@ export default function Sales({ userProfile, branches, addToast }) {
       // 7. Refresh data
       fetchSales();
       fetchInventory();
+      fetchSalesSummary();
     } catch (err) {
       console.error('Error deleting sale:', err);
       showMessage(err.message || 'Failed to delete invoice.', 'error');
@@ -2311,7 +2397,7 @@ export default function Sales({ userProfile, branches, addToast }) {
   });
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
       <div className="no-print top-bar">
         <div className="page-title-group">
           <h1>Customer Sales Invoices</h1>
@@ -2357,6 +2443,43 @@ export default function Sales({ userProfile, branches, addToast }) {
               <span>Create Invoice (POS)</span>
             </button>
           )}
+        </div>
+      </div>
+
+      {/* SALES 4-METRIC SUMMARY CARDS (4 on Desktop, 2 per row on Mobile) */}
+      <div className="summary-grid-4">
+        {/* Card 1: Total Sold Qty */}
+        <div className="summary-metric-card" style={{ borderLeftColor: '#2563eb' }}>
+          <span className="summary-metric-label">Total Sold (Qty)</span>
+          <span className="summary-metric-value" style={{ color: '#1d4ed8' }}>
+            {loadingSummary ? '...' : salesSummary.total_qty.toLocaleString()}{' '}
+            <span style={{ fontSize: '0.72rem', fontWeight: 600, color: 'var(--text-muted)' }}>pcs</span>
+          </span>
+        </div>
+
+        {/* Card 2: Sold Today Qty */}
+        <div className="summary-metric-card" style={{ borderLeftColor: '#d97706' }}>
+          <span className="summary-metric-label">Sold Today (Qty)</span>
+          <span className="summary-metric-value" style={{ color: '#d97706' }}>
+            {loadingSummary ? '...' : salesSummary.today_qty.toLocaleString()}{' '}
+            <span style={{ fontSize: '0.72rem', fontWeight: 600, color: 'var(--text-muted)' }}>pcs</span>
+          </span>
+        </div>
+
+        {/* Card 3: Total Sales Amount */}
+        <div className="summary-metric-card" style={{ borderLeftColor: '#10b981' }}>
+          <span className="summary-metric-label">Total Sales</span>
+          <span className="summary-metric-value" style={{ color: '#059669' }}>
+            {loadingSummary ? '...' : `৳${formatAmount(salesSummary.total_amount)}`}
+          </span>
+        </div>
+
+        {/* Card 4: Sales Today Amount */}
+        <div className="summary-metric-card" style={{ borderLeftColor: '#6366f1' }}>
+          <span className="summary-metric-label">Sales Today</span>
+          <span className="summary-metric-value" style={{ color: '#4f46e5' }}>
+            {loadingSummary ? '...' : `৳${formatAmount(salesSummary.today_amount)}`}
+          </span>
         </div>
       </div>
 
