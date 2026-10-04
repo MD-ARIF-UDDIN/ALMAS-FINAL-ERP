@@ -26,6 +26,8 @@ export default function Inventory({ userProfile, branches, addToast }) {
   const [loadingStock, setLoadingStock] = useState(false);
   const [loadingMovements, setLoadingMovements] = useState(false);
   const [submittingAdjustment, setSubmittingAdjustment] = useState(false);
+  const [totalQuantityInHand, setTotalQuantityInHand] = useState(0);
+  const [totalStockValue, setTotalStockValue] = useState(0);
 
   // Pagination states - Stock
   const [stockPage, setStockPage] = useState(1);
@@ -129,6 +131,8 @@ export default function Inventory({ userProfile, branches, addToast }) {
       const prods = prodData || [];
       if (prods.length === 0) {
         setStockItems([]);
+        setTotalQuantityInHand(0);
+        setTotalStockValue(0);
         return;
       }
 
@@ -186,6 +190,74 @@ export default function Inventory({ userProfile, branches, addToast }) {
           hasCustomSale,
         };
       });
+
+      // Calculate total quantity & stock value (sell price) for the selected branch (or search filter)
+      if (searchQuery.trim()) {
+        const cleanQuery = searchQuery.trim().replace(/[%_]/g, '');
+        const { data: allMatchingProds } = await supabase
+          .from('products')
+          .select('id, sale_price')
+          .or(`name.ilike.%${cleanQuery}%,product_code.ilike.%${cleanQuery}%,sku.ilike.%${cleanQuery}%,category.ilike.%${cleanQuery}%`);
+
+        if (allMatchingProds && allMatchingProds.length > 0) {
+          const matchingIds = allMatchingProds.map((p) => p.id);
+          const prodPriceMap = {};
+          allMatchingProds.forEach((p) => {
+            prodPriceMap[p.id] = Number(p.sale_price) || 0;
+          });
+
+          const { data: matchedInv } = await supabase
+            .from('inventory')
+            .select('product_id, quantity, sale_price')
+            .eq('branch_id', selectedBranchId)
+            .in('product_id', matchingIds);
+
+          let totalQty = 0;
+          let totalVal = 0;
+
+          (matchedInv || []).forEach((row) => {
+            const qty = Number(row.quantity) || 0;
+            const effectivePrice = (row.sale_price !== null && row.sale_price !== undefined)
+              ? Number(row.sale_price) || 0
+              : (prodPriceMap[row.product_id] || 0);
+
+            totalQty += qty;
+            totalVal += qty * effectivePrice;
+          });
+
+          setTotalQuantityInHand(totalQty);
+          setTotalStockValue(totalVal);
+        } else {
+          setTotalQuantityInHand(0);
+          setTotalStockValue(0);
+        }
+      } else {
+        const [{ data: allProds }, { data: allBranchInv }] = await Promise.all([
+          supabase.from('products').select('id, sale_price'),
+          supabase.from('inventory').select('product_id, quantity, sale_price').eq('branch_id', selectedBranchId),
+        ]);
+
+        const prodPriceMap = {};
+        (allProds || []).forEach((p) => {
+          prodPriceMap[p.id] = Number(p.sale_price) || 0;
+        });
+
+        let totalQty = 0;
+        let totalVal = 0;
+
+        (allBranchInv || []).forEach((row) => {
+          const qty = Number(row.quantity) || 0;
+          const effectivePrice = (row.sale_price !== null && row.sale_price !== undefined)
+            ? Number(row.sale_price) || 0
+            : (prodPriceMap[row.product_id] || 0);
+
+          totalQty += qty;
+          totalVal += qty * effectivePrice;
+        });
+
+        setTotalQuantityInHand(totalQty);
+        setTotalStockValue(totalVal);
+      }
 
       setStockItems(merged);
     } catch (err) {
@@ -418,6 +490,86 @@ export default function Inventory({ userProfile, branches, addToast }) {
       {/* ==================================================================== */}
       {activeTab === 'stock' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+          {/* Small Summary Cards */}
+          <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', alignItems: 'center' }}>
+            {/* Total Quantity Card */}
+            <div 
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.75rem',
+                backgroundColor: 'var(--card-bg, #ffffff)',
+                padding: '0.5rem 0.9rem',
+                borderRadius: '8px',
+                border: '1px solid var(--border-color)',
+                boxShadow: '0 1px 3px rgba(0, 0, 0, 0.04)',
+              }}
+            >
+              <div 
+                style={{
+                  width: '32px',
+                  height: '32px',
+                  borderRadius: '6px',
+                  backgroundColor: 'var(--primary-light, #eff6ff)',
+                  color: 'var(--primary, #2563eb)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  flexShrink: 0
+                }}
+              >
+                <Package size={17} />
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column' }}>
+                <span style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.025em' }}>
+                  Total Quantity in Hand
+                </span>
+                <span style={{ fontSize: '1.15rem', fontWeight: 800, color: 'var(--text-primary)', lineHeight: 1.15, fontFamily: "'Outfit', sans-serif" }}>
+                  {loadingStock ? '...' : totalQuantityInHand.toLocaleString()}{' '}
+                  <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)' }}>pcs</span>
+                </span>
+              </div>
+            </div>
+
+            {/* Total Stock Value Card (Sell Price) */}
+            <div 
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.75rem',
+                backgroundColor: 'var(--card-bg, #ffffff)',
+                padding: '0.5rem 0.9rem',
+                borderRadius: '8px',
+                border: '1px solid var(--border-color)',
+                boxShadow: '0 1px 3px rgba(0, 0, 0, 0.04)',
+              }}
+            >
+              <div 
+                style={{
+                  width: '32px',
+                  height: '32px',
+                  borderRadius: '6px',
+                  backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                  color: 'var(--success, #10b981)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  flexShrink: 0
+                }}
+              >
+                <TrendingUp size={17} />
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column' }}>
+                <span style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.025em' }}>
+                  Total Stock Value (Sell)
+                </span>
+                <span style={{ fontSize: '1.15rem', fontWeight: 800, color: 'var(--success-text, #059669)', lineHeight: 1.15, fontFamily: "'Outfit', sans-serif" }}>
+                  {loadingStock ? '...' : `৳${formatAmount(totalStockValue)}`}
+                </span>
+              </div>
+            </div>
+          </div>
+
           <div className="card">
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem', marginBottom: '1rem' }}>
               <div style={{ position: 'relative', width: '100%', maxWidth: '340px' }}>

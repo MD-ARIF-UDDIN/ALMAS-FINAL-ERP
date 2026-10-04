@@ -691,13 +691,16 @@ export default function Sales({ userProfile, branches, addToast }) {
 
   const getTaxAmount = () => {
     const sub = getSubtotal();
-    return (sub - discount) * (taxRate / 100);
+    const disc = parseFloat(discount) || 0;
+    const rate = parseFloat(taxRate) || 0;
+    return Math.max(0, (sub - disc) * (rate / 100));
   };
 
   const getGrandTotal = () => {
     const sub = getSubtotal();
-    const subAfterDiscount = sub - discount;
-    const tax = subAfterDiscount * (taxRate / 100);
+    const disc = parseFloat(discount) || 0;
+    const subAfterDiscount = Math.max(0, sub - disc);
+    const tax = getTaxAmount();
     return Math.max(0, subAfterDiscount + tax);
   };
 
@@ -1015,6 +1018,7 @@ export default function Sales({ userProfile, branches, addToast }) {
         customer_id: customerId,
         total_amount: subtotal,
         discount: discount,
+        tax: taxAmount,
         net_amount: grandTotal,
         paid_amount: 0.00, // Trigger will compute this from payments
         payment_status: 'unpaid', // Trigger will compute this
@@ -1029,8 +1033,9 @@ export default function Sales({ userProfile, branches, addToast }) {
         .insert([salePayload])
         .select();
 
-      if (saleError && saleError.message?.includes('is_showroom_challan')) {
-        delete salePayload.is_showroom_challan;
+      if (saleError && (saleError.message?.includes('is_showroom_challan') || saleError.message?.includes('tax'))) {
+        if (saleError.message?.includes('is_showroom_challan')) delete salePayload.is_showroom_challan;
+        if (saleError.message?.includes('tax')) delete salePayload.tax;
         const retry = await supabase.from('sales').insert([salePayload]).select();
         if (retry.error) throw retry.error;
         saleData = retry.data;
@@ -1433,7 +1438,8 @@ export default function Sales({ userProfile, branches, addToast }) {
   const getEditTaxAmount = () => {
     const sub = getEditSubtotal();
     const disc = parseFloat(editDiscount) || 0;
-    return Math.max(0, sub - disc) * ((parseFloat(editTaxRate) || 0) / 100);
+    const rate = parseFloat(editTaxRate) || 0;
+    return Math.max(0, (sub - disc) * (rate / 100));
   };
 
   const getEditGrandTotal = () => {
@@ -1643,8 +1649,9 @@ export default function Sales({ userProfile, branches, addToast }) {
         .update(editSalePayload)
         .eq('id', editingSale.id);
 
-      if (saleErr && saleErr.message?.includes('is_showroom_challan')) {
-        delete editSalePayload.is_showroom_challan;
+      if (saleErr && (saleErr.message?.includes('is_showroom_challan') || saleErr.message?.includes('tax'))) {
+        if (saleErr.message?.includes('is_showroom_challan')) delete editSalePayload.is_showroom_challan;
+        if (saleErr.message?.includes('tax')) delete editSalePayload.tax;
         const retry = await supabase.from('sales').update(editSalePayload).eq('id', editingSale.id);
         saleErr = retry.error;
       }
@@ -3666,10 +3673,12 @@ export default function Sales({ userProfile, branches, addToast }) {
                         <input
                           type="number"
                           min="0"
+                          step="any"
+                          placeholder="0"
                           className="input-control"
                           style={{ width: '100px', padding: '0.25rem 0.5rem', textAlign: 'right' }}
-                          value={taxRate}
-                          onChange={(e) => setTaxRate(Math.max(0, parseFloat(e.target.value) || 0))}
+                          value={taxRate === 0 ? '' : taxRate}
+                          onChange={(e) => setTaxRate(e.target.value === '' ? '' : Math.max(0, parseFloat(e.target.value) || 0))}
                         />
                       </div>
                       <div className="totals-row grand-total">
@@ -6136,9 +6145,11 @@ export default function Sales({ userProfile, branches, addToast }) {
                         type="number"
                         min="0"
                         step="any"
+                        placeholder="0"
                         className="input-control"
-                        value={editTaxRate}
-                        onChange={(e) => setEditTaxRate(Math.max(0, parseFloat(e.target.value) || 0))}
+                        value={editTaxRate === 0 ? '' : editTaxRate}
+                        onChange={(e) => setEditTaxRate(e.target.value === '' ? '' : Math.max(0, parseFloat(e.target.value) || 0))}
+                        style={{ height: '36px', minHeight: '36px', fontSize: '0.85rem' }}
                       />
                     </div>
 

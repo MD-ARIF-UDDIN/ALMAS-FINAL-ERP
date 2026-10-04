@@ -195,6 +195,7 @@ CREATE TABLE public.sales (
     sale_date DATE DEFAULT CURRENT_DATE NOT NULL,
     total_amount DECIMAL(12, 2) NOT NULL DEFAULT 0.00,
     discount DECIMAL(12, 2) DEFAULT 0.00,
+    tax DECIMAL(12, 2) DEFAULT 0.00,
     net_amount DECIMAL(12, 2) NOT NULL DEFAULT 0.00,
     paid_amount DECIMAL(12, 2) NOT NULL DEFAULT 0.00,
     payment_status payment_status NOT NULL DEFAULT 'unpaid'::payment_status,
