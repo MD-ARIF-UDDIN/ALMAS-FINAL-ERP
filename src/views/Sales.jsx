@@ -800,6 +800,12 @@ export default function Sales({ userProfile, branches, addToast }) {
       return;
     }
 
+    // 0. Showrooms can only sell items with verified stock in hand (Factory make-to-order allows unlisted items)
+    if (!isFactory) {
+      showMessage(`"${cleanCode}" is not in stock. Showrooms can only sell items with available stock.`, 'error');
+      return;
+    }
+
     // 1. Check if same code is already in current Cart
     const alreadyInCart = cart.some(
       (item) =>
@@ -926,9 +932,19 @@ export default function Sales({ userProfile, branches, addToast }) {
         showMessage(`Please specify a valid unit price for ${item.product?.name || 'item'}.`, 'error');
         return;
       }
-      if (!isFactory && !item.isCustomUnlisted && q > item.stockLimit) {
-        showMessage(`Quantity for ${item.product?.name || 'item'} exceeds available stock of ${item.stockLimit}.`, 'error');
-        return;
+      if (!isFactory) {
+        if (item.isCustomUnlisted || item.product?.is_custom_unlisted) {
+          showMessage(`"${item.product?.name || item.rawCode}" is not in stock. Showrooms can only sell items with available stock.`, 'error');
+          return;
+        }
+        const avail = Number(item.stockLimit);
+        if (isNaN(avail) || avail <= 0 || q > avail) {
+          showMessage(
+            `Insufficient stock for "${item.product?.name || item.product?.product_code}". Available: ${avail > 0 ? avail : 0} pcs (Requested: ${q} pcs).`,
+            'error'
+          );
+          return;
+        }
       }
     }
 
@@ -3162,32 +3178,34 @@ export default function Sales({ userProfile, branches, addToast }) {
                   <div ref={cartSearchRef} style={{ position: 'relative', marginBottom: '0.25rem' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.35rem' }}>
                       <label style={{ margin: 0, fontWeight: 600, fontSize: '0.82rem' }}>Search & Add Product</label>
-                      <button
-                        type="button"
-                        className="btn btn-sm"
-                        style={{
-                          padding: '0.2rem 0.55rem',
-                          fontSize: '0.74rem',
-                          backgroundColor: showCustomProdForm ? '#fee2e2' : '#f0fdf4',
-                          color: showCustomProdForm ? '#b91c1c' : '#15803d',
-                          border: `1px solid ${showCustomProdForm ? '#fca5a5' : '#86efac'}`,
-                          borderRadius: 'var(--border-radius-sm)',
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '0.3rem',
-                          fontWeight: 600,
-                          cursor: 'pointer'
-                        }}
-                        onClick={() => {
-                          setShowCustomProdForm(!showCustomProdForm);
-                          if (!showCustomProdForm && cartSearchQuery.trim()) {
-                            setCustomProdCode(cartSearchQuery.trim());
-                          }
-                        }}
-                      >
-                        <Plus size={13} />
-                        {showCustomProdForm ? 'Cancel Unlisted Item' : '+ Add Item (Not in Book)'}
-                      </button>
+                      {isFactory && (
+                        <button
+                          type="button"
+                          className="btn btn-sm"
+                          style={{
+                            padding: '0.2rem 0.55rem',
+                            fontSize: '0.74rem',
+                            backgroundColor: showCustomProdForm ? '#fee2e2' : '#f0fdf4',
+                            color: showCustomProdForm ? '#b91c1c' : '#15803d',
+                            border: `1px solid ${showCustomProdForm ? '#fca5a5' : '#86efac'}`,
+                            borderRadius: 'var(--border-radius-sm)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '0.3rem',
+                            fontWeight: 600,
+                            cursor: 'pointer'
+                          }}
+                          onClick={() => {
+                            setShowCustomProdForm(!showCustomProdForm);
+                            if (!showCustomProdForm && cartSearchQuery.trim()) {
+                              setCustomProdCode(cartSearchQuery.trim());
+                            }
+                          }}
+                        >
+                          <Plus size={13} />
+                          {showCustomProdForm ? 'Cancel Unlisted Item' : '+ Add Item (Not in Book)'}
+                        </button>
+                      )}
                     </div>
 
                     <div style={{ position: 'relative' }}>
@@ -3326,8 +3344,8 @@ export default function Sales({ userProfile, branches, addToast }) {
                           })
                         )}
 
-                        {/* Direct Option to Add as Unlisted Item (Not from book) */}
-                        {cartSearchQuery.trim() && (
+                        {/* Direct Option to Add as Unlisted Item (Not from book - Factory only) */}
+                        {isFactory && cartSearchQuery.trim() && (
                           <div
                             onClick={() => {
                               setCustomProdCode(cartSearchQuery.trim());

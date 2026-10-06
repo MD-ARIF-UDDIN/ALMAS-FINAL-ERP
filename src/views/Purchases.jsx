@@ -682,6 +682,63 @@ export default function Purchases({ userProfile, branches, addToast }) {
       const { error: itemsError } = await supabase.from('purchase_items').insert(resolvedPurchaseItems);
       if (itemsError) throw itemsError;
 
+      // 2.1 Update branch inventory & log movements for showroom/branch purchases
+      if (!isFactory) {
+        for (const item of resolvedPurchaseItems) {
+          if (item.product_id && item.quantity > 0) {
+            try {
+              const { data: curInv } = await supabase
+                .from('inventory')
+                .select('id, quantity, purchase_price')
+                .eq('branch_id', selectedBranchId)
+                .eq('product_id', item.product_id)
+                .maybeSingle();
+
+              if (curInv) {
+                await supabase
+                  .from('inventory')
+                  .update({
+                    quantity: (curInv.quantity || 0) + item.quantity,
+                    purchase_price: item.unit_price > 0 ? item.unit_price : curInv.purchase_price,
+                    updated_at: new Date().toISOString(),
+                  })
+                  .eq('id', curInv.id);
+              } else {
+                await supabase
+                  .from('inventory')
+                  .insert([
+                    {
+                      branch_id: selectedBranchId,
+                      product_id: item.product_id,
+                      quantity: item.quantity,
+                      purchase_price: item.unit_price > 0 ? item.unit_price : null,
+                      sale_price: item.unit_price > 0 ? item.unit_price : null,
+                      updated_at: new Date().toISOString(),
+                    },
+                  ]);
+              }
+
+              const actorId = userProfile?.id || (await supabase.auth.getUser())?.data?.user?.id || null;
+              if (actorId) {
+                await supabase.from('inventory_movements').insert([
+                  {
+                    branch_id: selectedBranchId,
+                    product_id: item.product_id,
+                    type: 'purchase',
+                    quantity: item.quantity,
+                    reference_id: purchaseId,
+                    description: `Branch Purchase: Bill #${purData[0]?.invoice_number || purchaseId.substring(0, 8)}`,
+                    created_by: actorId,
+                  },
+                ]);
+              }
+            } catch (invErr) {
+              console.error('Error updating inventory on purchase:', invErr);
+            }
+          }
+        }
+      }
+
       // 3. Register payment if initial amount paid
       if (initialPaid > 0) {
         const { error: paymentError } = await supabase.from('payments').insert([
@@ -1006,6 +1063,8 @@ export default function Purchases({ userProfile, branches, addToast }) {
       const existingItemsToUpdate = validItems.filter((v) => v.id && currentDbItems.some((d) => d.id === v.id));
       const newItemsToInsert = validItems.filter((v) => !v.id);
 
+      const actorId = userProfile?.id || (await supabase.auth.getUser())?.data?.user?.id || null;
+
       // A. Process Deleted Items
       for (const delIt of deletedDbItems) {
         const pId = delIt.product_id;
@@ -1029,17 +1088,19 @@ export default function Purchases({ userProfile, branches, addToast }) {
               .eq('id', curInv.id);
           }
 
-          await supabase.from('inventory_movements').insert([
-            {
-              branch_id: targetBranchId,
-              product_id: pId,
-              type: 'adjustment_out',
-              quantity: delQty,
-              reference_id: editingPurchase.id,
-              description: `Purchase Bill Edited [${editingPurchase.invoice_number || editingPurchase.id.substring(0, 8)}]: Item removed, Qty reduced by -${delQty}`,
-              created_by: userProfile.id,
-            },
-          ]);
+          if (actorId) {
+            await supabase.from('inventory_movements').insert([
+              {
+                branch_id: targetBranchId,
+                product_id: pId,
+                type: 'adjustment_out',
+                quantity: delQty,
+                reference_id: editingPurchase.id,
+                description: `Purchase Bill Edited [${editingPurchase.invoice_number || editingPurchase.id.substring(0, 8)}]: Item removed, Qty reduced by -${delQty}`,
+                created_by: actorId,
+              },
+            ]);
+          }
         }
 
         await supabase.from('purchase_items').delete().eq('id', delIt.id);
@@ -1096,21 +1157,23 @@ export default function Purchases({ userProfile, branches, addToast }) {
             ]);
           }
 
-          await supabase.from('inventory_movements').insert([
-            {
-              branch_id: targetBranchId,
-              product_id: pId,
-              type: diff > 0 ? 'purchase' : 'adjustment_out',
-              quantity: Math.abs(diff),
-              reference_id: editingPurchase.id,
-              description: `Purchase Bill Edited [${editingPurchase.invoice_number || editingPurchase.id.substring(0, 8)}]: Qty adjusted by ${diff > 0 ? '+' : ''}${diff}`,
-              created_by: userProfile.id,
-            },
-          ]);
+          if (actorId) {
+            await supabase.from('inventory_movements').insert([
+              {
+                branch_id: targetBranchId,
+                product_id: pId,
+                type: diff > 0 ? 'purchase' : 'adjustment_out',
+                quantity: Math.abs(diff),
+                reference_id: editingPurchase.id,
+                description: `Purchase Bill Edited [${editingPurchase.invoice_number || editingPurchase.id.substring(0, 8)}]: Qty adjusted by ${diff > 0 ? '+' : ''}${diff}`,
+                created_by: actorId,
+              },
+            ]);
+          }
         }
       }
 
-      // C. Process Brand New Items (INSERT fires DB trigger which automatically adds to inventory)
+      // C. Process Brand New Items
       if (newItemsToInsert.length > 0) {
         const resolvedNewItems = newItemsToInsert.map((it) => {
           const qty = parseFloat(it.quantity) || 1;
@@ -1127,6 +1190,59 @@ export default function Purchases({ userProfile, branches, addToast }) {
 
         const { error: newItemsErr } = await supabase.from('purchase_items').insert(resolvedNewItems);
         if (newItemsErr) throw newItemsErr;
+
+        if (!isFactoryPurchase && targetBranchId) {
+          for (const it of resolvedNewItems) {
+            if (it.product_id && it.quantity > 0) {
+              try {
+                const { data: curInv } = await supabase
+                  .from('inventory')
+                  .select('id, quantity, purchase_price')
+                  .eq('branch_id', targetBranchId)
+                  .eq('product_id', it.product_id)
+                  .maybeSingle();
+
+                if (curInv) {
+                  await supabase
+                    .from('inventory')
+                    .update({
+                      quantity: (curInv.quantity || 0) + it.quantity,
+                      purchase_price: it.unit_price > 0 ? it.unit_price : curInv.purchase_price,
+                      updated_at: new Date().toISOString(),
+                    })
+                    .eq('id', curInv.id);
+                } else {
+                  await supabase.from('inventory').insert([
+                    {
+                      branch_id: targetBranchId,
+                      product_id: it.product_id,
+                      quantity: it.quantity,
+                      purchase_price: it.unit_price > 0 ? it.unit_price : null,
+                      sale_price: it.unit_price > 0 ? it.unit_price : null,
+                      updated_at: new Date().toISOString(),
+                    },
+                  ]);
+                }
+
+                if (actorId) {
+                  await supabase.from('inventory_movements').insert([
+                    {
+                      branch_id: targetBranchId,
+                      product_id: it.product_id,
+                      type: 'purchase',
+                      quantity: it.quantity,
+                      reference_id: editingPurchase.id,
+                      description: `Purchase Bill Edited [${editingPurchase.invoice_number || editingPurchase.id.substring(0, 8)}]: New item added, Qty increased by +${it.quantity}`,
+                      created_by: actorId,
+                    },
+                  ]);
+                }
+              } catch (invErr) {
+                console.error('Error updating inventory on new item in purchase edit:', invErr);
+              }
+            }
+          }
+        }
       }
 
       showMessage('Purchase bill updated successfully!', 'success');
