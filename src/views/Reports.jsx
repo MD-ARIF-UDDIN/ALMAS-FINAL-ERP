@@ -64,6 +64,7 @@ export default function Reports({ userProfile, branches = [] }) {
   const [overallSales, setOverallSales] = useState([]);
   const [overallPurchasesTotal, setOverallPurchasesTotal] = useState(0);
   const [overallExpensesTotal, setOverallExpensesTotal] = useState(0);
+  const [branchInventoryPrices, setBranchInventoryPrices] = useState({});
 
   // Customer Report State
   const [customers, setCustomers] = useState([]);
@@ -244,20 +245,34 @@ export default function Reports({ userProfile, branches = [] }) {
       if (startDate) expQuery = expQuery.gte('expense_date', startDate);
       if (endDate) expQuery = expQuery.lte('expense_date', endDate);
 
+      let invQuery = supabase
+        .from('inventory')
+        .select('product_id, branch_id, purchase_price');
+
       if (selectedBranchId) {
         salesQuery = salesQuery.eq('branch_id', selectedBranchId);
         purQuery = purQuery.eq('branch_id', selectedBranchId);
         expQuery = expQuery.eq('branch_id', selectedBranchId);
+        invQuery = invQuery.eq('branch_id', selectedBranchId);
       }
 
-      // Execute all 3 queries concurrently in parallel
-      const [{ data: sData }, { data: pData }, { data: eData }] = await Promise.all([
+      // Execute queries concurrently in parallel
+      const [{ data: sData }, { data: pData }, { data: eData }, { data: iData }] = await Promise.all([
         salesQuery,
         purQuery,
         expQuery,
+        invQuery,
       ]);
 
       setOverallSales(sData || []);
+
+      const invPriceMap = {};
+      (iData || []).forEach((inv) => {
+        if (inv.purchase_price !== null && inv.purchase_price !== undefined && inv.purchase_price !== '') {
+          invPriceMap[`${inv.product_id}_${inv.branch_id}`] = inv.purchase_price;
+        }
+      });
+      setBranchInventoryPrices(invPriceMap);
 
       const pTotal = (pData || []).reduce((sum, p) => sum + (parseFloat(p.net_amount) || 0), 0);
       setOverallPurchasesTotal(pTotal);
@@ -499,17 +514,27 @@ export default function Reports({ userProfile, branches = [] }) {
     return overallSales.reduce((sum, s) => sum + (parseFloat(s.paid_amount) || 0), 0);
   }, [overallSales]);
 
+  const getItemBuyCost = (item, branchId) => {
+    if (!item) return 0;
+    const key = `${item.product_id}_${branchId}`;
+    const bPrice = branchInventoryPrices[key];
+    if (bPrice !== undefined && bPrice !== null && bPrice !== '') {
+      return parseFloat(bPrice) || 0;
+    }
+    return parseFloat(item.products?.purchase_price) || 0;
+  };
+
   const overallSalesProfit = useMemo(() => {
     return (overallSales || []).reduce((sum, s) => {
       const net = parseFloat(s.net_amount) || 0;
       const cost = (s.sale_items || []).reduce((iSum, item) => {
         const qty = parseFloat(item.quantity) || 0;
-        const buy = parseFloat(item.products?.purchase_price) || 0;
+        const buy = getItemBuyCost(item, s.branch_id);
         return iSum + (qty * buy);
       }, 0);
       return sum + (net - cost);
     }, 0);
-  }, [overallSales]);
+  }, [overallSales, branchInventoryPrices]);
 
   const overallTotalDue = Math.max(0, overallTotalRevenue - overallTotalPaid);
   const overallNetProfit = overallTotalRevenue - overallPurchasesTotal - overallExpensesTotal;
@@ -539,7 +564,7 @@ export default function Reports({ userProfile, branches = [] }) {
       const paid = parseFloat(s.paid_amount) || 0;
       const cost = (s.sale_items || []).reduce((iSum, item) => {
         const qty = parseFloat(item.quantity) || 0;
-        const buy = parseFloat(item.products?.purchase_price) || 0;
+        const buy = getItemBuyCost(item, s.branch_id);
         return iSum + (qty * buy);
       }, 0);
       const profit = net - cost;
@@ -573,7 +598,7 @@ export default function Reports({ userProfile, branches = [] }) {
     const branchBreakdown = Object.values(branchMap);
 
     return { grossSales, totalCollected, totalDue, totalSalesCount, totalSalesProfit, branchBreakdown };
-  }, [overallSales, branches]);
+  }, [overallSales, branches, branchInventoryPrices]);
 
   // Customer Financial Calculations
   const customerTotalBilled = useMemo(() => {
@@ -2308,7 +2333,7 @@ export default function Reports({ userProfile, branches = [] }) {
                       const due = Math.max(0, net - paid);
                       const cost = (s.sale_items || []).reduce((sum, item) => {
                         const qty = parseFloat(item.quantity) || 0;
-                        const buy = parseFloat(item.products?.purchase_price) || 0;
+                        const buy = getItemBuyCost(item, s.branch_id);
                         return sum + (qty * buy);
                       }, 0);
                       const profit = net - cost;
