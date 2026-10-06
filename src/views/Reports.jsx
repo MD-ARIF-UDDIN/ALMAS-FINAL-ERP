@@ -196,6 +196,8 @@ export default function Reports({ userProfile, branches = [] }) {
           id,
           invoice_number,
           sale_date,
+          discount,
+          total_amount,
           net_amount,
           paid_amount,
           payment_status,
@@ -208,6 +210,19 @@ export default function Reports({ userProfile, branches = [] }) {
           branches (
             id,
             name
+          ),
+          sale_items (
+            id,
+            product_id,
+            quantity,
+            unit_price,
+            total_price,
+            products (
+              id,
+              name,
+              purchase_price,
+              sale_price
+            )
           )
         `)
         .order('sale_date', { ascending: false });
@@ -484,8 +499,81 @@ export default function Reports({ userProfile, branches = [] }) {
     return overallSales.reduce((sum, s) => sum + (parseFloat(s.paid_amount) || 0), 0);
   }, [overallSales]);
 
+  const overallSalesProfit = useMemo(() => {
+    return (overallSales || []).reduce((sum, s) => {
+      const net = parseFloat(s.net_amount) || 0;
+      const cost = (s.sale_items || []).reduce((iSum, item) => {
+        const qty = parseFloat(item.quantity) || 0;
+        const buy = parseFloat(item.products?.purchase_price) || 0;
+        return iSum + (qty * buy);
+      }, 0);
+      return sum + (net - cost);
+    }, 0);
+  }, [overallSales]);
+
   const overallTotalDue = Math.max(0, overallTotalRevenue - overallTotalPaid);
   const overallNetProfit = overallTotalRevenue - overallPurchasesTotal - overallExpensesTotal;
+
+  // Overall Metrics for print/report summary
+  const overallMetrics = useMemo(() => {
+    let grossSales = 0;
+    let totalCollected = 0;
+    let totalSalesProfit = 0;
+    const totalSalesCount = (overallSales || []).length;
+
+    const branchMap = {};
+    (branches || []).forEach((b) => {
+      branchMap[b.id] = {
+        branchId: b.id,
+        branchName: b.name,
+        salesCount: 0,
+        grossSales: 0,
+        totalCollected: 0,
+        totalDue: 0,
+        salesProfit: 0,
+      };
+    });
+
+    (overallSales || []).forEach((s) => {
+      const net = parseFloat(s.net_amount) || 0;
+      const paid = parseFloat(s.paid_amount) || 0;
+      const cost = (s.sale_items || []).reduce((iSum, item) => {
+        const qty = parseFloat(item.quantity) || 0;
+        const buy = parseFloat(item.products?.purchase_price) || 0;
+        return iSum + (qty * buy);
+      }, 0);
+      const profit = net - cost;
+
+      grossSales += net;
+      totalCollected += paid;
+      totalSalesProfit += profit;
+
+      const bId = s.branch_id;
+      if (bId) {
+        if (!branchMap[bId]) {
+          branchMap[bId] = {
+            branchId: bId,
+            branchName: s.branches?.name || 'Showroom / Branch',
+            salesCount: 0,
+            grossSales: 0,
+            totalCollected: 0,
+            totalDue: 0,
+            salesProfit: 0,
+          };
+        }
+        branchMap[bId].salesCount += 1;
+        branchMap[bId].grossSales += net;
+        branchMap[bId].totalCollected += paid;
+        branchMap[bId].totalDue = Math.max(0, branchMap[bId].grossSales - branchMap[bId].totalCollected);
+        branchMap[bId].salesProfit += profit;
+      }
+    });
+
+    const totalDue = Math.max(0, grossSales - totalCollected);
+    const branchBreakdown = Object.values(branchMap);
+
+    return { grossSales, totalCollected, totalDue, totalSalesCount, totalSalesProfit, branchBreakdown };
+  }, [overallSales, branches]);
 
   // Customer Financial Calculations
   const customerTotalBilled = useMemo(() => {
@@ -1497,7 +1585,7 @@ export default function Reports({ userProfile, branches = [] }) {
           <div
             style={{
               display: 'grid',
-              gridTemplateColumns: 'repeat(4, 1fr)',
+              gridTemplateColumns: 'repeat(5, 1fr)',
               border: '1.5px solid #000000',
               marginBottom: '12px',
               backgroundColor: '#ffffff',
@@ -1517,6 +1605,14 @@ export default function Reports({ userProfile, branches = [] }) {
               </div>
               <div style={{ fontSize: '13px', fontWeight: 900, marginTop: '2px' }}>
                 {overallMetrics.totalSalesCount}
+              </div>
+            </div>
+            <div style={{ padding: '6px 8px', borderRight: '1px solid #000000', textAlign: 'center' }}>
+              <div style={{ fontSize: '9px', fontWeight: 700, textTransform: 'uppercase', color: '#555555' }}>
+                Sales Profit
+              </div>
+              <div style={{ fontSize: '13px', fontWeight: 900, marginTop: '2px', color: overallMetrics.totalSalesProfit >= 0 ? '#000000' : '#dc2626' }}>
+                ৳{formatAmount(overallMetrics.totalSalesProfit)}
               </div>
             </div>
             <div style={{ padding: '6px 8px', borderRight: '1px solid #000000', textAlign: 'center' }}>
@@ -1809,8 +1905,9 @@ export default function Reports({ userProfile, branches = [] }) {
             <thead>
               <tr style={{ backgroundColor: '#f0f0f0', borderBottom: '1.5px solid #000000' }}>
                 <th style={{ border: '1px solid #000000', padding: '4px 6px', textAlign: 'left', fontSize: '9.5px' }}>BRANCH / PLANT</th>
-                <th style={{ border: '1px solid #000000', padding: '4px 6px', width: '80px', textAlign: 'center', fontSize: '9.5px' }}>INVOICES</th>
+                <th style={{ border: '1px solid #000000', padding: '4px 6px', width: '70px', textAlign: 'center', fontSize: '9.5px' }}>INVOICES</th>
                 <th style={{ border: '1px solid #000000', padding: '4px 6px', textAlign: 'right', fontSize: '9.5px' }}>GROSS SALES (৳)</th>
+                <th style={{ border: '1px solid #000000', padding: '4px 6px', textAlign: 'right', fontSize: '9.5px' }}>SALES PROFIT (৳)</th>
                 <th style={{ border: '1px solid #000000', padding: '4px 6px', textAlign: 'right', fontSize: '9.5px' }}>COLLECTIONS (৳)</th>
                 <th style={{ border: '1px solid #000000', padding: '4px 6px', textAlign: 'right', fontSize: '9.5px' }}>DUE BALANCE (৳)</th>
               </tr>
@@ -1821,6 +1918,9 @@ export default function Reports({ userProfile, branches = [] }) {
                   <td style={{ border: '1px solid #000000', padding: '4px 6px', fontWeight: 600 }}>{b.branchName}</td>
                   <td style={{ border: '1px solid #000000', padding: '4px 6px', textAlign: 'center' }}>{b.salesCount}</td>
                   <td style={{ border: '1px solid #000000', padding: '4px 6px', textAlign: 'right' }}>৳{formatAmount(b.grossSales)}</td>
+                  <td style={{ border: '1px solid #000000', padding: '4px 6px', textAlign: 'right', fontWeight: 700, color: b.salesProfit >= 0 ? '#000000' : '#dc2626' }}>
+                    ৳{formatAmount(b.salesProfit)}
+                  </td>
                   <td style={{ border: '1px solid #000000', padding: '4px 6px', textAlign: 'right' }}>৳{formatAmount(b.totalCollected)}</td>
                   <td style={{ border: '1px solid #000000', padding: '4px 6px', textAlign: 'right', fontWeight: 800 }}>৳{formatAmount(b.totalDue)}</td>
                 </tr>
@@ -1831,6 +1931,7 @@ export default function Reports({ userProfile, branches = [] }) {
                 <td style={{ border: '1px solid #000000', padding: '5px 6px' }}>TOTAL</td>
                 <td style={{ border: '1px solid #000000', padding: '5px 6px', textAlign: 'center' }}>{overallMetrics.totalSalesCount}</td>
                 <td style={{ border: '1px solid #000000', padding: '5px 6px', textAlign: 'right' }}>৳{formatAmount(overallMetrics.grossSales)}</td>
+                <td style={{ border: '1px solid #000000', padding: '5px 6px', textAlign: 'right' }}>৳{formatAmount(overallMetrics.totalSalesProfit)}</td>
                 <td style={{ border: '1px solid #000000', padding: '5px 6px', textAlign: 'right' }}>৳{formatAmount(overallMetrics.totalCollected)}</td>
                 <td style={{ border: '1px solid #000000', padding: '5px 6px', textAlign: 'right' }}>৳{formatAmount(overallMetrics.totalDue)}</td>
               </tr>
@@ -2122,6 +2223,14 @@ export default function Reports({ userProfile, branches = [] }) {
               </div>
             </div>
 
+            {/* Sales Profit (Current Sales Profit) */}
+            <div className="card" style={{ padding: '0.45rem 0.65rem', borderLeft: `3.5px solid ${overallSalesProfit >= 0 ? '#10b981' : '#ef4444'}` }}>
+              <div style={{ fontSize: '0.68rem', fontWeight: 600, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>Sales Profit</div>
+              <div style={{ fontSize: '1.05rem', fontWeight: 800, fontFamily: 'Outfit, sans-serif', color: overallSalesProfit >= 0 ? '#059669' : '#dc2626', marginTop: '0.05rem' }}>
+                ৳{formatAmount(overallSalesProfit)}
+              </div>
+            </div>
+
             {/* Collected / Paid */}
             <div className="card" style={{ padding: '0.45rem 0.65rem', borderLeft: '3.5px solid #10b981' }}>
               <div style={{ fontSize: '0.68rem', fontWeight: 600, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>Total Collected</div>
@@ -2177,6 +2286,7 @@ export default function Reports({ userProfile, branches = [] }) {
                     <th>Customer Name</th>
                     <th>Phone</th>
                     <th style={{ textAlign: 'right' }}>Total (৳)</th>
+                    <th style={{ textAlign: 'right' }}>Profit (৳)</th>
                     <th style={{ textAlign: 'right' }}>Paid (৳)</th>
                     <th style={{ textAlign: 'right' }}>Due (৳)</th>
                     <th style={{ textAlign: 'center' }}>Status</th>
@@ -2184,10 +2294,10 @@ export default function Reports({ userProfile, branches = [] }) {
                 </thead>
                 <tbody>
                   {loading ? (
-                    <TableLoading colSpan={8} message="Loading sales..." />
+                    <TableLoading colSpan={9} message="Loading sales..." />
                   ) : overallSales.length === 0 ? (
                     <tr>
-                      <td colSpan={8} style={{ textAlign: 'center', padding: '2rem' }}>
+                      <td colSpan={9} style={{ textAlign: 'center', padding: '2rem' }}>
                         No sales found for this period.
                       </td>
                     </tr>
@@ -2196,6 +2306,13 @@ export default function Reports({ userProfile, branches = [] }) {
                       const net = parseFloat(s.net_amount) || 0;
                       const paid = parseFloat(s.paid_amount) || 0;
                       const due = Math.max(0, net - paid);
+                      const cost = (s.sale_items || []).reduce((sum, item) => {
+                        const qty = parseFloat(item.quantity) || 0;
+                        const buy = parseFloat(item.products?.purchase_price) || 0;
+                        return sum + (qty * buy);
+                      }, 0);
+                      const profit = net - cost;
+                      const margin = net > 0 ? ((profit / net) * 100).toFixed(1) : 0;
                       return (
                         <tr key={s.id}>
                           <td style={{ fontFamily: 'monospace', fontWeight: 700, color: '#0284c7' }}>
@@ -2205,6 +2322,14 @@ export default function Reports({ userProfile, branches = [] }) {
                           <td style={{ fontWeight: 600 }}>{s.contacts?.name || 'Walk-in'}</td>
                           <td>{s.contacts?.phone || '-'}</td>
                           <td style={{ textAlign: 'right', fontWeight: 700 }}>৳{formatAmount(net)}</td>
+                          <td style={{ textAlign: 'right', fontWeight: 700, color: profit >= 0 ? '#059669' : '#dc2626' }}>
+                            ৳{formatAmount(profit)}
+                            {net > 0 && (
+                              <span style={{ fontSize: '0.68rem', display: 'block', color: 'var(--text-muted)', fontWeight: 500 }}>
+                                ({margin}%)
+                              </span>
+                            )}
+                          </td>
                           <td style={{ textAlign: 'right', color: '#059669' }}>৳{formatAmount(paid)}</td>
                           <td style={{ textAlign: 'right', color: due > 0 ? '#dc2626' : 'inherit', fontWeight: due > 0 ? 700 : 400 }}>
                             ৳{formatAmount(due)}
@@ -2217,6 +2342,28 @@ export default function Reports({ userProfile, branches = [] }) {
                     })
                   )}
                 </tbody>
+                {overallSales.length > 0 && (
+                  <tfoot style={{ backgroundColor: '#f8fafc', fontWeight: 800 }}>
+                    <tr style={{ borderTop: '2px solid var(--border-color)' }}>
+                      <td colSpan={4} style={{ textAlign: 'right', padding: '0.6rem 0.8rem' }}>
+                        TOTALS:
+                      </td>
+                      <td style={{ textAlign: 'right', padding: '0.6rem 0.8rem', color: 'var(--text-primary)' }}>
+                        ৳{formatAmount(overallTotalRevenue)}
+                      </td>
+                      <td style={{ textAlign: 'right', padding: '0.6rem 0.8rem', color: overallSalesProfit >= 0 ? '#059669' : '#dc2626' }}>
+                        ৳{formatAmount(overallSalesProfit)}
+                      </td>
+                      <td style={{ textAlign: 'right', padding: '0.6rem 0.8rem', color: '#059669' }}>
+                        ৳{formatAmount(overallTotalPaid)}
+                      </td>
+                      <td style={{ textAlign: 'right', padding: '0.6rem 0.8rem', color: overallTotalDue > 0 ? '#dc2626' : 'inherit' }}>
+                        ৳{formatAmount(overallTotalDue)}
+                      </td>
+                      <td></td>
+                    </tr>
+                  </tfoot>
+                )}
               </table>
             </div>
           </div>

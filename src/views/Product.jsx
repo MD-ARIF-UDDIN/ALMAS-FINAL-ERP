@@ -1213,118 +1213,85 @@ export default function Product({ userProfile, branches, addToast }) {
 
         allActivities.sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
 
+        const prodCode = selectedHistoryProduct.product_code || selectedHistoryProduct.sku || '';
+        const prodName = selectedHistoryProduct.name || '';
+        const titleText = prodName && prodName.toLowerCase() !== prodCode.toLowerCase() ? `${prodName} (${prodCode})` : prodCode;
+
         return (
           <div className="modal-overlay" style={{ zIndex: 1050 }}>
-            <div className="modal-content" style={{ maxWidth: '960px', width: '95vw', maxHeight: '92vh', display: 'flex', flexDirection: 'column' }}>
+            <div className="modal-content" style={{ maxWidth: '880px', width: '95vw', maxHeight: '90vh', display: 'flex', flexDirection: 'column', borderRadius: '10px' }}>
               {/* Modal Header */}
-              <div className="modal-header" style={{ padding: '1rem 1.25rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
-                  <div style={{ backgroundColor: '#e0f2fe', color: '#0284c7', padding: '0.5rem', borderRadius: '8px', display: 'flex' }}>
-                    <History size={20} />
-                  </div>
-                  <div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                      <h3 className="modal-title" style={{ margin: 0, fontSize: '1.15rem' }}>
-                        {selectedHistoryProduct.name || selectedHistoryProduct.product_code || 'Product History'}
-                      </h3>
-                      <span style={{ fontFamily: 'monospace', fontWeight: 700, fontSize: '0.85rem', color: 'var(--primary)', backgroundColor: 'var(--primary-light)', padding: '0.15rem 0.5rem', borderRadius: '4px' }}>
-                        {selectedHistoryProduct.product_code || selectedHistoryProduct.sku}
-                      </span>
-                    </div>
-                    {selectedHistoryProduct.category && (
-                      <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
-                        Category: {selectedHistoryProduct.category}
-                      </span>
-                    )}
+              <div className="modal-header" style={{ padding: '0.85rem 1.15rem', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div>
+                  <h3 className="modal-title" style={{ margin: 0, fontSize: '1.05rem', fontWeight: 800, color: 'var(--text-primary)' }}>
+                    {titleText || 'Product History'}
+                  </h3>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '2px' }}>
+                    {selectedHistoryProduct.category ? `Category: ${selectedHistoryProduct.category} · ` : ''}Transaction & stock overview
                   </div>
                 </div>
                 <button
+                  type="button"
                   className="btn btn-secondary btn-sm"
                   onClick={() => setShowHistoryModal(false)}
-                  style={{ borderRadius: '50%', padding: '0.35rem 0.5rem', border: 'none', cursor: 'pointer' }}
+                  style={{ borderRadius: '50%', padding: '0.35rem 0.45rem', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
                 >
                   <X size={18} />
                 </button>
               </div>
 
               {/* Modal Body */}
-              <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '1rem', padding: '1.25rem', overflowY: 'auto' }}>
-                {/* 4-KPI Metric Strip */}
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '0.75rem' }}>
-                  {/* Total Purchased */}
-                  <div style={{ backgroundColor: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '8px', padding: '0.75rem' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.25rem' }}>
-                      <span style={{ fontSize: '0.75rem', fontWeight: 600, color: '#166534', textTransform: 'uppercase' }}>Total Purchased</span>
-                      <ArrowDownLeft size={16} style={{ color: '#16a34a' }} />
-                    </div>
-                    <div style={{ fontSize: '1.25rem', fontWeight: 800, color: '#15803d' }}>
-                      {totalPurchasedQty.toLocaleString()} <span style={{ fontSize: '0.8rem', fontWeight: 600 }}>pcs</span>
-                    </div>
-                    <div style={{ fontSize: '0.78rem', color: '#166534', marginTop: '2px' }}>
-                      Total Cost: ৳{formatAmount(totalPurchasedAmount)}
-                    </div>
+              <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', padding: '0.9rem 1.15rem', overflowY: 'auto' }}>
+                {/* Clean Simple Summary Strip */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '0.5rem', backgroundColor: '#f8fafc', padding: '0.6rem 0.75rem', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
+                  <div>
+                    <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 600, display: 'block' }}>PURCHASED</span>
+                    <span style={{ fontSize: '1.05rem', fontWeight: 800, color: '#15803d' }}>
+                      {totalPurchasedQty} pcs
+                    </span>
+                    <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', display: 'block' }}>
+                      ৳{formatAmount(totalPurchasedAmount)}
+                    </span>
                   </div>
 
-                  {/* Total Sold */}
-                  <div style={{ backgroundColor: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '8px', padding: '0.75rem' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.25rem' }}>
-                      <span style={{ fontSize: '0.75rem', fontWeight: 600, color: '#1e40af', textTransform: 'uppercase' }}>Total Sold</span>
-                      <ArrowUpRight size={16} style={{ color: '#2563eb' }} />
-                    </div>
-                    <div style={{ fontSize: '1.25rem', fontWeight: 800, color: '#1d4ed8' }}>
-                      {totalSoldQty.toLocaleString()} <span style={{ fontSize: '0.8rem', fontWeight: 600 }}>pcs</span>
-                    </div>
-                    <div style={{ fontSize: '0.78rem', color: '#1e40af', marginTop: '2px' }}>
-                      Revenue: ৳{formatAmount(totalSoldAmount)}
-                    </div>
+                  <div>
+                    <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 600, display: 'block' }}>SOLD</span>
+                    <span style={{ fontSize: '1.05rem', fontWeight: 800, color: '#1d4ed8' }}>
+                      {totalSoldQty} pcs
+                    </span>
+                    <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', display: 'block' }}>
+                      ৳{formatAmount(totalSoldAmount)}
+                    </span>
                   </div>
 
-                  {/* Stock in Hand */}
-                  <div style={{ backgroundColor: '#faf5ff', border: '1px solid #e9d5ff', borderRadius: '8px', padding: '0.75rem' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.25rem' }}>
-                      <span style={{ fontSize: '0.75rem', fontWeight: 600, color: '#6b21a8', textTransform: 'uppercase' }}>Stock In Hand</span>
-                      <Store size={16} style={{ color: '#9333ea' }} />
-                    </div>
-                    <div style={{ fontSize: '1.25rem', fontWeight: 800, color: totalStockInHand > 0 ? '#7e22ce' : '#dc2626' }}>
-                      {totalStockInHand.toLocaleString()} <span style={{ fontSize: '0.8rem', fontWeight: 600 }}>pcs</span>
-                    </div>
-                    <div style={{ fontSize: '0.78rem', color: '#6b21a8', marginTop: '2px' }}>
-                      Balance: (Purchased − Sold)
-                    </div>
-                  </div>
-
-                  {/* Stock Valuation */}
-                  <div style={{ backgroundColor: '#fffbeb', border: '1px solid #fde68a', borderRadius: '8px', padding: '0.75rem' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.25rem' }}>
-                      <span style={{ fontSize: '0.75rem', fontWeight: 600, color: '#92400e', textTransform: 'uppercase' }}>Stock Valuation</span>
-                      <DollarSign size={16} style={{ color: '#d97706' }} />
-                    </div>
-                    <div style={{ fontSize: '1.25rem', fontWeight: 800, color: '#b45309' }}>
-                      ৳{formatAmount(totalStockValuation)}
-                    </div>
-                    <div style={{ fontSize: '0.78rem', color: '#92400e', marginTop: '2px' }}>
-                      Based on current unit cost
-                    </div>
+                  <div>
+                    <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 600, display: 'block' }}>STOCK IN HAND</span>
+                    <span style={{ fontSize: '1.05rem', fontWeight: 800, color: totalStockInHand > 0 ? '#7e22ce' : '#dc2626' }}>
+                      {totalStockInHand} pcs
+                    </span>
+                    <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', display: 'block' }}>
+                      Val: ৳{formatAmount(totalStockValuation)}
+                    </span>
                   </div>
                 </div>
 
                 {/* Filter and Tab Navigation Bar */}
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.75rem' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
                   {/* Tabs */}
-                  <div style={{ display: 'flex', gap: '0.4rem', backgroundColor: '#f1f5f9', padding: '0.25rem', borderRadius: '8px' }}>
+                  <div style={{ display: 'flex', gap: '0.25rem', backgroundColor: '#f1f5f9', padding: '0.2rem', borderRadius: '6px' }}>
                     <button
                       type="button"
                       className={`btn btn-sm ${historyTab === 'all' ? 'btn-primary' : 'btn-secondary'}`}
                       onClick={() => setHistoryTab('all')}
-                      style={{ borderRadius: '6px', fontSize: '0.8rem', padding: '0.35rem 0.75rem' }}
+                      style={{ borderRadius: '5px', fontSize: '0.76rem', padding: '0.25rem 0.55rem' }}
                     >
-                      All Activity ({allActivities.length})
+                      All ({allActivities.length})
                     </button>
                     <button
                       type="button"
                       className={`btn btn-sm ${historyTab === 'purchases' ? 'btn-primary' : 'btn-secondary'}`}
                       onClick={() => setHistoryTab('purchases')}
-                      style={{ borderRadius: '6px', fontSize: '0.8rem', padding: '0.35rem 0.75rem' }}
+                      style={{ borderRadius: '5px', fontSize: '0.76rem', padding: '0.25rem 0.55rem' }}
                     >
                       Purchases ({filteredPurchases.length})
                     </button>
@@ -1332,7 +1299,7 @@ export default function Product({ userProfile, branches, addToast }) {
                       type="button"
                       className={`btn btn-sm ${historyTab === 'sales' ? 'btn-primary' : 'btn-secondary'}`}
                       onClick={() => setHistoryTab('sales')}
-                      style={{ borderRadius: '6px', fontSize: '0.8rem', padding: '0.35rem 0.75rem' }}
+                      style={{ borderRadius: '5px', fontSize: '0.76rem', padding: '0.25rem 0.55rem' }}
                     >
                       Sales ({filteredSales.length})
                     </button>
@@ -1340,18 +1307,18 @@ export default function Product({ userProfile, branches, addToast }) {
                       type="button"
                       className={`btn btn-sm ${historyTab === 'stock' ? 'btn-primary' : 'btn-secondary'}`}
                       onClick={() => setHistoryTab('stock')}
-                      style={{ borderRadius: '6px', fontSize: '0.8rem', padding: '0.35rem 0.75rem' }}
+                      style={{ borderRadius: '5px', fontSize: '0.76rem', padding: '0.25rem 0.55rem' }}
                     >
-                      Branch Stock ({filteredInventory.length})
+                      Stock ({filteredInventory.length})
                     </button>
                   </div>
 
                   {/* Branch Filter and Search */}
-                  <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                  <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', flexWrap: 'wrap', flex: 1, justifyContent: 'flex-end' }}>
                     {isOwner && branches && branches.length > 1 && (
                       <select
                         className="input-control"
-                        style={{ height: '34px', fontSize: '0.8rem', width: '170px' }}
+                        style={{ height: '30px', fontSize: '0.76rem', width: '130px' }}
                         value={historyBranchFilter}
                         onChange={(e) => setHistoryBranchFilter(e.target.value)}
                       >
@@ -1364,258 +1331,339 @@ export default function Product({ userProfile, branches, addToast }) {
                     <input
                       type="text"
                       className="input-control"
-                      placeholder="Search invoice or contact..."
-                      style={{ height: '34px', fontSize: '0.8rem', width: '190px' }}
+                      placeholder="Search..."
+                      style={{ height: '30px', fontSize: '0.76rem', width: '140px' }}
                       value={historySearchQuery}
                       onChange={(e) => setHistorySearchQuery(e.target.value)}
                     />
                   </div>
                 </div>
 
-                {/* Table Content */}
+                {/* Content Area */}
                 {loadingHistory ? (
-                  <div style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-muted)' }}>
-                    Loading transaction records...
+                  <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>
+                    Loading...
                   </div>
                 ) : (
                   <>
                     {/* 1. ALL ACTIVITY TAB */}
                     {historyTab === 'all' && (
-                      <div className="table-container" style={{ border: '1px solid var(--border-color)', borderRadius: '8px' }}>
-                        <table>
-                          <thead>
-                            <tr>
-                              <th style={{ width: '100px' }}>Date</th>
-                              <th style={{ width: '110px' }}>Type</th>
-                              <th style={{ width: '160px' }}>Invoice #</th>
-                              <th style={{ width: '140px' }}>Branch</th>
-                              <th>Party / Contact</th>
-                              <th style={{ width: '90px', textAlign: 'right' }}>Qty</th>
-                              <th style={{ width: '100px', textAlign: 'right' }}>Unit Price</th>
-                              <th style={{ width: '110px', textAlign: 'right' }}>Total (৳)</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {allActivities.length === 0 ? (
+                      <div>
+                        {/* Desktop Table View */}
+                        <div className="table-container hide-on-mobile" style={{ border: '1px solid var(--border-color)', borderRadius: '6px', maxHeight: '380px', overflowY: 'auto' }}>
+                          <table style={{ fontSize: '0.8rem' }}>
+                            <thead>
                               <tr>
-                                <td colSpan={8} style={{ textAlign: 'center', padding: '2.5rem', color: 'var(--text-muted)' }}>
-                                  No transaction activity found for this product.
-                                </td>
+                                <th style={{ width: '90px' }}>Date</th>
+                                <th style={{ width: '90px' }}>Type</th>
+                                <th style={{ width: '140px' }}>Invoice #</th>
+                                <th style={{ width: '130px' }}>Branch</th>
+                                <th>Party</th>
+                                <th style={{ width: '70px', textAlign: 'right' }}>Qty</th>
+                                <th style={{ width: '85px', textAlign: 'right' }}>Price</th>
+                                <th style={{ width: '95px', textAlign: 'right' }}>Total (৳)</th>
                               </tr>
-                            ) : (
-                              allActivities.map((act) => (
-                                <tr key={act.id}>
-                                  <td style={{ fontSize: '0.82rem', whiteSpace: 'nowrap' }}>
-                                    {act.date || '—'}
-                                  </td>
-                                  <td>
-                                    {act.type === 'purchase' ? (
-                                      <span style={{ backgroundColor: '#dcfce7', color: '#15803d', padding: '0.2rem 0.5rem', borderRadius: '4px', fontSize: '0.74rem', fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
-                                        <ArrowDownLeft size={11} /> PURCHASE
-                                      </span>
-                                    ) : (
-                                      <span style={{ backgroundColor: '#dbeafe', color: '#1d4ed8', padding: '0.2rem 0.5rem', borderRadius: '4px', fontSize: '0.74rem', fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
-                                        <ArrowUpRight size={11} /> SALE
-                                      </span>
-                                    )}
-                                  </td>
-                                  <td style={{ fontFamily: 'monospace', fontWeight: 700, fontSize: '0.82rem' }}>
-                                    {act.invoiceNumber}
-                                  </td>
-                                  <td style={{ fontSize: '0.82rem' }}>
-                                    {act.branchName}
-                                  </td>
-                                  <td style={{ fontSize: '0.82rem' }}>
-                                    <div style={{ fontWeight: 600 }}>{act.contactName}</div>
-                                    {act.contactPhone && <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>{act.contactPhone}</div>}
-                                  </td>
-                                  <td style={{ textAlign: 'right', fontWeight: 700, color: act.type === 'purchase' ? '#16a34a' : '#2563eb' }}>
-                                    {act.type === 'purchase' ? `+${act.quantity}` : `-${act.quantity}`}
-                                  </td>
-                                  <td style={{ textAlign: 'right', fontSize: '0.82rem' }}>
-                                    ৳{formatAmount(act.unitPrice)}
-                                  </td>
-                                  <td style={{ textAlign: 'right', fontWeight: 700, fontSize: '0.85rem' }}>
-                                    ৳{formatAmount(act.totalPrice)}
+                            </thead>
+                            <tbody>
+                              {allActivities.length === 0 ? (
+                                <tr>
+                                  <td colSpan={8} style={{ textAlign: 'center', padding: '1.5rem', color: 'var(--text-muted)' }}>
+                                    No activity found.
                                   </td>
                                 </tr>
-                              ))
-                            )}
-                          </tbody>
-                        </table>
+                              ) : (
+                                allActivities.map((act) => (
+                                  <tr key={act.id}>
+                                    <td style={{ whiteSpace: 'nowrap' }}>{act.date || '—'}</td>
+                                    <td>
+                                      {act.type === 'purchase' ? (
+                                        <span style={{ color: '#15803d', fontWeight: 700, fontSize: '0.74rem' }}>
+                                          ↓ Purchase
+                                        </span>
+                                      ) : (
+                                        <span style={{ color: '#1d4ed8', fontWeight: 700, fontSize: '0.74rem' }}>
+                                          ↑ Sale
+                                        </span>
+                                      )}
+                                    </td>
+                                    <td style={{ fontFamily: 'monospace', fontWeight: 700 }}>{act.invoiceNumber}</td>
+                                    <td>{act.branchName}</td>
+                                    <td>
+                                      <div style={{ fontWeight: 600 }}>{act.contactName}</div>
+                                      {act.contactPhone && <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>{act.contactPhone}</div>}
+                                    </td>
+                                    <td style={{ textAlign: 'right', fontWeight: 700, color: act.type === 'purchase' ? '#16a34a' : '#2563eb' }}>
+                                      {act.type === 'purchase' ? `+${act.quantity}` : `-${act.quantity}`}
+                                    </td>
+                                    <td style={{ textAlign: 'right' }}>৳{formatAmount(act.unitPrice)}</td>
+                                    <td style={{ textAlign: 'right', fontWeight: 700 }}>৳{formatAmount(act.totalPrice)}</td>
+                                  </tr>
+                                ))
+                              )}
+                            </tbody>
+                          </table>
+                        </div>
+
+                        {/* Mobile Cards View */}
+                        <div className="hide-on-desktop mobile-card-list">
+                          {allActivities.length === 0 ? (
+                            <div style={{ textAlign: 'center', padding: '1.25rem', color: 'var(--text-muted)' }}>
+                              No activity found.
+                            </div>
+                          ) : (
+                            allActivities.map((act) => (
+                              <div key={act.id} className="mobile-item-card" style={{ padding: '0.65rem', border: '1px solid var(--border-color)', borderRadius: '6px', backgroundColor: '#ffffff', marginBottom: '0.4rem' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.2rem' }}>
+                                  <span style={{ fontWeight: 700, fontSize: '0.76rem', color: act.type === 'purchase' ? '#15803d' : '#1d4ed8' }}>
+                                    {act.type === 'purchase' ? '↓ Purchase' : '↑ Sale'}
+                                  </span>
+                                  <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>{act.date}</span>
+                                </div>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.2rem' }}>
+                                  <span style={{ fontFamily: 'monospace', fontWeight: 700, fontSize: '0.8rem' }}>{act.invoiceNumber}</span>
+                                  <span style={{ fontWeight: 800, fontSize: '0.86rem', color: act.type === 'purchase' ? '#16a34a' : '#2563eb' }}>
+                                    {act.type === 'purchase' ? `+${act.quantity}` : `-${act.quantity}`} pcs
+                                  </span>
+                                </div>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.74rem', color: 'var(--text-secondary)' }}>
+                                  <span>{act.contactName} ({act.branchName})</span>
+                                  <span style={{ fontWeight: 700 }}>৳{formatAmount(act.totalPrice)}</span>
+                                </div>
+                              </div>
+                            ))
+                          )}
+                        </div>
                       </div>
                     )}
 
                     {/* 2. PURCHASES TAB */}
                     {historyTab === 'purchases' && (
-                      <div className="table-container" style={{ border: '1px solid var(--border-color)', borderRadius: '8px' }}>
-                        <table>
-                          <thead>
-                            <tr>
-                              <th style={{ width: '100px' }}>Date</th>
-                              <th style={{ width: '160px' }}>Purchase Bill #</th>
-                              <th style={{ width: '150px' }}>Branch</th>
-                              <th>Supplier</th>
-                              <th style={{ width: '90px', textAlign: 'right' }}>Qty</th>
-                              <th style={{ width: '110px', textAlign: 'right' }}>Cost Price</th>
-                              <th style={{ width: '120px', textAlign: 'right' }}>Total Cost (৳)</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {filteredPurchases.length === 0 ? (
+                      <div>
+                        {/* Desktop Table */}
+                        <div className="table-container hide-on-mobile" style={{ border: '1px solid var(--border-color)', borderRadius: '6px', maxHeight: '380px', overflowY: 'auto' }}>
+                          <table style={{ fontSize: '0.8rem' }}>
+                            <thead>
                               <tr>
-                                <td colSpan={7} style={{ textAlign: 'center', padding: '2.5rem', color: 'var(--text-muted)' }}>
-                                  No purchase records found for this product.
-                                </td>
+                                <th style={{ width: '90px' }}>Date</th>
+                                <th style={{ width: '140px' }}>Bill #</th>
+                                <th style={{ width: '130px' }}>Branch</th>
+                                <th>Supplier</th>
+                                <th style={{ width: '75px', textAlign: 'right' }}>Qty</th>
+                                <th style={{ width: '85px', textAlign: 'right' }}>Price</th>
+                                <th style={{ width: '100px', textAlign: 'right' }}>Total (৳)</th>
                               </tr>
-                            ) : (
-                              filteredPurchases.map((pi) => (
-                                <tr key={pi.id}>
-                                  <td style={{ fontSize: '0.82rem', whiteSpace: 'nowrap' }}>
-                                    {pi.purchases?.purchase_date || '—'}
-                                  </td>
-                                  <td style={{ fontFamily: 'monospace', fontWeight: 700, fontSize: '0.82rem', color: 'var(--primary)' }}>
-                                    {pi.purchases?.invoice_number || '—'}
-                                  </td>
-                                  <td style={{ fontSize: '0.82rem' }}>
-                                    {pi.purchases?.branches?.name || '—'}
-                                  </td>
-                                  <td style={{ fontSize: '0.82rem' }}>
-                                    <div style={{ fontWeight: 600 }}>{pi.purchases?.supplier?.name || 'Supplier'}</div>
-                                    {pi.purchases?.supplier?.phone && <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>{pi.purchases?.supplier?.phone}</div>}
-                                  </td>
-                                  <td style={{ textAlign: 'right', fontWeight: 700, color: '#16a34a' }}>
-                                    +{pi.quantity}
-                                  </td>
-                                  <td style={{ textAlign: 'right', fontSize: '0.82rem' }}>
-                                    ৳{formatAmount(pi.unit_price)}
-                                  </td>
-                                  <td style={{ textAlign: 'right', fontWeight: 700 }}>
-                                    ৳{formatAmount(pi.total_price || (pi.quantity * pi.unit_price))}
+                            </thead>
+                            <tbody>
+                              {filteredPurchases.length === 0 ? (
+                                <tr>
+                                  <td colSpan={7} style={{ textAlign: 'center', padding: '1.5rem', color: 'var(--text-muted)' }}>
+                                    No purchases found.
                                   </td>
                                 </tr>
-                              ))
-                            )}
-                          </tbody>
-                        </table>
+                              ) : (
+                                filteredPurchases.map((pi) => (
+                                  <tr key={pi.id}>
+                                    <td style={{ whiteSpace: 'nowrap' }}>{pi.purchases?.purchase_date || '—'}</td>
+                                    <td style={{ fontFamily: 'monospace', fontWeight: 700, color: 'var(--primary)' }}>{pi.purchases?.invoice_number || '—'}</td>
+                                    <td>{pi.purchases?.branches?.name || '—'}</td>
+                                    <td>
+                                      <div style={{ fontWeight: 600 }}>{pi.purchases?.supplier?.name || 'Supplier'}</div>
+                                      {pi.purchases?.supplier?.phone && <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>{pi.purchases?.supplier?.phone}</div>}
+                                    </td>
+                                    <td style={{ textAlign: 'right', fontWeight: 700, color: '#16a34a' }}>+{pi.quantity}</td>
+                                    <td style={{ textAlign: 'right' }}>৳{formatAmount(pi.unit_price)}</td>
+                                    <td style={{ textAlign: 'right', fontWeight: 700 }}>৳{formatAmount(pi.total_price || (pi.quantity * pi.unit_price))}</td>
+                                  </tr>
+                                ))
+                              )}
+                            </tbody>
+                          </table>
+                        </div>
+
+                        {/* Mobile Cards */}
+                        <div className="hide-on-desktop mobile-card-list">
+                          {filteredPurchases.length === 0 ? (
+                            <div style={{ textAlign: 'center', padding: '1.25rem', color: 'var(--text-muted)' }}>
+                              No purchases found.
+                            </div>
+                          ) : (
+                            filteredPurchases.map((pi) => (
+                              <div key={pi.id} className="mobile-item-card" style={{ padding: '0.65rem', border: '1px solid var(--border-color)', borderRadius: '6px', backgroundColor: '#ffffff', marginBottom: '0.4rem' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                  <span style={{ fontFamily: 'monospace', fontWeight: 700, fontSize: '0.8rem', color: 'var(--primary)' }}>{pi.purchases?.invoice_number}</span>
+                                  <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>{pi.purchases?.purchase_date}</span>
+                                </div>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '0.2rem' }}>
+                                  <span style={{ fontSize: '0.74rem' }}>{pi.purchases?.supplier?.name} ({pi.purchases?.branches?.name})</span>
+                                  <span style={{ fontWeight: 800, color: '#16a34a' }}>+{pi.quantity} pcs</span>
+                                </div>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.74rem', marginTop: '0.2rem' }}>
+                                  <span style={{ color: 'var(--text-muted)' }}>Unit: ৳{formatAmount(pi.unit_price)}</span>
+                                  <span style={{ fontWeight: 700 }}>Total: ৳{formatAmount(pi.total_price || (pi.quantity * pi.unit_price))}</span>
+                                </div>
+                              </div>
+                            ))
+                          )}
+                        </div>
                       </div>
                     )}
 
                     {/* 3. SALES TAB */}
                     {historyTab === 'sales' && (
-                      <div className="table-container" style={{ border: '1px solid var(--border-color)', borderRadius: '8px' }}>
-                        <table>
-                          <thead>
-                            <tr>
-                              <th style={{ width: '100px' }}>Date</th>
-                              <th style={{ width: '160px' }}>Sale Invoice #</th>
-                              <th style={{ width: '150px' }}>Branch</th>
-                              <th>Customer</th>
-                              <th style={{ width: '80px' }}>Size</th>
-                              <th style={{ width: '90px', textAlign: 'right' }}>Qty</th>
-                              <th style={{ width: '110px', textAlign: 'right' }}>Sell Price</th>
-                              <th style={{ width: '120px', textAlign: 'right' }}>Total (৳)</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {filteredSales.length === 0 ? (
+                      <div>
+                        {/* Desktop Table */}
+                        <div className="table-container hide-on-mobile" style={{ border: '1px solid var(--border-color)', borderRadius: '6px', maxHeight: '380px', overflowY: 'auto' }}>
+                          <table style={{ fontSize: '0.8rem' }}>
+                            <thead>
                               <tr>
-                                <td colSpan={8} style={{ textAlign: 'center', padding: '2.5rem', color: 'var(--text-muted)' }}>
-                                  No sales records found for this product.
-                                </td>
+                                <th style={{ width: '90px' }}>Date</th>
+                                <th style={{ width: '140px' }}>Invoice #</th>
+                                <th style={{ width: '130px' }}>Branch</th>
+                                <th>Customer</th>
+                                <th style={{ width: '60px' }}>Size</th>
+                                <th style={{ width: '75px', textAlign: 'right' }}>Qty</th>
+                                <th style={{ width: '85px', textAlign: 'right' }}>Price</th>
+                                <th style={{ width: '100px', textAlign: 'right' }}>Total (৳)</th>
                               </tr>
-                            ) : (
-                              filteredSales.map((si) => (
-                                <tr key={si.id}>
-                                  <td style={{ fontSize: '0.82rem', whiteSpace: 'nowrap' }}>
-                                    {si.sales?.sale_date || '—'}
-                                  </td>
-                                  <td style={{ fontFamily: 'monospace', fontWeight: 700, fontSize: '0.82rem', color: 'var(--primary)' }}>
-                                    {si.sales?.invoice_number || '—'}
-                                  </td>
-                                  <td style={{ fontSize: '0.82rem' }}>
-                                    {si.sales?.branches?.name || '—'}
-                                  </td>
-                                  <td style={{ fontSize: '0.82rem' }}>
-                                    <div style={{ fontWeight: 600 }}>{si.sales?.customer?.name || 'Customer'}</div>
-                                    {si.sales?.customer?.phone && <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>{si.sales?.customer?.phone}</div>}
-                                  </td>
-                                  <td style={{ fontSize: '0.82rem', color: 'var(--text-secondary)' }}>
-                                    {si.size || '—'}
-                                  </td>
-                                  <td style={{ textAlign: 'right', fontWeight: 700, color: '#2563eb' }}>
-                                    -{si.quantity}
-                                  </td>
-                                  <td style={{ textAlign: 'right', fontSize: '0.82rem' }}>
-                                    ৳{formatAmount(si.unit_price)}
-                                  </td>
-                                  <td style={{ textAlign: 'right', fontWeight: 700 }}>
-                                    ৳{formatAmount(si.total_price || (si.quantity * si.unit_price))}
+                            </thead>
+                            <tbody>
+                              {filteredSales.length === 0 ? (
+                                <tr>
+                                  <td colSpan={8} style={{ textAlign: 'center', padding: '1.5rem', color: 'var(--text-muted)' }}>
+                                    No sales found.
                                   </td>
                                 </tr>
-                              ))
-                            )}
-                          </tbody>
-                        </table>
+                              ) : (
+                                filteredSales.map((si) => (
+                                  <tr key={si.id}>
+                                    <td style={{ whiteSpace: 'nowrap' }}>{si.sales?.sale_date || '—'}</td>
+                                    <td style={{ fontFamily: 'monospace', fontWeight: 700, color: 'var(--primary)' }}>{si.sales?.invoice_number || '—'}</td>
+                                    <td>{si.sales?.branches?.name || '—'}</td>
+                                    <td>
+                                      <div style={{ fontWeight: 600 }}>{si.sales?.customer?.name || 'Customer'}</div>
+                                      {si.sales?.customer?.phone && <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>{si.sales?.customer?.phone}</div>}
+                                    </td>
+                                    <td style={{ color: 'var(--text-secondary)' }}>{si.size || '—'}</td>
+                                    <td style={{ textAlign: 'right', fontWeight: 700, color: '#2563eb' }}>-{si.quantity}</td>
+                                    <td style={{ textAlign: 'right' }}>৳{formatAmount(si.unit_price)}</td>
+                                    <td style={{ textAlign: 'right', fontWeight: 700 }}>৳{formatAmount(si.total_price || (si.quantity * si.unit_price))}</td>
+                                  </tr>
+                                ))
+                              )}
+                            </tbody>
+                          </table>
+                        </div>
+
+                        {/* Mobile Cards */}
+                        <div className="hide-on-desktop mobile-card-list">
+                          {filteredSales.length === 0 ? (
+                            <div style={{ textAlign: 'center', padding: '1.25rem', color: 'var(--text-muted)' }}>
+                              No sales found.
+                            </div>
+                          ) : (
+                            filteredSales.map((si) => (
+                              <div key={si.id} className="mobile-item-card" style={{ padding: '0.65rem', border: '1px solid var(--border-color)', borderRadius: '6px', backgroundColor: '#ffffff', marginBottom: '0.4rem' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                  <span style={{ fontFamily: 'monospace', fontWeight: 700, fontSize: '0.8rem', color: 'var(--primary)' }}>{si.sales?.invoice_number}</span>
+                                  <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>{si.sales?.sale_date}</span>
+                                </div>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '0.2rem' }}>
+                                  <span style={{ fontSize: '0.74rem' }}>{si.sales?.customer?.name} ({si.sales?.branches?.name})</span>
+                                  <span style={{ fontWeight: 800, color: '#2563eb' }}>-{si.quantity} pcs</span>
+                                </div>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.74rem', marginTop: '0.2rem' }}>
+                                  <span style={{ color: 'var(--text-muted)' }}>{si.size ? `Size: ${si.size} | ` : ''}৳{formatAmount(si.unit_price)}</span>
+                                  <span style={{ fontWeight: 700 }}>Total: ৳{formatAmount(si.total_price || (si.quantity * si.unit_price))}</span>
+                                </div>
+                              </div>
+                            ))
+                          )}
+                        </div>
                       </div>
                     )}
 
                     {/* 4. BRANCH STOCK BREAKDOWN TAB */}
                     {historyTab === 'stock' && (
-                      <div className="table-container" style={{ border: '1px solid var(--border-color)', borderRadius: '8px' }}>
-                        <table>
-                          <thead>
-                            <tr>
-                              <th>Branch Name</th>
-                              <th style={{ width: '120px' }}>Type</th>
-                              <th style={{ width: '130px', textAlign: 'right' }}>Stock in Hand</th>
-                              <th style={{ width: '130px', textAlign: 'right' }}>Unit Buy Cost</th>
-                              <th style={{ width: '150px', textAlign: 'right' }}>Stock Valuation (৳)</th>
-                              <th style={{ width: '150px' }}>Last Updated</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {filteredInventory.length === 0 ? (
+                      <div>
+                        {/* Desktop Table */}
+                        <div className="table-container hide-on-mobile" style={{ border: '1px solid var(--border-color)', borderRadius: '6px', maxHeight: '380px', overflowY: 'auto' }}>
+                          <table style={{ fontSize: '0.8rem' }}>
+                            <thead>
                               <tr>
-                                <td colSpan={6} style={{ textAlign: 'center', padding: '2.5rem', color: 'var(--text-muted)' }}>
-                                  No branch stock records found.
-                                </td>
+                                <th>Branch Name</th>
+                                <th style={{ width: '100px' }}>Type</th>
+                                <th style={{ width: '110px', textAlign: 'right' }}>Stock in Hand</th>
+                                <th style={{ width: '110px', textAlign: 'right' }}>Buy Cost</th>
+                                <th style={{ width: '130px', textAlign: 'right' }}>Stock Value (৳)</th>
                               </tr>
-                            ) : (
-                              filteredInventory.map((inv) => {
-                                const q = Number(inv.quantity) || 0;
-                                const cost = Number(inv.purchase_price) || 0;
-                                const val = q * cost;
-                                return (
-                                  <tr key={inv.id}>
-                                    <td style={{ fontWeight: 600 }}>
-                                      {inv.branches?.name || 'Branch'}
-                                    </td>
-                                    <td>
-                                      {inv.branches?.is_factory ? (
-                                        <span className="badge badge-secondary" style={{ fontSize: '0.72rem' }}>🏭 Factory</span>
-                                      ) : (
-                                        <span className="badge badge-primary" style={{ fontSize: '0.72rem' }}>🏪 Showroom</span>
-                                      )}
-                                    </td>
-                                    <td style={{ textAlign: 'right', fontWeight: 800, fontSize: '0.95rem', color: q > 0 ? '#15803d' : 'var(--text-muted)' }}>
-                                      {q.toLocaleString()} pcs
-                                    </td>
-                                    <td style={{ textAlign: 'right', fontSize: '0.85rem' }}>
-                                      {cost > 0 ? `৳${formatAmount(cost)}` : '—'}
-                                    </td>
-                                    <td style={{ textAlign: 'right', fontWeight: 700, fontSize: '0.9rem' }}>
-                                      {val > 0 ? `৳${formatAmount(val)}` : '—'}
-                                    </td>
-                                    <td style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
-                                      {inv.updated_at ? new Date(inv.updated_at).toLocaleDateString() : '—'}
-                                    </td>
-                                  </tr>
-                                );
-                              })
-                            )}
-                          </tbody>
-                        </table>
+                            </thead>
+                            <tbody>
+                              {filteredInventory.length === 0 ? (
+                                <tr>
+                                  <td colSpan={5} style={{ textAlign: 'center', padding: '1.5rem', color: 'var(--text-muted)' }}>
+                                    No stock records found.
+                                  </td>
+                                </tr>
+                              ) : (
+                                filteredInventory.map((inv) => {
+                                  const q = Number(inv.quantity) || 0;
+                                  const cost = Number(inv.purchase_price) || 0;
+                                  const val = q * cost;
+                                  return (
+                                    <tr key={inv.id}>
+                                      <td style={{ fontWeight: 600 }}>{inv.branches?.name || 'Branch'}</td>
+                                      <td>
+                                        {inv.branches?.is_factory ? (
+                                          <span className="badge badge-secondary" style={{ fontSize: '0.7rem' }}>Factory</span>
+                                        ) : (
+                                          <span className="badge badge-primary" style={{ fontSize: '0.7rem' }}>Showroom</span>
+                                        )}
+                                      </td>
+                                      <td style={{ textAlign: 'right', fontWeight: 800, color: q > 0 ? '#15803d' : 'var(--text-muted)' }}>
+                                        {q.toLocaleString()} pcs
+                                      </td>
+                                      <td style={{ textAlign: 'right' }}>{cost > 0 ? `৳${formatAmount(cost)}` : '—'}</td>
+                                      <td style={{ textAlign: 'right', fontWeight: 700 }}>{val > 0 ? `৳${formatAmount(val)}` : '—'}</td>
+                                    </tr>
+                                  );
+                                })
+                              )}
+                            </tbody>
+                          </table>
+                        </div>
+
+                        {/* Mobile Cards */}
+                        <div className="hide-on-desktop mobile-card-list">
+                          {filteredInventory.length === 0 ? (
+                            <div style={{ textAlign: 'center', padding: '1.25rem', color: 'var(--text-muted)' }}>
+                              No stock records found.
+                            </div>
+                          ) : (
+                            filteredInventory.map((inv) => {
+                              const q = Number(inv.quantity) || 0;
+                              const cost = Number(inv.purchase_price) || 0;
+                              const val = q * cost;
+                              return (
+                                <div key={inv.id} className="mobile-item-card" style={{ padding: '0.65rem', border: '1px solid var(--border-color)', borderRadius: '6px', backgroundColor: '#ffffff', marginBottom: '0.4rem' }}>
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                    <span style={{ fontWeight: 700, fontSize: '0.82rem' }}>{inv.branches?.name}</span>
+                                    <span className={`badge badge-${inv.branches?.is_factory ? 'secondary' : 'primary'}`} style={{ fontSize: '0.68rem' }}>
+                                      {inv.branches?.is_factory ? 'Factory' : 'Showroom'}
+                                    </span>
+                                  </div>
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '0.2rem' }}>
+                                    <span style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>Stock in Hand:</span>
+                                    <span style={{ fontWeight: 800, color: q > 0 ? '#15803d' : 'var(--text-muted)' }}>{q.toLocaleString()} pcs</span>
+                                  </div>
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.74rem', marginTop: '0.2rem' }}>
+                                    <span style={{ color: 'var(--text-muted)' }}>Cost: {cost > 0 ? `৳${formatAmount(cost)}` : '—'}</span>
+                                    <span style={{ fontWeight: 700 }}>Valuation: {val > 0 ? `৳${formatAmount(val)}` : '—'}</span>
+                                  </div>
+                                </div>
+                              );
+                            })
+                          )}
+                        </div>
                       </div>
                     )}
                   </>
@@ -1623,11 +1671,12 @@ export default function Product({ userProfile, branches, addToast }) {
               </div>
 
               {/* Modal Footer */}
-              <div className="modal-footer" style={{ padding: '0.75rem 1.25rem', display: 'flex', justifyContent: 'flex-end' }}>
+              <div className="modal-footer" style={{ padding: '0.6rem 1.15rem', borderTop: '1px solid var(--border-color)', display: 'flex', justifyContent: 'flex-end', background: '#f8fafc' }}>
                 <button
                   type="button"
-                  className="btn btn-secondary"
+                  className="btn btn-secondary btn-sm"
                   onClick={() => setShowHistoryModal(false)}
+                  style={{ minWidth: '70px', fontWeight: 600 }}
                 >
                   Close
                 </button>
