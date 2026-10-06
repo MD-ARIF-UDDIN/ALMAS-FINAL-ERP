@@ -1107,15 +1107,15 @@ export default function Purchases({ userProfile, branches, addToast }) {
         const dbMatch = currentDbItems.find((d) => d.id === upIt.id);
         const oldQ = parseFloat(dbMatch?.quantity) || 0;
         const newQ = parseFloat(upIt.quantity) || 0;
-        const pId = upIt.productId || dbMatch?.product_id;
+        const oldPId = dbMatch?.product_id;
+        const newPId = upIt.productId || oldPId;
         const unitPrice = parseFloat(upIt.costPrice) || 0;
-        const diff = newQ - oldQ;
 
         // Update purchase_items table row directly
         const { error: upErr } = await supabase
           .from('purchase_items')
           .update({
-            product_id: isFactoryPurchase ? null : (pId || null),
+            product_id: isFactoryPurchase ? null : (newPId || null),
             item_name: upIt.name?.trim() || 'Custom Item',
             quantity: newQ,
             unit_price: unitPrice,
@@ -1125,45 +1125,130 @@ export default function Purchases({ userProfile, branches, addToast }) {
 
         if (upErr) throw upErr;
 
-        // Adjust inventory only if quantity changed for branch purchases
-        if (!isFactoryPurchase && targetBranchId && pId && diff !== 0) {
-          const { data: curInv } = await supabase
-            .from('inventory')
-            .select('id, quantity')
-            .eq('branch_id', targetBranchId)
-            .eq('product_id', pId)
-            .maybeSingle();
+        // Handle inventory adjustments for branch purchases
+        if (!isFactoryPurchase && targetBranchId) {
+          if (oldPId && newPId && oldPId !== newPId) {
+            // Case 1: Product was changed on this row (e.g. swapped W-386 to W-385)
+            // 1a. Reduce stock of OLD product by oldQ
+            if (oldQ > 0) {
+              const { data: curOldInv } = await supabase
+                .from('inventory')
+                .select('id, quantity')
+                .eq('branch_id', targetBranchId)
+                .eq('product_id', oldPId)
+                .maybeSingle();
 
-          if (curInv) {
-            await supabase
-              .from('inventory')
-              .update({
-                quantity: Math.max(0, (curInv.quantity || 0) + diff),
-                updated_at: new Date().toISOString(),
-              })
-              .eq('id', curInv.id);
-          } else if (diff > 0) {
-            await supabase.from('inventory').insert([
-              {
-                branch_id: targetBranchId,
-                product_id: pId,
-                quantity: diff,
-                updated_at: new Date().toISOString(),
-              },
-            ]);
+              if (curOldInv) {
+                await supabase
+                  .from('inventory')
+                  .update({
+                    quantity: Math.max(0, (curOldInv.quantity || 0) - oldQ),
+                    updated_at: new Date().toISOString(),
+                  })
+                  .eq('id', curOldInv.id);
+              }
+
+              await supabase.from('inventory_movements').insert([
+                {
+                  branch_id: targetBranchId,
+                  product_id: oldPId,
+                  type: 'adjustment_out',
+                  quantity: oldQ,
+                  reference_id: editingPurchase.id,
+                  description: `Purchase Bill Edited [${editingPurchase.invoice_number || editingPurchase.id.substring(0, 8)}]: Product changed, Old item removed (-${oldQ})`,
+                  created_by: userProfile.id,
+                },
+              ]);
+            }
+
+            // 1b. Increase stock of NEW product by newQ
+            if (newQ > 0) {
+              const { data: curNewInv } = await supabase
+                .from('inventory')
+                .select('id, quantity')
+                .eq('branch_id', targetBranchId)
+                .eq('product_id', newPId)
+                .maybeSingle();
+
+              if (curNewInv) {
+                await supabase
+                  .from('inventory')
+                  .update({
+                    quantity: (curNewInv.quantity || 0) + newQ,
+                    updated_at: new Date().toISOString(),
+                  })
+                  .eq('id', curNewInv.id);
+              } else {
+                await supabase.from('inventory').insert([
+                  {
+                    branch_id: targetBranchId,
+                    product_id: newPId,
+                    quantity: newQ,
+                    purchase_price: unitPrice > 0 ? unitPrice : null,
+                    sale_price: unitPrice > 0 ? unitPrice : null,
+                    updated_at: new Date().toISOString(),
+                  },
+                ]);
+              }
+
+              await supabase.from('inventory_movements').insert([
+                {
+                  branch_id: targetBranchId,
+                  product_id: newPId,
+                  type: 'purchase',
+                  quantity: newQ,
+                  reference_id: editingPurchase.id,
+                  description: `Purchase Bill Edited [${editingPurchase.invoice_number || editingPurchase.id.substring(0, 8)}]: Product changed, New item added (+${newQ})`,
+                  created_by: userProfile.id,
+                },
+              ]);
+            }
+          } else {
+            // Case 2: Same product, quantity difference
+            const pId = newPId || oldPId;
+            const diff = newQ - oldQ;
+            if (pId && diff !== 0) {
+              const { data: curInv } = await supabase
+                .from('inventory')
+                .select('id, quantity')
+                .eq('branch_id', targetBranchId)
+                .eq('product_id', pId)
+                .maybeSingle();
+
+              if (curInv) {
+                await supabase
+                  .from('inventory')
+                  .update({
+                    quantity: Math.max(0, (curInv.quantity || 0) + diff),
+                    updated_at: new Date().toISOString(),
+                  })
+                  .eq('id', curInv.id);
+              } else if (diff > 0) {
+                await supabase.from('inventory').insert([
+                  {
+                    branch_id: targetBranchId,
+                    product_id: pId,
+                    quantity: diff,
+                    purchase_price: unitPrice > 0 ? unitPrice : null,
+                    sale_price: unitPrice > 0 ? unitPrice : null,
+                    updated_at: new Date().toISOString(),
+                  },
+                ]);
+              }
+
+              await supabase.from('inventory_movements').insert([
+                {
+                  branch_id: targetBranchId,
+                  product_id: pId,
+                  type: diff > 0 ? 'purchase' : 'adjustment_out',
+                  quantity: Math.abs(diff),
+                  reference_id: editingPurchase.id,
+                  description: `Purchase Bill Edited [${editingPurchase.invoice_number || editingPurchase.id.substring(0, 8)}]: Qty adjusted by ${diff > 0 ? '+' : ''}${diff}`,
+                  created_by: userProfile.id,
+                },
+              ]);
+            }
           }
-
-          await supabase.from('inventory_movements').insert([
-            {
-              branch_id: targetBranchId,
-              product_id: pId,
-              type: diff > 0 ? 'purchase' : 'adjustment_out',
-              quantity: Math.abs(diff),
-              reference_id: editingPurchase.id,
-              description: `Purchase Bill Edited [${editingPurchase.invoice_number || editingPurchase.id.substring(0, 8)}]: Qty adjusted by ${diff > 0 ? '+' : ''}${diff}`,
-              created_by: userProfile.id,
-            },
-          ]);
         }
       }
 
@@ -2461,7 +2546,7 @@ export default function Purchases({ userProfile, branches, addToast }) {
                                   <span style={{ fontFamily: 'monospace', fontSize: '0.82rem' }}>{item.products?.sku || '—'}</span>
                                 </td>
                                 <td style={{ textAlign: 'right' }}>
-                                  {item.quantity} {item.products?.unit || 'pcs'}
+                                  {item.quantity}{item.products?.unit ? ` ${item.products.unit}` : ''}
                                 </td>
                                 <td style={{ textAlign: 'right' }}>
                                   ৳{formatAmount(item.unit_price)}
