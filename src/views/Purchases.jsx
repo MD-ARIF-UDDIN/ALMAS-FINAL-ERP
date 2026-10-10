@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useLocation } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
-import { Download, Plus, Search, Trash2, UserPlus, CreditCard, Eye, X, Edit } from 'lucide-react';
+import { Download, Plus, Search, Trash2, UserPlus, CreditCard, Eye, X, Edit, AlertTriangle } from 'lucide-react';
 import { TableLoading } from '../components/TableLoading';
 import Pagination from '../components/Pagination';
 import { formatAmount } from '../utils/format';
@@ -43,6 +43,11 @@ export default function Purchases({ userProfile, branches, addToast }) {
   const [loadingDetails, setLoadingDetails] = useState(false);
   const [showPurchaseModal, setShowPurchaseModal] = useState(false);
   const [loading, setLoading] = useState(true);
+
+  // Purchase Deletion states
+  const [purchaseToDelete, setPurchaseToDelete] = useState(null);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [isDeletingPurchase, setIsDeletingPurchase] = useState(false);
 
   // Edit Purchase States
   const [showEditPurchaseModal, setShowEditPurchaseModal] = useState(false);
@@ -1344,6 +1349,130 @@ export default function Purchases({ userProfile, branches, addToast }) {
     }
   };
 
+  const handlePromptDeletePurchase = (purchase) => {
+    setPurchaseToDelete(purchase);
+    setShowDeleteModal(true);
+  };
+
+  const handleConfirmDeletePurchase = async () => {
+    if (!purchaseToDelete) return;
+    setIsDeletingPurchase(true);
+
+    const billNum = purchaseToDelete.invoice_number || purchaseToDelete.purchase_number || `PUR#${purchaseToDelete.id.substring(0, 8).toUpperCase()}`;
+    const targetBranchId = purchaseToDelete.branch_id || selectedBranchId;
+    const targetBranch = branches.find((b) => b.id === targetBranchId);
+    const isTargetFactory = Boolean(targetBranch?.is_factory || targetBranch?.name?.toLowerCase().includes('factory'));
+
+    try {
+      // 1. Fetch all items in this purchase to revert branch stock
+      const { data: itemsToRevert, error: itemsFetchErr } = await supabase
+        .from('purchase_items')
+        .select('id, product_id, quantity')
+        .eq('purchase_id', purchaseToDelete.id);
+
+      if (itemsFetchErr) throw itemsFetchErr;
+
+      // 2. If not factory, revert inventory quantities from branch
+      if (!isTargetFactory && itemsToRevert && itemsToRevert.length > 0) {
+        for (const it of itemsToRevert) {
+          const qtyToDeduct = parseFloat(it.quantity) || 0;
+          if (it.product_id && qtyToDeduct > 0) {
+            try {
+              const { data: invItem } = await supabase
+                .from('inventory')
+                .select('id, quantity')
+                .eq('branch_id', targetBranchId)
+                .eq('product_id', it.product_id)
+                .maybeSingle();
+
+              if (invItem) {
+                const updatedQty = Math.max(0, (invItem.quantity || 0) - qtyToDeduct);
+                await supabase
+                  .from('inventory')
+                  .update({
+                    quantity: updatedQty,
+                    updated_at: new Date().toISOString(),
+                  })
+                  .eq('id', invItem.id);
+              }
+
+              // Log inventory movement audit record
+              await supabase.from('inventory_movements').insert([
+                {
+                  branch_id: targetBranchId,
+                  product_id: it.product_id,
+                  type: 'adjustment_out',
+                  quantity: qtyToDeduct,
+                  reference_id: purchaseToDelete.id,
+                  description: `Purchase Bill Deleted [${billNum}]: Deducted +${qtyToDeduct} added stock`,
+                  created_by: userProfile.id,
+                },
+              ]);
+            } catch (invErr) {
+              console.error('Error reverting inventory for deleted purchase item:', invErr);
+            }
+          }
+        }
+      }
+
+      // 3. Delete linked payment records
+      const { error: payDelErr } = await supabase
+        .from('payments')
+        .delete()
+        .eq('reference_invoice_id', purchaseToDelete.id);
+
+      if (payDelErr) {
+        console.warn('Payment delete warning:', payDelErr);
+      }
+
+      // 4. Delete linked cash ledger records
+      const { error: ledgerDelErr } = await supabase
+        .from('cash_ledger')
+        .delete()
+        .eq('reference_id', purchaseToDelete.id);
+
+      if (ledgerDelErr) {
+        console.warn('Cash ledger delete warning:', ledgerDelErr);
+      }
+
+      // 5. Delete purchase_items
+      const { error: piDelErr } = await supabase
+        .from('purchase_items')
+        .delete()
+        .eq('purchase_id', purchaseToDelete.id);
+
+      if (piDelErr) throw piDelErr;
+
+      // 6. Delete purchases row
+      const { error: purDelErr } = await supabase
+        .from('purchases')
+        .delete()
+        .eq('id', purchaseToDelete.id);
+
+      if (purDelErr) throw purDelErr;
+
+      // 7. Cleanup & Refresh
+      showMessage(`Purchase bill ${billNum} deleted successfully and stock/payments reverted.`, 'success');
+      setShowDeleteModal(false);
+      setPurchaseToDelete(null);
+      if (showDetailModal) {
+        setShowDetailModal(false);
+        setSelectedPurchase(null);
+        setSelectedPurchaseItems([]);
+        setSelectedPurchasePayments([]);
+      }
+
+      fetchPurchases();
+      fetchPurchasesSummary();
+      fetchCatalogProducts();
+    } catch (err) {
+      console.error('Error deleting purchase bill:', err);
+      showMessage(err.message || 'Failed to delete purchase bill.', 'error');
+    } finally {
+      setIsDeletingPurchase(false);
+    }
+  };
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
       <div className="top-bar">
@@ -1549,6 +1678,14 @@ export default function Purchases({ userProfile, branches, addToast }) {
                             >
                               <Edit size={15} />
                             </button>
+                            <button
+                              className="btn btn-secondary btn-sm btn-icon"
+                              onClick={() => handlePromptDeletePurchase(p)}
+                              title="Delete Purchase Bill"
+                              style={{ color: '#ef4444', padding: '0.35rem 0.45rem' }}
+                            >
+                              <Trash2 size={15} />
+                            </button>
                           </div>
                         </td>
                       </tr>
@@ -1736,6 +1873,26 @@ export default function Purchases({ userProfile, branches, addToast }) {
                       >
                         <Edit size={14} />
                         <span>Edit</span>
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm"
+                        onClick={() => handlePromptDeletePurchase(p)}
+                        style={{
+                          flex: 1,
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: '0.35rem',
+                          height: '34px',
+                          fontSize: '0.8rem',
+                          color: '#ef4444',
+                          borderColor: '#fecaca',
+                          backgroundColor: '#fef2f2',
+                        }}
+                      >
+                        <Trash2 size={14} />
+                        <span>Delete</span>
                       </button>
                     </div>
                   </div>
@@ -2505,6 +2662,23 @@ export default function Purchases({ userProfile, branches, addToast }) {
                     style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.8rem', padding: '0.3rem 0.65rem' }}
                   >
                     <Edit size={14} /> Edit Bill
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => handlePromptDeletePurchase(selectedPurchase)}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '0.35rem',
+                      fontSize: '0.8rem',
+                      padding: '0.3rem 0.65rem',
+                      color: '#ef4444',
+                      borderColor: '#fecaca',
+                      backgroundColor: '#fef2f2',
+                    }}
+                  >
+                    <Trash2 size={14} /> Delete Bill
                   </button>
                   <button 
                     className="btn btn-secondary btn-sm" 
@@ -3344,6 +3518,178 @@ export default function Purchases({ userProfile, branches, addToast }) {
           </div>
         </div>
       )}
+
+      {/* DELETE PURCHASE CONFIRMATION MODAL */}
+      {showDeleteModal && purchaseToDelete && (() => {
+        const delBranch = branches.find((b) => b.id === purchaseToDelete.branch_id) || { name: 'Main Branch' };
+        const billNo = purchaseToDelete.invoice_number || purchaseToDelete.purchase_number || `PUR#${purchaseToDelete.id.substring(0, 8).toUpperCase()}`;
+        const isFactoryBranch = Boolean(delBranch.is_factory || delBranch.name?.toLowerCase().includes('factory'));
+
+        return (
+          <div className="modal-overlay" style={{ zIndex: 1100 }}>
+            <div
+              className="modal-content"
+              style={{
+                maxWidth: '520px',
+                width: '90%',
+                borderRadius: '12px',
+                overflow: 'hidden',
+                boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.2)',
+              }}
+            >
+              <div
+                className="modal-header"
+                style={{
+                  backgroundColor: '#fef2f2',
+                  borderBottom: '1px solid #fee2e2',
+                  padding: '1rem 1.25rem',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                  <div
+                    style={{
+                      backgroundColor: '#fee2e2',
+                      color: '#dc2626',
+                      padding: '0.4rem',
+                      borderRadius: '50%',
+                      display: 'flex',
+                    }}
+                  >
+                    <AlertTriangle size={20} />
+                  </div>
+                  <h3 className="modal-title" style={{ margin: 0, color: '#991b1b', fontSize: '1.05rem', fontWeight: 700 }}>
+                    Delete Purchase Bill?
+                  </h3>
+                </div>
+                <button
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => {
+                    setShowDeleteModal(false);
+                    setPurchaseToDelete(null);
+                  }}
+                  style={{ borderRadius: '50%', padding: '0.35rem', border: 'none', background: 'transparent' }}
+                >
+                  <X size={16} />
+                </button>
+              </div>
+
+              <div className="modal-body" style={{ padding: '1.25rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                <p style={{ margin: 0, fontSize: '0.9rem', color: '#475569', lineHeight: 1.5 }}>
+                  Are you sure you want to permanently delete purchase bill <strong>{billNo}</strong>? This action cannot be undone.
+                </p>
+
+                <div
+                  style={{
+                    backgroundColor: '#f8fafc',
+                    border: '1px solid var(--border-color)',
+                    borderRadius: '8px',
+                    padding: '0.85rem 1rem',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '0.4rem',
+                    fontSize: '0.85rem',
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span style={{ color: 'var(--text-muted)' }}>Supplier:</span>
+                    <strong>{purchaseToDelete.contacts?.name || 'Unknown supplier'}</strong>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span style={{ color: 'var(--text-muted)' }}>Branch:</span>
+                    <span>{delBranch.name}</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span style={{ color: 'var(--text-muted)' }}>Date:</span>
+                    <span>{new Date(purchaseToDelete.purchase_date).toLocaleDateString()}</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span style={{ color: 'var(--text-muted)' }}>Total Bill Amount:</span>
+                    <strong style={{ color: 'var(--text-color)' }}>৳{formatAmount(purchaseToDelete.net_amount || 0)}</strong>
+                  </div>
+                  {(purchaseToDelete.paid_amount || 0) > 0 && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', color: '#059669' }}>
+                      <span>Recorded Payments:</span>
+                      <strong>৳{formatAmount(purchaseToDelete.paid_amount)}</strong>
+                    </div>
+                  )}
+                </div>
+
+                <div
+                  style={{
+                    backgroundColor: '#fff7ed',
+                    border: '1px solid #ffedd5',
+                    borderRadius: '8px',
+                    padding: '0.75rem 0.9rem',
+                    fontSize: '0.8rem',
+                    color: '#9a3412',
+                    lineHeight: 1.45,
+                  }}
+                >
+                  <strong style={{ display: 'block', marginBottom: '0.2rem', color: '#c2410c' }}>Impact of Deletion:</strong>
+                  <ul style={{ margin: 0, paddingLeft: '1.2rem' }}>
+                    {!isFactoryBranch && (
+                      <li>
+                        <strong>Inventory Reversal:</strong> Added quantities for all items in this bill will be subtracted from {delBranch.name}'s stock.
+                      </li>
+                    )}
+                    <li>
+                      <strong>Payments Cleanup:</strong> Linked payment records and cash ledger logs for this purchase will be deleted.
+                    </li>
+                    <li>
+                      <strong>Permanent:</strong> The bill record and item details will be erased.
+                    </li>
+                  </ul>
+                </div>
+              </div>
+
+              <div
+                className="modal-footer"
+                style={{
+                  borderTop: '1px solid var(--border-color)',
+                  padding: '0.75rem 1.25rem',
+                  display: 'flex',
+                  justifyContent: 'flex-end',
+                  gap: '0.6rem',
+                  backgroundColor: '#f8fafc',
+                }}
+              >
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => {
+                    setShowDeleteModal(false);
+                    setPurchaseToDelete(null);
+                  }}
+                  disabled={isDeletingPurchase}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-danger btn-sm"
+                  onClick={handleConfirmDeletePurchase}
+                  disabled={isDeletingPurchase}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.4rem',
+                    backgroundColor: '#dc2626',
+                    borderColor: '#dc2626',
+                    color: '#ffffff',
+                    fontWeight: 600,
+                  }}
+                >
+                  <Trash2 size={14} />
+                  {isDeletingPurchase ? 'Deleting & Reverting Stock...' : 'Delete Purchase'}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Predefined suggestions for Factory Units */}
       <datalist id="purchase-unit-options">

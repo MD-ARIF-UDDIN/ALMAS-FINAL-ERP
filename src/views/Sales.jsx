@@ -1188,7 +1188,10 @@ export default function Sales({ userProfile, branches, addToast }) {
       }
 
       // 2.1 Deduct sold quantities from branch inventory (skip for factory — no physical stock)
-      if (!isFactory) {
+      const currentBranch = branches.find((b) => b.id === selectedBranchId);
+      const isCurrentBranchFactory = Boolean(currentBranch?.is_factory || currentBranch?.name?.toLowerCase().includes('factory'));
+
+      if (!isCurrentBranchFactory) {
         for (const item of cart) {
           const resolvedProdId = customProdIdMap[item.product.id] || item.product.id;
           const qty = parseFloat(item.quantity) || 1;
@@ -1202,13 +1205,27 @@ export default function Sales({ userProfile, branches, addToast }) {
                 .maybeSingle();
 
               if (invItem) {
-                await supabase
+                const newQty = Math.max(0, (invItem.quantity || 0) - qty);
+                const { error: updErr } = await supabase
                   .from('inventory')
                   .update({
-                    quantity: Math.max(0, (invItem.quantity || 0) - qty),
+                    quantity: newQty,
                     updated_at: new Date().toISOString(),
                   })
                   .eq('id', invItem.id);
+                if (updErr) console.error('Error updating inventory stock on checkout:', updErr);
+              } else {
+                const { error: insErr } = await supabase
+                  .from('inventory')
+                  .insert([
+                    {
+                      branch_id: selectedBranchId,
+                      product_id: resolvedProdId,
+                      quantity: 0,
+                      updated_at: new Date().toISOString(),
+                    },
+                  ]);
+                if (insErr) console.error('Error creating inventory row on checkout:', insErr);
               }
             } catch (stockErr) {
               console.error('Error updating inventory stock on checkout:', stockErr);
