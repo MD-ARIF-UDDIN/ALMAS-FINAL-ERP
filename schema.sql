@@ -183,7 +183,8 @@ CREATE TABLE public.purchase_items (
     item_name VARCHAR(255),
     quantity INTEGER NOT NULL,
     unit_price DECIMAL(12, 2) NOT NULL,
-    total_price DECIMAL(12, 2) NOT NULL
+    total_price DECIMAL(12, 2) NOT NULL,
+    unit VARCHAR(50)
 );
 
 -- 5.10 Sales (POS & Wholesale Invoices)

@@ -17,7 +17,7 @@ const Payments = lazy(() => import('./views/Payments'));
 const Expenses = lazy(() => import('./views/Expenses'));
 const Reports = lazy(() => import('./views/Reports'));
 const Contacts = lazy(() => import('./views/Contacts'));
-const BranchChallans = lazy(() => import('./views/BranchChallans'));
+// BranchChallans removed — not required for branch operations
 const Returns = lazy(() => import('./views/Returns'));
 
 function App() {
@@ -242,7 +242,7 @@ function App() {
             />
             <Route path="/products" element={<Product userProfile={userProfile} branches={branches} addToast={addToast} />} />
             <Route path="/inventory" element={<Inventory userProfile={userProfile} branches={branches} addToast={addToast} />} />
-            <Route path="/challans" element={<BranchChallans userProfile={userProfile} branches={branches} addToast={addToast} />} />
+            {/* /challans route removed — Branch Challans not required */}
             <Route path="/sales" element={<Sales userProfile={userProfile} branches={branches} addToast={addToast} />} />
             <Route path="/returns" element={<Returns userProfile={userProfile} branches={branches} addToast={addToast} />} />
             <Route path="/purchases" element={<Purchases userProfile={userProfile} branches={branches} addToast={addToast} />} />

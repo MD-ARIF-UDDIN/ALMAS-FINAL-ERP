@@ -71,7 +71,7 @@ export default function Purchases({ userProfile, branches, addToast }) {
   const [selectedSupplierId, setSelectedSupplierId] = useState('');
   const [purchaseDate, setPurchaseDate] = useState(new Date().toISOString().split('T')[0]);
   const [isFactoryChallan, setIsFactoryChallan] = useState(false);
-  const [purchaseItems, setPurchaseItems] = useState([{ productId: '', code: '', name: '', quantity: 1, costPrice: 0.00 }]); // { productId, code, name, quantity, costPrice }
+  const [purchaseItems, setPurchaseItems] = useState([{ productId: '', code: '', name: '', quantity: 1, unit: '', costPrice: 0.00 }]); // { productId, code, name, quantity, unit, costPrice }
   const [discount, setDiscount] = useState(0);
   const [paidAmount, setPaidAmount] = useState('');
   const [paymentMethod, setPaymentMethod] = useState('cash');
@@ -170,7 +170,8 @@ export default function Purchases({ userProfile, branches, addToast }) {
             email
           ),
           purchase_items (
-            quantity
+            quantity,
+            unit
           )
         `, { count: 'exact' })
         .order('purchase_date', { ascending: false })
@@ -360,6 +361,7 @@ export default function Purchases({ userProfile, branches, addToast }) {
           quantity,
           unit_price,
           total_price,
+          unit,
           products (
             id,
             name,
@@ -389,7 +391,7 @@ export default function Purchases({ userProfile, branches, addToast }) {
 
 
   const addItemToPurchase = () => {
-    setPurchaseItems((prev) => [...prev, { productId: '', code: '', name: '', quantity: 1, costPrice: 0.00 }]);
+    setPurchaseItems((prev) => [...prev, { productId: '', code: '', name: '', quantity: 1, unit: '', costPrice: 0.00 }]);
     setTimeout(() => {
       if (purchaseTableContainerRef.current) {
         purchaseTableContainerRef.current.scrollTop = purchaseTableContainerRef.current.scrollHeight;
@@ -611,7 +613,7 @@ export default function Purchases({ userProfile, branches, addToast }) {
         const itemQty = parseInt(item.quantity) || 1;
 
         if (isFactory) {
-          // Factory Purchase: do not insert to products catalog if unlisted
+          // Factory Purchase: do not insert to products catalog if unlisted, save unit
           resolvedPurchaseItems.push({
             purchase_id: purchaseId,
             product_id: finalProdId,
@@ -619,6 +621,7 @@ export default function Purchases({ userProfile, branches, addToast }) {
             quantity: itemQty,
             unit_price: costVal,
             total_price: costVal * itemQty,
+            unit: item.unit?.trim() || null,
           });
         } else {
           // Branch / Showroom Purchase:
@@ -675,6 +678,7 @@ export default function Purchases({ userProfile, branches, addToast }) {
             quantity: itemQty,
             unit_price: costVal,
             total_price: costVal * itemQty,
+            unit: null,
           });
         }
       }
@@ -836,6 +840,7 @@ export default function Purchases({ userProfile, branches, addToast }) {
           quantity,
           unit_price,
           total_price,
+          unit,
           products (
             id,
             name,
@@ -870,11 +875,12 @@ export default function Purchases({ userProfile, branches, addToast }) {
           code: code,
           name: name,
           quantity: it.quantity || 1,
+          unit: it.unit || '',
           costPrice: it.unit_price || 0,
         };
       });
 
-      setEditPurchaseItems(formattedItems.length > 0 ? formattedItems : [{ productId: '', code: '', name: '', quantity: 1, costPrice: 0.00 }]);
+      setEditPurchaseItems(formattedItems.length > 0 ? formattedItems : [{ productId: '', code: '', name: '', quantity: 1, unit: '', costPrice: 0.00 }]);
       setOriginalEditItems(JSON.parse(JSON.stringify(formattedItems)));
     } catch (err) {
       console.error('Error fetching items for edit:', err);
@@ -901,7 +907,7 @@ export default function Purchases({ userProfile, branches, addToast }) {
   };
 
   const addEditItemRow = () => {
-    setEditPurchaseItems((prev) => [...prev, { productId: '', code: '', name: '', quantity: 1, costPrice: 0.00 }]);
+    setEditPurchaseItems((prev) => [...prev, { productId: '', code: '', name: '', quantity: 1, unit: '', costPrice: 0.00 }]);
     setTimeout(() => {
       if (editPurchaseTableContainerRef.current) {
         editPurchaseTableContainerRef.current.scrollTop = editPurchaseTableContainerRef.current.scrollHeight;
@@ -912,7 +918,7 @@ export default function Purchases({ userProfile, branches, addToast }) {
 
   const removeEditItemRow = (index) => {
     if (editPurchaseItems.length === 1) {
-      setEditPurchaseItems([{ productId: '', code: '', name: '', quantity: 1, costPrice: 0.00 }]);
+      setEditPurchaseItems([{ productId: '', code: '', name: '', quantity: 1, unit: '', costPrice: 0.00 }]);
       return;
     }
     setEditPurchaseItems((prev) => prev.filter((_, i) => i !== index));
@@ -1120,6 +1126,7 @@ export default function Purchases({ userProfile, branches, addToast }) {
             quantity: newQ,
             unit_price: unitPrice,
             total_price: newQ * unitPrice,
+            unit: isFactoryPurchase ? (upIt.unit?.trim() || null) : null,
           })
           .eq('id', upIt.id);
 
@@ -1264,6 +1271,7 @@ export default function Purchases({ userProfile, branches, addToast }) {
             quantity: qty,
             unit_price: price,
             total_price: qty * price,
+            unit: isFactoryPurchase ? (it.unit?.trim() || null) : null,
           };
         });
 
@@ -1475,6 +1483,7 @@ export default function Purchases({ userProfile, branches, addToast }) {
                       p.contacts?.name === 'Chittagong Factory'
                     );
                     const totalQty = (p.purchase_items || []).reduce((sum, item) => sum + (parseInt(item.quantity) || 0), 0);
+                    const displayUnit = (p.purchase_items || []).find((it) => it.unit)?.unit || 'pcs';
 
                     return (
                       <tr key={p.id}>
@@ -1513,7 +1522,7 @@ export default function Purchases({ userProfile, branches, addToast }) {
                           )}
                         </td>
                         <td style={{ textAlign: 'center', fontWeight: 700, color: '#0369a1' }}>
-                          {totalQty}
+                          {totalQty} <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)' }}>{displayUnit}</span>
                         </td>
                         <td style={{ fontFamily: 'Outfit, sans-serif' }}>৳{formatAmount(p.net_amount)}</td>
                         <td style={{ fontFamily: 'Outfit, sans-serif', color: 'var(--success-text)' }}>
@@ -1572,6 +1581,7 @@ export default function Purchases({ userProfile, branches, addToast }) {
                 );
                 const branchName = branches.find((b) => b.id === p.branch_id)?.name;
                 const totalQty = (p.purchase_items || []).reduce((sum, item) => sum + (parseInt(item.quantity) || 0), 0);
+                const displayUnit = (p.purchase_items || []).find((it) => it.unit)?.unit || 'pcs';
 
                 return (
                   <div
@@ -1660,7 +1670,7 @@ export default function Purchases({ userProfile, branches, addToast }) {
                       <div>
                         <span style={{ color: 'var(--text-muted)', fontSize: '0.7rem', display: 'block' }}>Total Qty</span>
                         <span style={{ fontWeight: 800, color: '#0369a1', fontSize: '0.92rem' }}>
-                          {totalQty}
+                          {totalQty} <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)' }}>{displayUnit}</span>
                         </span>
                       </div>
                       <div>
@@ -1998,6 +2008,7 @@ export default function Purchases({ userProfile, branches, addToast }) {
                           <th style={{ width: '120px', padding: '0.35rem 0.4rem' }}>Code</th>
                           <th style={{ padding: '0.35rem 0.4rem', minWidth: '200px' }}>Product Name *</th>
                           <th style={{ width: '70px', textAlign: 'right', padding: '0.35rem 0.4rem' }}>Qty *</th>
+                          {isFactory && <th style={{ width: '75px', padding: '0.35rem 0.4rem' }}>Unit</th>}
                           <th style={{ width: '90px', textAlign: 'right', padding: '0.35rem 0.4rem' }}>Cost *</th>
                           <th style={{ width: '85px', textAlign: 'right', padding: '0.35rem 0.4rem' }}>Total</th>
                           <th style={{ width: '38px', textAlign: 'center', padding: '0.35rem 0.3rem' }}>Del</th>
@@ -2118,6 +2129,19 @@ export default function Purchases({ userProfile, branches, addToast }) {
                                 style={{ height: '30px', minHeight: '30px', padding: '0.15rem 0.3rem', fontSize: '0.8rem', textAlign: 'right', width: '100%' }}
                               />
                             </td>
+                            {isFactory && (
+                              <td style={{ verticalAlign: 'middle', padding: '0.3rem 0.3rem' }}>
+                                <input
+                                  type="text"
+                                  placeholder="e.g. lbs"
+                                  className="input-control"
+                                  value={item.unit || ''}
+                                  onChange={(e) => updateItemField(idx, 'unit', e.target.value)}
+                                  list="purchase-unit-options"
+                                  style={{ height: '30px', minHeight: '30px', padding: '0.15rem 0.3rem', fontSize: '0.8rem', width: '100%' }}
+                                />
+                              </td>
+                            )}
                             <td style={{ verticalAlign: 'middle', textAlign: 'right', padding: '0.3rem 0.3rem' }}>
                               <input
                                 type="number"
@@ -2277,6 +2301,21 @@ export default function Purchases({ userProfile, branches, addToast }) {
                               style={{ height: '34px', minHeight: '34px', fontSize: '0.88rem', textAlign: 'center', fontWeight: 700 }}
                             />
                           </div>
+
+                          {isFactory && (
+                            <div className="form-group" style={{ marginBottom: 0 }}>
+                              <label className="mobile-card-label">Unit</label>
+                              <input
+                                type="text"
+                                placeholder="e.g. lbs"
+                                className="input-control"
+                                value={item.unit || ''}
+                                onChange={(e) => updateItemField(idx, 'unit', e.target.value)}
+                                list="purchase-unit-options"
+                                style={{ height: '34px', minHeight: '34px', fontSize: '0.88rem' }}
+                              />
+                            </div>
+                          )}
                         </div>
 
                         <div className="mobile-card-row-pricing">
@@ -2546,7 +2585,7 @@ export default function Purchases({ userProfile, branches, addToast }) {
                                   <span style={{ fontFamily: 'monospace', fontSize: '0.82rem' }}>{item.products?.sku || '—'}</span>
                                 </td>
                                 <td style={{ textAlign: 'right' }}>
-                                  {item.quantity}{item.products?.unit ? ` ${item.products.unit}` : ''}
+                                  {item.quantity} <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{item.unit || item.products?.unit || 'pcs'}</span>
                                 </td>
                                 <td style={{ textAlign: 'right' }}>
                                   ৳{formatAmount(item.unit_price)}
@@ -2840,331 +2879,359 @@ export default function Purchases({ userProfile, branches, addToast }) {
                     </div>
 
                     {/* Desktop Items Table */}
-                    <div ref={editPurchaseTableContainerRef} className="table-container hide-on-mobile" style={{ border: '1px solid var(--border-color)', borderRadius: '6px', maxHeight: '420px', overflowY: 'auto', width: '100%' }}>
-                      <table style={{ width: '100%', minWidth: '640px', fontSize: '0.82rem' }}>
-                        <thead>
-                          <tr>
-                            <th style={{ width: '35px', padding: '0.35rem 0.4rem', textAlign: 'center' }}>SL</th>
-                            <th style={{ width: '120px', padding: '0.35rem 0.4rem' }}>Code</th>
-                            <th style={{ padding: '0.35rem 0.4rem', minWidth: '200px' }}>Product Name *</th>
-                            <th style={{ width: '70px', textAlign: 'right', padding: '0.35rem 0.4rem' }}>Qty *</th>
-                            <th style={{ width: '90px', textAlign: 'right', padding: '0.35rem 0.4rem' }}>Cost *</th>
-                            <th style={{ width: '85px', textAlign: 'right', padding: '0.35rem 0.4rem' }}>Total</th>
-                            <th style={{ width: '38px', textAlign: 'center', padding: '0.35rem 0.3rem' }}>Del</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {editPurchaseItems.map((item, idx) => (
-                            <tr key={idx}>
-                              <td style={{ verticalAlign: 'middle', fontWeight: 600, padding: '0.3rem 0.4rem', textAlign: 'center', color: 'var(--text-muted)' }}>
-                                {idx + 1}
-                              </td>
-                              <td style={{ verticalAlign: 'middle', padding: '0.3rem 0.3rem' }}>
-                                <input
-                                  type="text"
-                                  className="input-control"
-                                  placeholder="Code (opt)"
-                                  value={item.code || ''}
-                                  readOnly={Boolean(item.productId)}
-                                  onChange={(e) => {
-                                    if (item.productId) return;
-                                    const val = e.target.value;
-                                    const matched = catalogProducts.find(
-                                      (p) => p.sku?.toLowerCase() === val.toLowerCase() || p.product_code?.toLowerCase() === val.toLowerCase()
-                                    );
-                                    if (matched) {
-                                      const bPrice = matched.branch_prices?.[editingPurchase.branch_id]?.purchase_price;
-                                      const effectiveCost = (bPrice !== null && bPrice !== undefined) ? bPrice : matched.purchase_price;
-                                      updateEditItemRow(idx, { productId: matched.id, code: matched.sku || matched.product_code || val, name: matched.name, costPrice: effectiveCost });
-                                    } else {
-                                      updateEditItemField(idx, 'code', val);
-                                    }
-                                  }}
-                                  style={{
-                                    height: '30px',
-                                    minHeight: '30px',
-                                    width: '100%',
-                                    padding: '0.15rem 0.35rem',
-                                    fontSize: '0.8rem',
-                                    fontFamily: 'monospace',
-                                    backgroundColor: item.productId ? '#f1f5f9' : '#ffffff',
-                                    cursor: item.productId ? 'not-allowed' : 'text',
-                                    color: item.productId ? 'var(--text-secondary)' : 'inherit',
-                                  }}
-                                  title={item.productId ? `Catalog code (locked): ${item.code}` : 'Enter custom product code'}
-                                />
-                              </td>
-                              <td style={{ verticalAlign: 'middle', padding: '0.3rem 0.3rem' }}>
-                                <SearchableCreatableSelect
-                                  value={
-                                    item.productId
-                                      ? { value: item.productId, label: item.name, code: item.code, costPrice: item.costPrice }
-                                      : item.name
-                                      ? { value: item.name, label: item.name, isNew: true, code: item.code, costPrice: item.costPrice }
-                                      : null
-                                  }
-                                  options={catalogProducts.map((p) => {
-                                    const bPrice = p.branch_prices?.[editingPurchase.branch_id]?.purchase_price;
-                                    const effectiveCost = (bPrice !== null && bPrice !== undefined) ? bPrice : p.purchase_price;
-                                    return {
-                                      value: p.id,
-                                      label: p.name,
-                                      code: p.product_code || p.sku || '',
-                                      costPrice: effectiveCost,
-                                    };
-                                  })}
-                                  onChange={(opt) => {
-                                    if (!opt) {
-                                      updateEditItemRow(idx, { productId: '', code: '', name: '', costPrice: 0 });
-                                      return;
-                                    }
-                                    if (opt.__isNew__ || opt.isNew) {
-                                      updateEditItemRow(idx, {
-                                        productId: '',
-                                        name: opt.label || opt.value,
-                                        code: item.code || opt.label || opt.value,
-                                        costPrice: item.costPrice || 0,
-                                      });
-                                    } else {
-                                      updateEditItemRow(idx, {
-                                        productId: opt.value,
-                                        name: opt.label,
-                                        code: opt.code || '',
-                                        costPrice: opt.costPrice || 0,
-                                      });
-                                    }
-                                  }}
-                                  formatOptionLabel={(opt) => (
-                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
-                                      <span style={{ fontWeight: 600 }}>{opt.label}</span>
-                                      {opt.costPrice !== undefined && (
-                                        <span style={{ fontSize: '0.74rem', color: '#64748b' }}>
-                                          {opt.code ? `Code: ${opt.code} | ` : ''}৳{formatAmount(opt.costPrice || 0)}
-                                        </span>
-                                      )}
+                    {(() => {
+                      const editBranch = branches.find((b) => b.id === editingPurchase.branch_id);
+                      const isEditBranchFactory = Boolean(editBranch?.is_factory || editBranch?.name?.toLowerCase().includes('factory'));
+
+                      return (
+                        <>
+                          <div ref={editPurchaseTableContainerRef} className="table-container hide-on-mobile" style={{ border: '1px solid var(--border-color)', borderRadius: '6px', maxHeight: '420px', overflowY: 'auto', width: '100%' }}>
+                            <table style={{ width: '100%', minWidth: '640px', fontSize: '0.82rem' }}>
+                              <thead>
+                                <tr>
+                                  <th style={{ width: '35px', padding: '0.35rem 0.4rem', textAlign: 'center' }}>SL</th>
+                                  <th style={{ width: '120px', padding: '0.35rem 0.4rem' }}>Code</th>
+                                  <th style={{ padding: '0.35rem 0.4rem', minWidth: '200px' }}>Product Name *</th>
+                                  <th style={{ width: '70px', textAlign: 'right', padding: '0.35rem 0.4rem' }}>Qty *</th>
+                                  {isEditBranchFactory && <th style={{ width: '75px', padding: '0.35rem 0.4rem' }}>Unit</th>}
+                                  <th style={{ width: '90px', textAlign: 'right', padding: '0.35rem 0.4rem' }}>Cost *</th>
+                                  <th style={{ width: '85px', textAlign: 'right', padding: '0.35rem 0.4rem' }}>Total</th>
+                                  <th style={{ width: '38px', textAlign: 'center', padding: '0.35rem 0.3rem' }}>Del</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {editPurchaseItems.map((item, idx) => (
+                                  <tr key={idx}>
+                                    <td style={{ verticalAlign: 'middle', fontWeight: 600, padding: '0.3rem 0.4rem', textAlign: 'center', color: 'var(--text-muted)' }}>
+                                      {idx + 1}
+                                    </td>
+                                    <td style={{ verticalAlign: 'middle', padding: '0.3rem 0.3rem' }}>
+                                      <input
+                                        type="text"
+                                        className="input-control"
+                                        placeholder="Code (opt)"
+                                        value={item.code || ''}
+                                        readOnly={Boolean(item.productId)}
+                                        onChange={(e) => {
+                                          if (item.productId) return;
+                                          const val = e.target.value;
+                                          const matched = catalogProducts.find(
+                                            (p) => p.sku?.toLowerCase() === val.toLowerCase() || p.product_code?.toLowerCase() === val.toLowerCase()
+                                          );
+                                          if (matched) {
+                                            const bPrice = matched.branch_prices?.[editingPurchase.branch_id]?.purchase_price;
+                                            const effectiveCost = (bPrice !== null && bPrice !== undefined) ? bPrice : matched.purchase_price;
+                                            updateEditItemRow(idx, { productId: matched.id, code: matched.sku || matched.product_code || val, name: matched.name, costPrice: effectiveCost });
+                                          } else {
+                                            updateEditItemField(idx, 'code', val);
+                                          }
+                                        }}
+                                        style={{
+                                          height: '30px',
+                                          minHeight: '30px',
+                                          width: '100%',
+                                          padding: '0.15rem 0.35rem',
+                                          fontSize: '0.8rem',
+                                          fontFamily: 'monospace',
+                                          backgroundColor: item.productId ? '#f1f5f9' : '#ffffff',
+                                          cursor: item.productId ? 'not-allowed' : 'text',
+                                          color: item.productId ? 'var(--text-secondary)' : 'inherit',
+                                        }}
+                                        title={item.productId ? `Catalog code (locked): ${item.code}` : 'Enter custom product code'}
+                                      />
+                                    </td>
+                                    <td style={{ verticalAlign: 'middle', padding: '0.3rem 0.3rem' }}>
+                                      <SearchableCreatableSelect
+                                        value={
+                                          item.productId
+                                            ? { value: item.productId, label: item.name, code: item.code, costPrice: item.costPrice }
+                                            : item.name
+                                            ? { value: item.name, label: item.name, isNew: true, code: item.code, costPrice: item.costPrice }
+                                            : null
+                                        }
+                                        options={catalogProducts.map((p) => {
+                                          const bPrice = p.branch_prices?.[editingPurchase.branch_id]?.purchase_price;
+                                          const effectiveCost = (bPrice !== null && bPrice !== undefined) ? bPrice : p.purchase_price;
+                                          return {
+                                            value: p.id,
+                                            label: p.name,
+                                            code: p.product_code || p.sku || '',
+                                            costPrice: effectiveCost,
+                                          };
+                                        })}
+                                        onChange={(opt) => {
+                                          if (!opt) {
+                                            updateEditItemRow(idx, { productId: '', code: '', name: '', costPrice: 0 });
+                                            return;
+                                          }
+                                          if (opt.__isNew__ || opt.isNew) {
+                                            updateEditItemRow(idx, {
+                                              productId: '',
+                                              name: opt.label || opt.value,
+                                              code: item.code || opt.label || opt.value,
+                                              costPrice: item.costPrice || 0,
+                                            });
+                                          } else {
+                                            updateEditItemRow(idx, {
+                                              productId: opt.value,
+                                              name: opt.label,
+                                              code: opt.code || '',
+                                              costPrice: opt.costPrice || 0,
+                                            });
+                                          }
+                                        }}
+                                        formatOptionLabel={(opt) => (
+                                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+                                            <span style={{ fontWeight: 600 }}>{opt.label}</span>
+                                            {opt.costPrice !== undefined && (
+                                              <span style={{ fontSize: '0.74rem', color: '#64748b' }}>
+                                                {opt.code ? `Code: ${opt.code} | ` : ''}৳{formatAmount(opt.costPrice || 0)}
+                                              </span>
+                                            )}
+                                          </div>
+                                        )}
+                                        placeholder="Type or select product..."
+                                        isClearable
+                                        styles={{
+                                          control: (base) => ({
+                                            ...base,
+                                            minHeight: '32px',
+                                            height: '32px',
+                                            fontSize: '0.82rem',
+                                          }),
+                                        }}
+                                      />
+                                    </td>
+                                    <td style={{ verticalAlign: 'middle', textAlign: 'right', padding: '0.3rem 0.3rem' }}>
+                                      <input
+                                        type="number"
+                                        min="1"
+                                        placeholder="Qty"
+                                        className="input-control"
+                                        value={item.quantity}
+                                        onChange={(e) => updateEditItemField(idx, 'quantity', parseInt(e.target.value) || 1)}
+                                        required
+                                        style={{ height: '30px', minHeight: '30px', padding: '0.15rem 0.3rem', fontSize: '0.8rem', textAlign: 'right', width: '100%' }}
+                                      />
+                                    </td>
+                                    {isEditBranchFactory && (
+                                      <td style={{ verticalAlign: 'middle', padding: '0.3rem 0.3rem' }}>
+                                        <input
+                                          type="text"
+                                          placeholder="e.g. lbs"
+                                          className="input-control"
+                                          value={item.unit || ''}
+                                          onChange={(e) => updateEditItemField(idx, 'unit', e.target.value)}
+                                          list="purchase-unit-options"
+                                          style={{ height: '30px', minHeight: '30px', padding: '0.15rem 0.3rem', fontSize: '0.8rem', width: '100%' }}
+                                        />
+                                      </td>
+                                    )}
+                                    <td style={{ verticalAlign: 'middle', textAlign: 'right', padding: '0.3rem 0.3rem' }}>
+                                      <input
+                                        type="number"
+                                        step="0.01"
+                                        min="0"
+                                        placeholder="Cost"
+                                        className="input-control"
+                                        value={item.costPrice}
+                                        onChange={(e) => updateEditItemField(idx, 'costPrice', parseFloat(e.target.value) || 0.00)}
+                                        required
+                                        style={{ height: '30px', minHeight: '30px', padding: '0.15rem 0.3rem', fontSize: '0.8rem', textAlign: 'right', width: '100%' }}
+                                      />
+                                    </td>
+                                    <td style={{ verticalAlign: 'middle', textAlign: 'right', fontWeight: 700, padding: '0.3rem 0.4rem', whiteSpace: 'nowrap' }}>
+                                      ৳{formatAmount((parseFloat(item.costPrice) || 0) * (parseInt(item.quantity) || 0))}
+                                    </td>
+                                    <td style={{ verticalAlign: 'middle', textAlign: 'center', padding: '0.3rem 0.2rem' }}>
+                                      <button
+                                        type="button"
+                                        className="btn btn-danger btn-sm btn-icon"
+                                        style={{ border: 'none', background: 'none', color: 'var(--danger)', display: 'inline-flex', padding: '0.2rem' }}
+                                        onClick={() => removeEditItemRow(idx)}
+                                      >
+                                        <Trash2 size={14} />
+                                      </button>
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+
+                          {/* Mobile Items Card View */}
+                          <div className="hide-on-desktop mobile-card-list">
+                            {editPurchaseItems.map((item, idx) => (
+                              <div key={idx} className="mobile-item-card">
+                                <div className="mobile-card-header">
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', flex: 1, minWidth: 0 }}>
+                                    <span style={{ fontSize: '0.8rem', fontWeight: 800, color: '#0284c7' }}>#{idx + 1}</span>
+                                    <div style={{ flex: 1, minWidth: 0 }}>
+                                      <SearchableCreatableSelect
+                                        value={
+                                          item.productId
+                                            ? { value: item.productId, label: item.name, code: item.code, costPrice: item.costPrice }
+                                            : item.name
+                                            ? { value: item.name, label: item.name, isNew: true, code: item.code, costPrice: item.costPrice }
+                                            : null
+                                        }
+                                        options={catalogProducts.map((p) => {
+                                          const bPrice = p.branch_prices?.[editingPurchase.branch_id]?.purchase_price;
+                                          const effectiveCost = (bPrice !== null && bPrice !== undefined) ? bPrice : p.purchase_price;
+                                          return {
+                                            value: p.id,
+                                            label: p.name,
+                                            code: p.product_code || p.sku || '',
+                                            costPrice: effectiveCost,
+                                          };
+                                        })}
+                                        onChange={(opt) => {
+                                          if (!opt) {
+                                            updateEditItemRow(idx, { productId: '', code: '', name: '', costPrice: 0 });
+                                            return;
+                                          }
+                                          if (opt.__isNew__ || opt.isNew) {
+                                            updateEditItemRow(idx, {
+                                              productId: '',
+                                              name: opt.label || opt.value,
+                                              code: item.code || opt.label || opt.value,
+                                              costPrice: item.costPrice || 0,
+                                            });
+                                          } else {
+                                            updateEditItemRow(idx, {
+                                              productId: opt.value,
+                                              name: opt.label,
+                                              code: opt.code || '',
+                                              costPrice: opt.costPrice || 0,
+                                            });
+                                          }
+                                        }}
+                                        formatOptionLabel={(opt) => (
+                                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+                                            <span style={{ fontWeight: 600 }}>{opt.label}</span>
+                                            {opt.costPrice !== undefined && (
+                                              <span style={{ fontSize: '0.74rem', color: '#64748b' }}>
+                                                {opt.code ? `Code: ${opt.code} | ` : ''}৳{formatAmount(opt.costPrice || 0)}
+                                              </span>
+                                            )}
+                                          </div>
+                                        )}
+                                        placeholder="Type or select product..."
+                                        isClearable
+                                        styles={{
+                                          control: (base) => ({
+                                            ...base,
+                                            minHeight: '36px',
+                                            height: '36px',
+                                            fontSize: '0.85rem',
+                                          }),
+                                        }}
+                                      />
+                                    </div>
+                                  </div>
+                                  <button
+                                    type="button"
+                                    className="btn btn-danger btn-sm btn-icon"
+                                    style={{ border: 'none', background: '#fee2e2', color: 'var(--danger)', display: 'inline-flex', padding: '0.35rem', borderRadius: '6px', minWidth: '32px', height: '32px', alignItems: 'center', justifyContent: 'center' }}
+                                    onClick={() => removeEditItemRow(idx)}
+                                  >
+                                    <Trash2 size={15} />
+                                  </button>
+                                </div>
+
+                                <div className="mobile-card-row-2">
+                                  <div className="form-group" style={{ marginBottom: 0 }}>
+                                    <label className="mobile-card-label">Code (Optional)</label>
+                                    <input
+                                      type="text"
+                                      className="input-control"
+                                      placeholder="Code (optional)"
+                                      value={item.code || ''}
+                                      readOnly={Boolean(item.productId)}
+                                      onChange={(e) => {
+                                        if (item.productId) return;
+                                        const val = e.target.value;
+                                        const matched = catalogProducts.find(
+                                          (p) => p.sku?.toLowerCase() === val.toLowerCase() || p.product_code?.toLowerCase() === val.toLowerCase()
+                                        );
+                                        if (matched) {
+                                          const bPrice = matched.branch_prices?.[editingPurchase.branch_id]?.purchase_price;
+                                          const effectiveCost = (bPrice !== null && bPrice !== undefined) ? bPrice : matched.purchase_price;
+                                          updateEditItemRow(idx, { productId: matched.id, code: matched.sku || matched.product_code || val, name: matched.name, costPrice: effectiveCost });
+                                        } else {
+                                          updateEditItemField(idx, 'code', val);
+                                        }
+                                      }}
+                                      style={{
+                                        height: '34px',
+                                        minHeight: '34px',
+                                        width: '100%',
+                                        fontSize: '0.84rem',
+                                        fontFamily: 'monospace',
+                                        backgroundColor: item.productId ? '#f1f5f9' : '#ffffff',
+                                      }}
+                                    />
+                                  </div>
+
+                                  <div className="form-group" style={{ marginBottom: 0 }}>
+                                    <label className="mobile-card-label">Quantity *</label>
+                                    <input
+                                      type="number"
+                                      min="1"
+                                      placeholder="Qty"
+                                      className="input-control"
+                                      value={item.quantity}
+                                      onChange={(e) => updateEditItemField(idx, 'quantity', parseInt(e.target.value) || 1)}
+                                      required
+                                      style={{ height: '34px', minHeight: '34px', fontSize: '0.88rem', textAlign: 'center', fontWeight: 700 }}
+                                    />
+                                  </div>
+
+                                  {isEditBranchFactory && (
+                                    <div className="form-group" style={{ marginBottom: 0 }}>
+                                      <label className="mobile-card-label">Unit</label>
+                                      <input
+                                        type="text"
+                                        placeholder="e.g. lbs"
+                                        className="input-control"
+                                        value={item.unit || ''}
+                                        onChange={(e) => updateEditItemField(idx, 'unit', e.target.value)}
+                                        list="purchase-unit-options"
+                                        style={{ height: '34px', minHeight: '34px', fontSize: '0.88rem' }}
+                                      />
                                     </div>
                                   )}
-                                  placeholder="Type or select product..."
-                                  isClearable
-                                  styles={{
-                                    control: (base) => ({
-                                      ...base,
-                                      minHeight: '32px',
-                                      height: '32px',
-                                      fontSize: '0.82rem',
-                                    }),
-                                  }}
-                                />
-                              </td>
-                              <td style={{ verticalAlign: 'middle', textAlign: 'right', padding: '0.3rem 0.3rem' }}>
-                                <input
-                                  type="number"
-                                  min="1"
-                                  placeholder="Qty"
-                                  className="input-control"
-                                  value={item.quantity}
-                                  onChange={(e) => updateEditItemField(idx, 'quantity', parseInt(e.target.value) || 1)}
-                                  required
-                                  style={{ height: '30px', minHeight: '30px', padding: '0.15rem 0.3rem', fontSize: '0.8rem', textAlign: 'right', width: '100%' }}
-                                />
-                              </td>
-                              <td style={{ verticalAlign: 'middle', textAlign: 'right', padding: '0.3rem 0.3rem' }}>
-                                <input
-                                  type="number"
-                                  step="0.01"
-                                  min="0"
-                                  placeholder="Cost"
-                                  className="input-control"
-                                  value={item.costPrice}
-                                  onChange={(e) => updateEditItemField(idx, 'costPrice', parseFloat(e.target.value) || 0.00)}
-                                  required
-                                  style={{ height: '30px', minHeight: '30px', padding: '0.15rem 0.3rem', fontSize: '0.8rem', textAlign: 'right', width: '100%' }}
-                                />
-                              </td>
-                              <td style={{ verticalAlign: 'middle', textAlign: 'right', fontWeight: 700, padding: '0.3rem 0.4rem', whiteSpace: 'nowrap' }}>
-                                ৳{formatAmount((parseFloat(item.costPrice) || 0) * (parseInt(item.quantity) || 0))}
-                              </td>
-                              <td style={{ verticalAlign: 'middle', textAlign: 'center', padding: '0.3rem 0.2rem' }}>
-                                <button
-                                  type="button"
-                                  className="btn btn-danger btn-sm btn-icon"
-                                  style={{ border: 'none', background: 'none', color: 'var(--danger)', display: 'inline-flex', padding: '0.2rem' }}
-                                  onClick={() => removeEditItemRow(idx)}
-                                >
-                                  <Trash2 size={14} />
-                                </button>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
+                                </div>
 
-                    {/* Mobile Items Card View */}
-                    <div className="hide-on-desktop mobile-card-list">
-                      {editPurchaseItems.map((item, idx) => (
-                        <div key={idx} className="mobile-item-card">
-                          <div className="mobile-card-header">
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', flex: 1, minWidth: 0 }}>
-                              <span style={{ fontSize: '0.8rem', fontWeight: 800, color: '#0284c7' }}>#{idx + 1}</span>
-                              <div style={{ flex: 1, minWidth: 0 }}>
-                                <SearchableCreatableSelect
-                                  value={
-                                    item.productId
-                                      ? { value: item.productId, label: item.name, code: item.code, costPrice: item.costPrice }
-                                      : item.name
-                                      ? { value: item.name, label: item.name, isNew: true, code: item.code, costPrice: item.costPrice }
-                                      : null
-                                  }
-                                  options={catalogProducts.map((p) => {
-                                    const bPrice = p.branch_prices?.[editingPurchase.branch_id]?.purchase_price;
-                                    const effectiveCost = (bPrice !== null && bPrice !== undefined) ? bPrice : p.purchase_price;
-                                    return {
-                                      value: p.id,
-                                      label: p.name,
-                                      code: p.product_code || p.sku || '',
-                                      costPrice: effectiveCost,
-                                    };
-                                  })}
-                                  onChange={(opt) => {
-                                    if (!opt) {
-                                      updateEditItemRow(idx, { productId: '', code: '', name: '', costPrice: 0 });
-                                      return;
-                                    }
-                                    if (opt.__isNew__ || opt.isNew) {
-                                      updateEditItemRow(idx, {
-                                        productId: '',
-                                        name: opt.label || opt.value,
-                                        code: item.code || opt.label || opt.value,
-                                        costPrice: item.costPrice || 0,
-                                      });
-                                    } else {
-                                      updateEditItemRow(idx, {
-                                        productId: opt.value,
-                                        name: opt.label,
-                                        code: opt.code || '',
-                                        costPrice: opt.costPrice || 0,
-                                      });
-                                    }
-                                  }}
-                                  formatOptionLabel={(opt) => (
-                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
-                                      <span style={{ fontWeight: 600 }}>{opt.label}</span>
-                                      {opt.costPrice !== undefined && (
-                                        <span style={{ fontSize: '0.74rem', color: '#64748b' }}>
-                                          {opt.code ? `Code: ${opt.code} | ` : ''}৳{formatAmount(opt.costPrice || 0)}
-                                        </span>
-                                      )}
-                                    </div>
-                                  )}
-                                  placeholder="Type or select product..."
-                                  isClearable
-                                  styles={{
-                                    control: (base) => ({
-                                      ...base,
-                                      minHeight: '36px',
-                                      height: '36px',
-                                      fontSize: '0.85rem',
-                                    }),
-                                  }}
-                                />
+                                <div className="mobile-card-row-pricing">
+                                  <div className="form-group" style={{ marginBottom: 0 }}>
+                                    <label className="mobile-card-label">Unit Cost (৳) *</label>
+                                    <input
+                                      type="number"
+                                      step="0.01"
+                                      min="0"
+                                      placeholder="0.00"
+                                      className="input-control"
+                                      value={item.costPrice}
+                                      onChange={(e) => updateEditItemField(idx, 'costPrice', parseFloat(e.target.value) || 0.00)}
+                                      required
+                                      style={{ height: '34px', minHeight: '34px', fontSize: '0.88rem', textAlign: 'right', fontWeight: 600 }}
+                                    />
+                                  </div>
+                                  <div></div>
+                                  <div className="mobile-card-total-display">
+                                    <span className="mobile-card-label">Total Cost</span>
+                                    <span className="mobile-card-total-value">
+                                      ৳{formatAmount((parseFloat(item.costPrice) || 0) * (parseInt(item.quantity) || 0))}
+                                    </span>
+                                  </div>
+                                </div>
                               </div>
-                            </div>
-                            <button
-                              type="button"
-                              className="btn btn-danger btn-sm btn-icon"
-                              style={{ border: 'none', background: '#fee2e2', color: 'var(--danger)', display: 'inline-flex', padding: '0.35rem', borderRadius: '6px', minWidth: '32px', height: '32px', alignItems: 'center', justifyContent: 'center' }}
-                              onClick={() => removeEditItemRow(idx)}
-                            >
-                              <Trash2 size={15} />
-                            </button>
+                            ))}
                           </div>
-
-                          <div className="mobile-card-row-2">
-                            <div className="form-group" style={{ marginBottom: 0 }}>
-                              <label className="mobile-card-label">Code (Optional)</label>
-                              <input
-                                type="text"
-                                className="input-control"
-                                placeholder="Code (optional)"
-                                value={item.code || ''}
-                                readOnly={Boolean(item.productId)}
-                                onChange={(e) => {
-                                  if (item.productId) return;
-                                  const val = e.target.value;
-                                  const matched = catalogProducts.find(
-                                    (p) => p.sku?.toLowerCase() === val.toLowerCase() || p.product_code?.toLowerCase() === val.toLowerCase()
-                                  );
-                                  if (matched) {
-                                    const bPrice = matched.branch_prices?.[editingPurchase.branch_id]?.purchase_price;
-                                    const effectiveCost = (bPrice !== null && bPrice !== undefined) ? bPrice : matched.purchase_price;
-                                    updateEditItemRow(idx, { productId: matched.id, code: matched.sku || matched.product_code || val, name: matched.name, costPrice: effectiveCost });
-                                  } else {
-                                    updateEditItemField(idx, 'code', val);
-                                  }
-                                }}
-                                style={{
-                                  height: '34px',
-                                  minHeight: '34px',
-                                  width: '100%',
-                                  fontSize: '0.84rem',
-                                  fontFamily: 'monospace',
-                                  backgroundColor: item.productId ? '#f1f5f9' : '#ffffff',
-                                }}
-                              />
-                            </div>
-
-                            <div className="form-group" style={{ marginBottom: 0 }}>
-                              <label className="mobile-card-label">Quantity *</label>
-                              <input
-                                type="number"
-                                min="1"
-                                placeholder="Qty"
-                                className="input-control"
-                                value={item.quantity}
-                                onChange={(e) => updateEditItemField(idx, 'quantity', parseInt(e.target.value) || 1)}
-                                required
-                                style={{ height: '34px', minHeight: '34px', fontSize: '0.88rem', textAlign: 'center', fontWeight: 700 }}
-                              />
-                            </div>
-                          </div>
-
-                          <div className="mobile-card-row-pricing">
-                            <div className="form-group" style={{ marginBottom: 0 }}>
-                              <label style={{ fontSize: '0.72rem', color: 'var(--text-secondary)' }}>Quantity *</label>
-                              <input
-                                type="number"
-                                min="1"
-                                className="input-control"
-                                value={item.quantity}
-                                onChange={(e) => updateEditItemField(idx, 'quantity', parseInt(e.target.value) || 1)}
-                                required
-                                style={{ height: '34px', fontSize: '0.85rem', textAlign: 'center', fontWeight: 600 }}
-                              />
-                            </div>
-                            <div className="form-group" style={{ marginBottom: 0 }}>
-                              <label style={{ fontSize: '0.72rem', color: 'var(--text-secondary)' }}>Unit Cost (৳) *</label>
-                              <input
-                                type="number"
-                                step="0.01"
-                                min="0"
-                                className="input-control"
-                                value={item.costPrice}
-                                onChange={(e) => updateEditItemField(idx, 'costPrice', parseFloat(e.target.value) || 0.00)}
-                                required
-                                style={{ height: '34px', fontSize: '0.85rem', textAlign: 'right' }}
-                              />
-                            </div>
-                            <div style={{ textAlign: 'right' }}>
-                              <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)' }}>Line Total</div>
-                              <div style={{ fontWeight: 700, fontSize: '0.95rem', color: 'var(--primary)', marginTop: '0.2rem' }}>
-                                ৳{formatAmount((parseFloat(item.costPrice) || 0) * (parseInt(item.quantity) || 0))}
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
+                        </>
+                      );
+                    })()}
 
                     {/* Bottom Add Row Bar (Right aligned blue plus button) */}
                     <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '0.4rem' }}>
@@ -3277,6 +3344,19 @@ export default function Purchases({ userProfile, branches, addToast }) {
           </div>
         </div>
       )}
+
+      {/* Predefined suggestions for Factory Units */}
+      <datalist id="purchase-unit-options">
+        <option value="lbs" />
+        <option value="pcs" />
+        <option value="kg" />
+        <option value="cone" />
+        <option value="yard" />
+        <option value="meter" />
+        <option value="roll" />
+        <option value="carton" />
+        <option value="box" />
+      </datalist>
     </div>
   );
 }

@@ -35,6 +35,7 @@ const PURCHASES_DATA = [
   { date: '2026-09-20', challan: '155', qty: 400, price: 135.00, debit: 54000.00 },
   { date: '2026-09-23', challan: '190', qty: 400, price: 135.00, debit: 54000.00 },
   { date: '2026-09-27', challan: '419', qty: 800, price: 136.00, debit: 108800.00 },
+  { date: '2026-10-03', challan: '448', qty: 400, price: 136.00, debit: 54400.00 },
 ];
 
 const PAYMENTS_DATA = [
@@ -179,7 +180,7 @@ async function seedKhanTwisting() {
 
     if (pErr) throw pErr;
 
-    // Insert purchase item with product_id: null (Gray Thread without creating in product catalog)
+    // Insert purchase item with product_id: null (Gray Thread without creating in product catalog, unit: 'lbs')
     const { error: piErr } = await supabase.from('purchase_items').insert([
       {
         purchase_id: purRecord.id,
@@ -188,6 +189,7 @@ async function seedKhanTwisting() {
         quantity: pur.qty,
         unit_price: pur.price,
         total_price: pur.debit,
+        unit: 'lbs',
       }
     ]);
     if (piErr) throw piErr;

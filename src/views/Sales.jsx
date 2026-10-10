@@ -1187,45 +1187,8 @@ export default function Sales({ userProfile, branches, addToast }) {
         }
       }
 
-      // 2.1 FIFO deduction on branch_challan_items for this branch (tracks sold vs left on Challans)
+      // 2.1 Deduct sold quantities from branch inventory (skip for factory — no physical stock)
       if (!isFactory) {
-        for (const item of cart) {
-          if (item.isCustomUnlisted || item.product?.is_custom_unlisted) continue;
-          try {
-            const { data: openChallanItems } = await supabase
-              .from('branch_challan_items')
-              .select('id, dispatched_qty, sold_qty, remaining_qty, challan_id, branch_challans!inner(to_branch_id)')
-              .eq('product_id', item.product.id)
-              .eq('branch_challans.to_branch_id', selectedBranchId)
-              .gt('remaining_qty', 0)
-              .order('created_at', { ascending: true });
-
-            if (openChallanItems && openChallanItems.length > 0) {
-              let qtyToDeduct = parseFloat(item.quantity) || 1;
-              for (const chItem of openChallanItems) {
-                if (qtyToDeduct <= 0) break;
-                const availableInChallan = chItem.remaining_qty;
-                const deductFromThis = Math.min(qtyToDeduct, availableInChallan);
-                const newSold = (chItem.sold_qty || 0) + deductFromThis;
-                const newRemaining = chItem.remaining_qty - deductFromThis;
-
-                await supabase
-                  .from('branch_challan_items')
-                  .update({
-                    sold_qty: newSold,
-                    remaining_qty: newRemaining,
-                  })
-                  .eq('id', chItem.id);
-
-                qtyToDeduct -= deductFromThis;
-              }
-            }
-          } catch (challanErr) {
-            console.error('Error updating challan item remaining qty:', challanErr);
-          }
-        }
-
-        // 2.2 Deduct sold quantities from branch inventory
         for (const item of cart) {
           const resolvedProdId = customProdIdMap[item.product.id] || item.product.id;
           const qty = parseFloat(item.quantity) || 1;
@@ -1626,8 +1589,10 @@ export default function Sales({ userProfile, branches, addToast }) {
       const grandTotal = getEditGrandTotal();
       const currentPaid = parseFloat(editingSale.paid_amount || 0);
 
-      // 1. Physical Inventory Adjustments (if not factory)
-      if (!isFactory) {
+      // 1. Physical Inventory Adjustments (if not the sale's actual branch = factory)
+      const editBranchForInv = branches.find((b) => b.id === targetBranchId);
+      const isEditBranchFactory = Boolean(editBranchForInv?.is_factory || editBranchForInv?.name?.toLowerCase().includes('factory'));
+      if (!isEditBranchFactory) {
         const originalMap = {};
         originalSaleItems.forEach((it) => {
           originalMap[it.product_id] = (originalMap[it.product_id] || 0) + it.original_quantity;
@@ -1728,8 +1693,6 @@ export default function Sales({ userProfile, branches, addToast }) {
       const cleanUserNotes = editNotes.trim();
       const cleanReceipt = editStoredReceiptNo.trim();
 
-      const editBranch = branches.find(b => b.id === targetBranchId);
-      const isEditBranchFactory = Boolean(editBranch?.is_factory || editBranch?.name?.toLowerCase().includes('factory') || isFactory);
       const editIsChallan = isEditBranchFactory && Boolean(editIsShowroomChallan || isShowroomContact(editCustomerId));
 
       const editSalePayload = {
@@ -1882,34 +1845,7 @@ export default function Sales({ userProfile, branches, addToast }) {
             },
           ]);
 
-          // 5.3 Restore Challan FIFO remaining_qty if applicable
-          try {
-            const { data: chItems } = await supabase
-              .from('branch_challan_items')
-              .select('id, sold_qty, remaining_qty, challan_id, branch_challans!inner(to_branch_id)')
-              .eq('product_id', it.product_id)
-              .eq('branch_challans.to_branch_id', targetBranchId)
-              .gt('sold_qty', 0)
-              .order('created_at', { ascending: false });
-
-            if (chItems && chItems.length > 0) {
-              let qtyRemainingToRestore = restoreQty;
-              for (const chItem of chItems) {
-                if (qtyRemainingToRestore <= 0) break;
-                const canRestore = Math.min(qtyRemainingToRestore, chItem.sold_qty);
-                await supabase
-                  .from('branch_challan_items')
-                  .update({
-                    sold_qty: Math.max(0, (chItem.sold_qty || 0) - canRestore),
-                    remaining_qty: (chItem.remaining_qty || 0) + canRestore,
-                  })
-                  .eq('id', chItem.id);
-                qtyRemainingToRestore -= canRestore;
-              }
-            }
-          } catch (chErr) {
-            console.error('Error rolling back challan remaining qty on sale delete:', chErr);
-          }
+          // (Branch Challan FIFO restore removed — Branch Challans feature not in use)
         }
       }
 
@@ -1928,8 +1864,8 @@ export default function Sales({ userProfile, branches, addToast }) {
       }
 
       // 7. Refresh data
-      fetchSales();
-      fetchInventory();
+      fetchSalesHistory();
+      fetchBranchInventory();
       fetchSalesSummary();
     } catch (err) {
       console.error('Error deleting sale:', err);
