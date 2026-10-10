@@ -1423,100 +1423,6 @@ textarea.input-control {
 }
 
 /* ====================================================================
-   PRINT MEDIA RULES
-   ==================================================================== */
-@media print {
-  @page {
-    margin: 6mm 10mm;
-    size: auto;
-  }
-  .print-only {
-    display: block !important;
-  }
-  body, html {
-    background: #fff !important;
-    background-color: #fff !important;
-    color: #000 !important;
-    font-size: 12px !important;
-    margin: 0 !important;
-    padding: 0 !important;
-    width: 100% !important;
-    -webkit-print-color-adjust: exact !important;
-    print-color-adjust: exact !important;
-  }
-  .sidebar, .top-bar, .btn, .no-print, nav, header, footer, .mobile-header, .sidebar-overlay, .toast-container {
-    display: none !important;
-  }
-  .app-container, .main-content {
-    display: block !important;
-    padding: 0 !important;
-    margin: 0 !important;
-    width: 100% !important;
-    background: transparent !important;
-  }
-  .modal-overlay {
-    position: static !important;
-    background: transparent !important;
-    background-color: transparent !important;
-    padding: 0 !important;
-    display: block !important;
-    backdrop-filter: none !important;
-    z-index: auto !important;
-  }
-  .modal-content {
-    box-shadow: none !important;
-    border: none !important;
-    width: 100% !important;
-    max-width: 100% !important;
-    padding: 0 !important;
-    margin: 0 !important;
-    max-height: none !important;
-    overflow: visible !important;
-    background: transparent !important;
-  }
-  .modal-body {
-    padding: 0 !important;
-    overflow: visible !important;
-    max-height: none !important;
-    background: transparent !important;
-    background-color: transparent !important;
-  }
-  .invoice-print-view {
-    border: 1px solid #000 !important;
-    padding: 1.25rem 1.5rem !important;
-    width: 100% !important;
-    max-width: 100% !important;
-    box-shadow: none !important;
-    margin: 0 auto !important;
-    background: #ffffff !important;
-    page-break-inside: avoid !important;
-    break-inside: avoid !important;
-  }
-  .table-container {
-    border: none !important;
-    overflow: visible !important;
-  }
-  table {
-    width: 100% !important;
-    page-break-inside: auto !important;
-  }
-  tr {
-    page-break-inside: avoid !important;
-    break-inside: avoid !important;
-  }
-  th {
-    background-color: #f1f5f9 !important;
-    color: #000 !important;
-    border-bottom: 1px solid #000 !important;
-    -webkit-print-color-adjust: exact !important;
-    print-color-adjust: exact !important;
-  }
-  td {
-    border-bottom: 1px solid #cbd5e1 !important;
-  }
-}
-
-/* ====================================================================
    MOBILE RESPONSIVENESS STYLES (DEFAULT HIDDEN ON DESKTOP)
    ==================================================================== */
 .mobile-header {
@@ -2381,6 +2287,173 @@ textarea.input-control {
   .report-item-card.is-purchase {
     background: #ffffff;
     border-color: #e2e8f0;
+  }
+}
+
+/* ====================================================================
+   PRINT MEDIA RULES (PLACED AT THE ABSOLUTE END TO OVERRIDE ALL STYLES)
+   ==================================================================== */
+@media print {
+  @page {
+    margin: 6mm 10mm;
+    size: auto;
+  }
+
+  *, *::before, *::after {
+    box-shadow: none !important;
+    text-shadow: none !important;
+    animation: none !important;
+    transition: none !important;
+  }
+
+  body, html {
+    background: #ffffff !important;
+    background-color: #ffffff !important;
+    color: #000000 !important;
+    font-size: 12px !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    width: 100% !important;
+    height: auto !important;
+    min-height: auto !important;
+    overflow: visible !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  .print-only {
+    display: block !important;
+  }
+
+  /* Hide entire standard application shell & non-printable elements */
+  .sidebar, 
+  .top-bar, 
+  .btn, 
+  .no-print, 
+  nav, 
+  header, 
+  footer, 
+  .mobile-header, 
+  .sidebar-overlay, 
+  .toast-container,
+  .summary-grid-4, 
+  .summary-grid, 
+  .search-filter-card, 
+  .table-card, 
+  .pagination, 
+  .pagination-container,
+  .mobile-card-row, 
+  .modal-header.no-print, 
+  .modal-footer.no-print,
+  .modal-header,
+  .modal-footer {
+    display: none !important;
+  }
+
+  .app-container, .main-content {
+    display: block !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    width: 100% !important;
+    height: auto !important;
+    background: transparent !important;
+    background-color: transparent !important;
+    overflow: visible !important;
+  }
+
+  /* Reset all modal wrappers so they don't darken or clip */
+  .modal-overlay {
+    position: static !important;
+    top: auto !important;
+    left: auto !important;
+    right: auto !important;
+    bottom: auto !important;
+    width: 100% !important;
+    height: auto !important;
+    min-height: auto !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    display: block !important;
+    background: transparent !important;
+    background-color: transparent !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    z-index: auto !important;
+    overflow: visible !important;
+    align-items: stretch !important;
+    justify-content: flex-start !important;
+  }
+
+  .modal-content {
+    position: static !important;
+    box-shadow: none !important;
+    border: none !important;
+    border-radius: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    max-height: none !important;
+    height: auto !important;
+    overflow: visible !important;
+    background: transparent !important;
+    background-color: transparent !important;
+    animation: none !important;
+  }
+
+  .modal-body {
+    padding: 0 !important;
+    overflow: visible !important;
+    max-height: none !important;
+    height: auto !important;
+    background: transparent !important;
+    background-color: transparent !important;
+  }
+
+  /* Printable invoice document styling */
+  .invoice-print-view {
+    border: 1.5px solid #000000 !important;
+    padding: 0.8rem 1rem !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    box-shadow: none !important;
+    margin: 0 auto !important;
+    background: #ffffff !important;
+    background-color: #ffffff !important;
+    color: #000000 !important;
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+
+  .invoice-print-view * {
+    color: #000000 !important;
+  }
+
+  .table-container {
+    border: none !important;
+    overflow: visible !important;
+  }
+
+  table {
+    width: 100% !important;
+    page-break-inside: auto !important;
+  }
+
+  tr {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+
+  th {
+    background-color: #f1f5f9 !important;
+    color: #000000 !important;
+    border-bottom: 1px solid #000000 !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  td {
+    border-bottom: 1px solid #cbd5e1 !important;
   }
 }
 

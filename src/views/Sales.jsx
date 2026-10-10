@@ -23,6 +23,7 @@ import {
   User,
   Package,
   Banknote,
+  AlertTriangle,
 } from 'lucide-react';
 import { TableLoading, LoadingBlock } from '../components/TableLoading';
 import Pagination from '../components/Pagination';
@@ -224,6 +225,11 @@ export default function Sales({ userProfile, branches, addToast }) {
   const [activeInvoice, setActiveInvoice] = useState(null);
   const [invoiceItems, setInvoiceItems] = useState([]);
   const [showInvoicePrint, setShowInvoicePrint] = useState(false);
+
+  // Delete Sale states
+  const [saleToDelete, setSaleToDelete] = useState(null);
+  const [showDeleteSaleModal, setShowDeleteSaleModal] = useState(false);
+  const [isDeletingSale, setIsDeletingSale] = useState(false);
 
   const [selectedBranchId, setSelectedBranchId] = useState(() => {
     if (userProfile?.role === 'owner') {
@@ -566,12 +572,15 @@ export default function Sales({ userProfile, branches, addToast }) {
           quantity,
           unit_price,
           total_price,
+          size,
+          number_of_carton,
           products (
             id,
             sku,
             product_code,
             name,
-            sale_price
+            sale_price,
+            category
           )
         `)
         .eq('sale_id', sale.id);
@@ -597,9 +606,12 @@ export default function Sales({ userProfile, branches, addToast }) {
           sku: item.products?.sku || item.products?.product_code || '',
           name: item.products?.name || 'Unknown',
           sale_price: parseFloat(item.unit_price) || parseFloat(item.products?.sale_price) || 0,
+          category: item.products?.category || '',
           unit: 'pcs',
         },
         products: item.products,
+        size: item.size || item.products?.category || '',
+        number_of_carton: item.number_of_carton !== undefined && item.number_of_carton !== null ? item.number_of_carton : '',
         quantity: parseFloat(item.quantity) || 1,
         unit_price: parseFloat(item.unit_price) || 0,
         total_price: parseFloat(item.total_price) || 0,
@@ -1752,132 +1764,117 @@ export default function Sales({ userProfile, branches, addToast }) {
     }
   };
 
-  // Delete Sale Handler (Allowed only if no payment history and no return history)
-  const handleDeleteSale = async (sale) => {
+  // Delete Sale Handler (Prompts confirmation modal, restores inventory, and cleans up payments/cash ledger)
+  const handleDeleteSale = (sale) => {
     if (!sale) return;
+    setSaleToDelete(sale);
+    setShowDeleteSaleModal(true);
+  };
 
-    const invNum = sale.invoice_number || `INV#${sale.id.substring(0, 8).toUpperCase()}`;
+  const handleConfirmDeleteSale = async () => {
+    if (!saleToDelete) return;
+    setIsDeletingSale(true);
 
-    // 1. Check if sale has any recorded paid amount
-    const paid = parseFloat(sale.paid_amount || 0);
-    if (paid > 0) {
-      showMessage(`Cannot delete invoice ${invNum}. It has recorded payments of ৳${formatAmount(paid)}. Only unpaid sales without payment history can be deleted.`, 'error');
-      return;
-    }
+    const invNum = saleToDelete.invoice_number || `INV#${saleToDelete.id.substring(0, 8).toUpperCase()}`;
+    const targetBranchId = saleToDelete.branch_id || selectedBranchId;
+    const branchObj = branches.find((b) => b.id === targetBranchId);
+    const isTargetFactory = branchObj ? Boolean(branchObj.is_factory || branchObj.name?.toLowerCase().includes('factory')) : false;
 
     try {
-      // Check payments table for any linked records
-      const { data: payments, error: payErr } = await supabase
-        .from('payments')
-        .select('id, amount')
-        .eq('reference_invoice_id', sale.id);
-
-      if (payErr) throw payErr;
-
-      if (payments && payments.length > 0) {
-        showMessage(`Cannot delete invoice ${invNum}. It has ${payments.length} payment record(s) linked to it.`, 'error');
-        return;
-      }
-
-      // 2. Check if sale has any returns / exchanges recorded
-      const saleIdSub = sale.id ? sale.id.substring(0, 8) : '';
-      let movementsQuery = supabase
-        .from('inventory_movements')
-        .select('id, description');
-
-      if (sale.invoice_number && saleIdSub) {
-        movementsQuery = movementsQuery.or(`description.ilike.%${sale.invoice_number}%,description.ilike.%${saleIdSub}%`);
-      } else if (sale.invoice_number) {
-        movementsQuery = movementsQuery.ilike('description', `%${sale.invoice_number}%`);
-      } else if (saleIdSub) {
-        movementsQuery = movementsQuery.ilike('description', `%${saleIdSub}%`);
-      }
-
-      const { data: movements, error: movErr } = await movementsQuery;
-      if (movErr) throw movErr;
-
-      const hasReturnRecords = (movements || []).some((m) => {
-        const desc = (m.description || '').toLowerCase();
-        return desc.includes('return') || desc.includes('restocked') || desc.includes('crn-') || desc.includes('exchange');
-      });
-
-      if (hasReturnRecords) {
-        showMessage(`Cannot delete invoice ${invNum}. It has associated return or exchange records.`, 'error');
-        return;
-      }
-
-      // 3. User Confirmation
-      const confirmed = window.confirm(
-        `Are you sure you want to permanently delete Invoice ${invNum}?\n\nAll items in this invoice will be restored to inventory stock.`
-      );
-      if (!confirmed) return;
-
-      setLoading(true);
-
-      // 4. Fetch sale items to restore inventory
+      // 1. Fetch sale items to restore inventory
       const { data: itemsToRestore, error: itemsFetchErr } = await supabase
         .from('sale_items')
         .select('id, product_id, quantity')
-        .eq('sale_id', sale.id);
+        .eq('sale_id', saleToDelete.id);
 
       if (itemsFetchErr) throw itemsFetchErr;
 
-      const targetBranchId = sale.branch_id || selectedBranchId;
-      const branchObj = branches.find((b) => b.id === targetBranchId);
-      const isTargetFactory = branchObj ? Boolean(branchObj.is_factory) : false;
-
-      // 5. Restore stock for physical branch
+      // 2. Restore stock for physical branch
       if (!isTargetFactory && itemsToRestore && itemsToRestore.length > 0) {
         for (const it of itemsToRestore) {
           const restoreQty = parseFloat(it.quantity) || 0;
-          if (restoreQty <= 0) continue;
+          if (it.product_id && restoreQty > 0) {
+            try {
+              const { data: invItem } = await supabase
+                .from('inventory')
+                .select('id, quantity')
+                .eq('branch_id', targetBranchId)
+                .eq('product_id', it.product_id)
+                .maybeSingle();
 
-          // 5.1 Update branch inventory
-          const { data: invItem } = await supabase
-            .from('inventory')
-            .select('id, quantity')
-            .eq('branch_id', targetBranchId)
-            .eq('product_id', it.product_id)
-            .maybeSingle();
+              if (invItem) {
+                await supabase
+                  .from('inventory')
+                  .update({
+                    quantity: (invItem.quantity || 0) + restoreQty,
+                    updated_at: new Date().toISOString(),
+                  })
+                  .eq('id', invItem.id);
+              }
 
-          if (invItem) {
-            await supabase
-              .from('inventory')
-              .update({
-                quantity: (invItem.quantity || 0) + restoreQty,
-                updated_at: new Date().toISOString(),
-              })
-              .eq('id', invItem.id);
+              // Log movement audit
+              await supabase.from('inventory_movements').insert([
+                {
+                  branch_id: targetBranchId,
+                  product_id: it.product_id,
+                  type: 'adjustment_in',
+                  quantity: restoreQty,
+                  reference_id: saleToDelete.id,
+                  description: `Invoice Deleted [${invNum}]: Restored ${restoreQty} units back to stock`,
+                  created_by: userProfile.id,
+                },
+              ]);
+            } catch (invErr) {
+              console.error('Error restoring inventory on sale delete:', invErr);
+            }
           }
-
-          // 5.2 Log movement audit
-          await supabase.from('inventory_movements').insert([
-            {
-              branch_id: targetBranchId,
-              product_id: it.product_id,
-              type: 'adjustment_in',
-              quantity: restoreQty,
-              description: `Invoice Deleted [${invNum}]: Restored ${restoreQty} units back to stock`,
-              created_by: userProfile.id,
-            },
-          ]);
-
-          // (Branch Challan FIFO restore removed — Branch Challans feature not in use)
         }
       }
 
-      // 6. Delete the sale record (CASCADE deletes sale_items)
-      const { error: delErr } = await supabase
+      // 3. Delete linked payment records
+      const { error: payDelErr } = await supabase
+        .from('payments')
+        .delete()
+        .eq('reference_invoice_id', saleToDelete.id);
+
+      if (payDelErr) {
+        console.warn('Payment delete warning:', payDelErr);
+      }
+
+      // 4. Delete linked cash ledger records
+      const { error: ledgerDelErr } = await supabase
+        .from('cash_ledger')
+        .delete()
+        .eq('reference_id', saleToDelete.id);
+
+      if (ledgerDelErr) {
+        console.warn('Cash ledger delete warning:', ledgerDelErr);
+      }
+
+      // 5. Delete sale items
+      const { error: itemsDelErr } = await supabase
+        .from('sale_items')
+        .delete()
+        .eq('sale_id', saleToDelete.id);
+
+      if (itemsDelErr) throw itemsDelErr;
+
+      // 6. Delete sale record
+      const { error: saleDelErr } = await supabase
         .from('sales')
         .delete()
-        .eq('id', sale.id);
+        .eq('id', saleToDelete.id);
 
-      if (delErr) throw delErr;
+      if (saleDelErr) throw saleDelErr;
 
-      showMessage(`Invoice ${invNum} was deleted successfully and stock has been restored.`, 'success');
+      showMessage(`Invoice ${invNum} deleted successfully. Stock has been restored and payment records removed.`, 'success');
+
+      setShowDeleteSaleModal(false);
+      setSaleToDelete(null);
 
       if (showSaleDetailsModal) {
         setShowSaleDetailsModal(false);
+        setSelectedSaleForDetails(null);
       }
 
       // 7. Refresh data
@@ -1888,7 +1885,7 @@ export default function Sales({ userProfile, branches, addToast }) {
       console.error('Error deleting sale:', err);
       showMessage(err.message || 'Failed to delete invoice.', 'error');
     } finally {
-      setLoading(false);
+      setIsDeletingSale(false);
     }
   };
 
@@ -2416,7 +2413,7 @@ export default function Sales({ userProfile, branches, addToast }) {
       </div>
 
       {/* SALES 4-METRIC SUMMARY CARDS (4 on Desktop, 2 per row on Mobile) */}
-      <div className="summary-grid-4">
+      <div className="summary-grid-4 no-print">
         {/* Card 1: Total Sold Qty */}
         <div className="summary-metric-card" style={{ borderLeftColor: '#2563eb' }}>
           <span className="summary-metric-label">Total Sold (Qty)</span>
@@ -6665,6 +6662,181 @@ export default function Sales({ userProfile, branches, addToast }) {
           </div>
         </div>
       )}
+
+      {/* DELETE SALE CONFIRMATION MODAL */}
+      {showDeleteSaleModal && saleToDelete && (() => {
+        const saleBranch = branches.find((b) => b.id === saleToDelete.branch_id) || { name: 'Main Branch' };
+        const invNo = saleToDelete.invoice_number || `INV#${saleToDelete.id.substring(0, 8).toUpperCase()}`;
+        const isFactoryBranch = Boolean(saleBranch.is_factory || saleBranch.name?.toLowerCase().includes('factory'));
+        const paidAmt = parseFloat(saleToDelete.paid_amount || 0);
+
+        return (
+          <div className="modal-overlay" style={{ zIndex: 1100 }}>
+            <div
+              className="modal-content"
+              style={{
+                maxWidth: '520px',
+                width: '90%',
+                borderRadius: '12px',
+                overflow: 'hidden',
+                boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.2)',
+              }}
+            >
+              <div
+                className="modal-header"
+                style={{
+                  backgroundColor: '#fef2f2',
+                  borderBottom: '1px solid #fee2e2',
+                  padding: '1rem 1.25rem',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                  <div
+                    style={{
+                      backgroundColor: '#fee2e2',
+                      color: '#dc2626',
+                      padding: '0.4rem',
+                      borderRadius: '50%',
+                      display: 'flex',
+                    }}
+                  >
+                    <AlertTriangle size={20} />
+                  </div>
+                  <h3 className="modal-title" style={{ margin: 0, color: '#991b1b', fontSize: '1.05rem', fontWeight: 700 }}>
+                    Delete Sales Invoice?
+                  </h3>
+                </div>
+                <button
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => {
+                    setShowDeleteSaleModal(false);
+                    setSaleToDelete(null);
+                  }}
+                  style={{ borderRadius: '50%', padding: '0.35rem', border: 'none', background: 'transparent' }}
+                >
+                  <X size={16} />
+                </button>
+              </div>
+
+              <div className="modal-body" style={{ padding: '1.25rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                <p style={{ margin: 0, fontSize: '0.9rem', color: '#475569', lineHeight: 1.5 }}>
+                  Are you sure you want to permanently delete invoice <strong>{invNo}</strong>? This action cannot be undone.
+                </p>
+
+                <div
+                  style={{
+                    backgroundColor: '#f8fafc',
+                    border: '1px solid var(--border-color)',
+                    borderRadius: '8px',
+                    padding: '0.85rem 1rem',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '0.4rem',
+                    fontSize: '0.85rem',
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span style={{ color: 'var(--text-muted)' }}>Customer:</span>
+                    <strong>{saleToDelete.contacts?.name || 'Walk-in Customer'}</strong>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span style={{ color: 'var(--text-muted)' }}>Branch:</span>
+                    <span>{saleBranch.name}</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span style={{ color: 'var(--text-muted)' }}>Date:</span>
+                    <span>{new Date(saleToDelete.sale_date).toLocaleDateString()}</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span style={{ color: 'var(--text-muted)' }}>Net Invoice Amount:</span>
+                    <strong style={{ color: 'var(--text-color)' }}>৳{formatAmount(saleToDelete.net_amount || 0)}</strong>
+                  </div>
+                  {paidAmt > 0 && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', color: '#059669' }}>
+                      <span>Collected Payments:</span>
+                      <strong>৳{formatAmount(paidAmt)}</strong>
+                    </div>
+                  )}
+                </div>
+
+                <div
+                  style={{
+                    backgroundColor: '#fff7ed',
+                    border: '1px solid #ffedd5',
+                    borderRadius: '8px',
+                    padding: '0.75rem 0.9rem',
+                    fontSize: '0.8rem',
+                    color: '#9a3412',
+                    lineHeight: 1.45,
+                  }}
+                >
+                  <strong style={{ display: 'block', marginBottom: '0.2rem', color: '#c2410c' }}>Impact of Deletion:</strong>
+                  <ul style={{ margin: 0, paddingLeft: '1.2rem' }}>
+                    {!isFactoryBranch && (
+                      <li>
+                        <strong>Stock Restoration:</strong> Sold quantities for all items in this invoice will be restored back to {saleBranch.name}'s inventory stock.
+                      </li>
+                    )}
+                    {paidAmt > 0 && (
+                      <li>
+                        <strong>Payments Cleanup:</strong> Linked payment collections (৳{formatAmount(paidAmt)}) and cash ledger entries will be deleted.
+                      </li>
+                    )}
+                    <li>
+                      <strong>Permanent:</strong> The invoice and all its item records will be permanently erased.
+                    </li>
+                  </ul>
+                </div>
+              </div>
+
+              <div
+                className="modal-footer"
+                style={{
+                  borderTop: '1px solid var(--border-color)',
+                  padding: '0.75rem 1.25rem',
+                  display: 'flex',
+                  justifyContent: 'flex-end',
+                  gap: '0.6rem',
+                  backgroundColor: '#f8fafc',
+                }}
+              >
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => {
+                    setShowDeleteSaleModal(false);
+                    setSaleToDelete(null);
+                  }}
+                  disabled={isDeletingSale}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-danger btn-sm"
+                  onClick={handleConfirmDeleteSale}
+                  disabled={isDeletingSale}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.4rem',
+                    backgroundColor: '#dc2626',
+                    borderColor: '#dc2626',
+                    color: '#ffffff',
+                    fontWeight: 600,
+                  }}
+                >
+                  <Trash2 size={14} />
+                  {isDeletingSale ? 'Deleting & Restoring Stock...' : 'Delete Invoice'}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
